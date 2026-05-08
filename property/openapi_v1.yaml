@@ -3602,8 +3602,8 @@ paths:
         - property_types   : flat / house / studio (Advanced Search)
         - rooms_min/max    : minimum / maximum number_of_bedrooms (Advanced Search)
         - move_in_date     : earliest acceptable move-in date (Advanced Search)
-        - min_rating       : minimum average rating (1–5)
-        - max_rating       : maximum average rating (1–5)
+        - min_rating       : minimum average rating (1â€“5)
+        - max_rating       : maximum average rating (1â€“5)
       parameters:
       - name: limit
         required: false

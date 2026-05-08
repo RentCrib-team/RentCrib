@@ -41,6 +41,7 @@ from django.db.models import Q, Exists, OuterRef, Prefetch, Count
 from propertylist_app.validators import validate_radius_miles, haversine_miles
 from propertylist_app.services.captcha import verify_captcha
 from propertylist_app.services.geo import geocode_postcode_cached
+from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
@@ -342,7 +343,7 @@ class FindAddressView(APIView):
 
 
 
-class SearchRoomsView(generics.ListAPIView):
+class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
 
     """
     GET /api/search/rooms/
@@ -364,6 +365,8 @@ class SearchRoomsView(generics.ListAPIView):
     serializer_class = RoomSerializer
     permission_classes = [permissions.AllowAny]
     pagination_class = StandardLimitOffsetPagination
+    cache_prefix = "search_rooms"
+    cache_timeout = 60
 
     _ordered_ids = None
     _distance_by_id = None
