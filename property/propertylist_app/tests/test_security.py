@@ -1,4 +1,4 @@
-# property/propertylist_app/tests/test_security.py
+﻿# property/propertylist_app/tests/test_security.py
 from unittest.mock import patch
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -76,7 +76,7 @@ class TestLoginLockout(APITestCase):
         """
         Backend behaviour:
         - LOGIN_FAIL_LIMIT = 3
-        - Attempts 1–3 (wrong password) -> 400
+        - Attempts 1â€“3 (wrong password) -> 400
         - Attempt 4 -> 429 (locked out)
         """
 
@@ -131,14 +131,14 @@ class TestRegisterThrottle(APITestCase):
 class TestRegisterThrottle(APITestCase):
     @override_settings(
         ENABLE_CAPTCHA=False,  # keep CAPTCHA out of this test
-        
+
         CACHES={
             "default": {
                 "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
                 "LOCATION": "register-throttle-test-cache",
             }
         },
-        
+
         REST_FRAMEWORK={
             "DEFAULT_AUTHENTICATION_CLASSES": (
                 "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -165,7 +165,7 @@ class TestRegisterThrottle(APITestCase):
             "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
         },
     )
-    
+
     def test_register_anon_throttle_hits_limit(self):
         client = APIClient()
         url = reverse("v1:auth-register")
@@ -299,6 +299,9 @@ class TestCaptcha(APITestCase):
 
 
 class TestMessagingThrottle(APITestCase):
+    def setUp(self):
+        cache.clear()
+
     @override_settings(
         REST_FRAMEWORK={
             "DEFAULT_AUTHENTICATION_CLASSES": (

@@ -1,4 +1,4 @@
-from django.contrib import admin
+﻿from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
@@ -75,7 +75,7 @@ urlpatterns = [
     # API includes (ONLY ONCE EACH)
     #path("api/", include(("propertylist_app.api.urls", "api"), namespace="api")),
     path("api/v1/", include(("propertylist_app.api.urls", "v1"), namespace="v1")),
-    
+
     re_path(
     r"^api/auth/(?P<path>.*)$",
     RedirectView.as_view(url="/api/v1/auth/%(path)s", permanent=True),
@@ -98,9 +98,9 @@ urlpatterns = [
     path("api/schema/", lambda r: redirect("/api/v1/schema/")),
     path("api/schema/swagger-ui/", lambda r: redirect("/api/v1/schema/swagger-ui/")),
     path("api/schema/redoc/", lambda r: redirect("/api/v1/schema/redoc/")),
-    
-    
-    
+
+
+
     # Redirect any old /api/<path> (except the explicit auth + schema routes above) to /api/v1/<path>
     re_path(r"^api/(?!v1/)(?P<path>.*)$", redirect_api_to_v1),
 
@@ -112,8 +112,9 @@ urlpatterns = [
 # - DEBUG=True (local dev)
 # - OR staging when SERVE_MEDIA=1 (Render disk)
 SERVE_MEDIA = os.getenv("SERVE_MEDIA", "").lower() in {"1", "true", "yes"}
+ENVIRONMENT = os.getenv("ENVIRONMENT", "").lower()
 
-if settings.DEBUG or SERVE_MEDIA:
+if settings.DEBUG or (SERVE_MEDIA and ENVIRONMENT != "production"):
     urlpatterns += [
         re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
     ]

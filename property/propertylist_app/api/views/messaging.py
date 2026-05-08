@@ -843,8 +843,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardLimitOffsetPagination
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "message_user"
+    throttle_classes = [MessageUserThrottle]
 
     def get_throttles(self):
         # Only throttle sending messages (POST), not reading (GET),

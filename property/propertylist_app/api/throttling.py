@@ -1,4 +1,4 @@
-from rest_framework.throttling import UserRateThrottle
+﻿from rest_framework.throttling import UserRateThrottle
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.throttling import SimpleRateThrottle
 import logging
@@ -16,6 +16,9 @@ class RegisterAnonThrottle(SimpleRateThrottle):
     Scope name must exist in DEFAULT_THROTTLE_RATES.
     """
     scope = "register_anon"
+
+    def get_rate(self):
+        return api_settings.DEFAULT_THROTTLE_RATES.get(self.scope)
 
     def get_cache_key(self, request, view):
         # Only throttle anonymous users (by IP).
@@ -37,10 +40,13 @@ class MessageUserThrottle(SimpleRateThrottle):
     """
     scope = "message_user"
 
+    def get_rate(self):
+        return api_settings.DEFAULT_THROTTLE_RATES.get(self.scope)
+
     def get_cache_key(self, request, view):
         user = getattr(request, "user", None)
         if not user or not user.is_authenticated:
-            # No user — don’t throttle here (your messaging endpoint should require auth anyway).
+            # No user â€” donâ€™t throttle here (your messaging endpoint should require auth anyway).
             return None
 
         # Per-user key
@@ -50,10 +56,10 @@ class MessageUserThrottle(SimpleRateThrottle):
 
 class  ReviewCreateThrottle(UserRateThrottle):
   scope = 'review-create'
-  
+
 class ReviewListThrottle(UserRateThrottle):
-  scope = 'review-list'  
-  
+  scope = 'review-list'
+
 
 class LoginScopedThrottle(ScopedRateThrottle):
     scope = "login"
@@ -84,6 +90,6 @@ class ReportCreateScopedThrottle(ScopedRateThrottle):
 
 class MessagingScopedThrottle(ScopedRateThrottle):
     scope = "messaging"
-  
-  
-  
+
+
+
