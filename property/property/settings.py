@@ -17,10 +17,11 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
+import sys
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
-TESTING = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+TESTING = "pytest" in sys.modules
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,24 +39,24 @@ OTP_EXPIRY_MINUTES = 10
 # -----------------------------
 # Core security / environment
 # -----------------------------
+DJANGO_DEBUG_RAW = os.getenv("DJANGO_DEBUG", "false").lower()
+DEBUG = DJANGO_DEBUG_RAW in {"1", "true", "yes"}
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     # Safe behaviour:
     # - local/dev/testing: allow a temporary key so you can still run
     # - production: you MUST set DJANGO_SECRET_KEY
-    if os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes"} or TESTING:
+    if DEBUG or TESTING:
         SECRET_KEY = "dev-only-unsafe-secret-key-change-me"
     else:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY is required in production.")
 
-DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes"}
-
 # -----------------------------
 # Production-grade security (staging + production)
 # -----------------------------
-if not DEBUG:
+if not DEBUG and not TESTING:
     # Render terminates TLS and forwards requests to Django.
-    # This tells Django the original scheme was https.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
     # Force HTTPS
@@ -73,7 +74,7 @@ if not DEBUG:
     # HSTS (start low; increase later once confirmed stable)
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600"))  # 1 hour
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "false").lower() in {"1", "true", "yes"}
 
 
 
@@ -109,7 +110,7 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 
-if not DEBUG:
+if not DEBUG and "pytest" not in sys.modules:
     missing_stripe = [
         name for name in [
             "STRIPE_SECRET_KEY",
@@ -119,6 +120,7 @@ if not DEBUG:
         ]
         if not os.getenv(name)
     ]
+
     if missing_stripe:
         raise ImproperlyConfigured(
             f"Missing required Stripe/site env vars: {', '.join(missing_stripe)}"
@@ -151,8 +153,8 @@ INSTALLED_APPS = [
     "notifications.apps.NotificationsConfig",
     "django_celery_beat",
     "user_app",
-   
-   
+
+
 
 
 ]
@@ -205,7 +207,7 @@ DATABASES = {
 
 # Hard stop in production if missing DB env vars
 if not TESTING and not DEBUG:
-    missing = [k for k in ["DB_NAME", "DB_USER", "DB_PASSWORD"] if not os.getenv(k)]
+    missing = [k for k in ["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST"] if not os.getenv(k)]
     if missing:
         raise ImproperlyConfigured(f"Missing required DB env vars: {', '.join(missing)}")
 
@@ -286,9 +288,9 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.ScopedRateThrottle",
     ],
-    
+
     "DEFAULT_THROTTLE_RATES": {
-        
+
         "user": "120/hour",
         "anon": "30/hour",
 
@@ -310,11 +312,11 @@ REST_FRAMEWORK = {
         "otp-verify": "5/minute",
         "otp-resend": "2/hour",
     },
-    
-        
-        
-        
-    
+
+
+
+
+
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.OrderingFilter",
@@ -364,7 +366,7 @@ SPECTACULAR_SETTINGS = {
             "description": "Staging",
         },
     ],
-    
+
     "ENUM_NAME_OVERRIDES": {
         "RoomStatusEnum": "propertylist_app.api.schema_enums.ROOM_STATUS_CHOICES",
         "BookingStatusEnum": "propertylist_app.api.schema_enums.BOOKING_STATUS_CHOICES",
@@ -395,7 +397,7 @@ ENABLE_CAPTCHA = os.getenv("ENABLE_CAPTCHA", "true" if not DEBUG else "false").l
 CAPTCHA_PROVIDER = os.getenv("CAPTCHA_PROVIDER", "recaptcha")
 CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "")
 
-if ENABLE_CAPTCHA and not CAPTCHA_SECRET:
+if ENABLE_CAPTCHA and not CAPTCHA_SECRET and not TESTING:
     raise ImproperlyConfigured("CAPTCHA_SECRET must be set when CAPTCHA is enabled")
 
 
@@ -442,7 +444,7 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@rentout.local")
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
-if not DEBUG:
+if not DEBUG and not TESTING:
     missing_email = [
         k for k in ["EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"]
         if not os.getenv(k)
@@ -474,7 +476,7 @@ if USE_S3:
 
     if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
         raise ImproperlyConfigured("AWS credentials must be set when USE_S3=True")
-         
+
     if not AWS_STORAGE_BUCKET_NAME:
         raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set when USE_S3=True")
     AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "eu-west-2")
@@ -510,7 +512,7 @@ WEBHOOK_SECRETS = {
 # -----------------------------
 REDIS_URL = os.getenv("REDIS_CACHE_URL")
 
-if not REDIS_URL and not DEBUG:
+if not REDIS_URL and not DEBUG and not TESTING:
     raise ImproperlyConfigured("REDIS_CACHE_URL must be set in production")
 
 CACHES = {
@@ -524,7 +526,7 @@ CACHES = {
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
 
-if not DEBUG:
+if not DEBUG and not TESTING:
     if not CELERY_BROKER_URL:
         raise ImproperlyConfigured("CELERY_BROKER_URL must be set in production")
     if not CELERY_RESULT_BACKEND:
@@ -545,7 +547,7 @@ GDPR_RETENTION = {
 }
 GDPR_HASH_SALT = os.getenv("GDPR_HASH_SALT", "dev-insecure-salt")
 
-if not DEBUG and GDPR_HASH_SALT == "dev-insecure-salt":
+if not DEBUG and not TESTING and GDPR_HASH_SALT == "dev-insecure-salt":
     raise ImproperlyConfigured("GDPR_HASH_SALT must be set in production")
 
 # -----------------------------

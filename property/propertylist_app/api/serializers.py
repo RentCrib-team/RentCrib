@@ -1447,14 +1447,23 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         email = (value or "").strip().lower()
+
         if User.objects.filter(email__iexact=email).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
+            raise serializers.ValidationError(
+                "Unable to complete registration with the provided credentials."
+            )
+
         return email
+
 
     def validate_username(self, value):
         username = (value or "").strip()
+
         if User.objects.filter(username=username).exists():
-            raise serializers.ValidationError("A user with this username already exists.")
+            raise serializers.ValidationError(
+                "Unable to complete registration with the provided credentials."
+            )
+
         return username
 
 
