@@ -1493,6 +1493,7 @@ class EmailOTPResendView(APIView):
 
 class PhoneOTPStartView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
     versioning_class = None
     throttle_scope = "otp-resend"
 
@@ -1566,6 +1567,7 @@ class PhoneOTPStartView(APIView):
 
 class PhoneOTPVerifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
     versioning_class = None
     throttle_scope = "otp-verify"
 
