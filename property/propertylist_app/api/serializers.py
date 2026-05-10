@@ -417,7 +417,12 @@ class TenancyProposalSerializer(serializers.Serializer):
         request = self.context["request"]
         user = request.user
 
-        room = Room.objects.select_related("property_owner").filter(id=attrs["room_id"]).first()
+        room = (
+            Room.objects.select_related("property_owner")
+            .filter(id=attrs["room_id"], is_deleted=False)
+            .first()
+        )
+
         if not room:
             raise serializers.ValidationError({"room_id": "Room not found."})
 
