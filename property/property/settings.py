@@ -21,7 +21,10 @@ import sys
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
-TESTING = "pytest" in sys.modules
+TESTING = (
+    "pytest" in sys.modules
+    or os.getenv("DJANGO_SETTINGS_MODULE") == "property.settings_test"
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -110,7 +113,7 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 
-if not DEBUG and "pytest" not in sys.modules:
+if not DEBUG and not TESTING:
     missing_stripe = [
         name for name in [
             "STRIPE_SECRET_KEY",
