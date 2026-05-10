@@ -1,3 +1,4 @@
+﻿from django.db import transaction
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.db.models import Avg, Count
@@ -136,7 +137,7 @@ def booking_created_queue_emails(sender, instance: Booking, created, **kwargs):
                 "cta_url": booking_full_url,
             },
         )
- 
+
 
 @receiver(post_save, sender=Message)
 def message_created_create_notifications(sender, instance: Message, created, **kwargs):
@@ -196,9 +197,11 @@ def message_created_create_notifications(sender, instance: Message, created, **k
 
     # Enqueue once per message if at least one recipient opted-in
     if queued_any_email:
-        task_send_new_message_email.delay(instance.id)
-        
-        
+        transaction.on_commit(
+            lambda: task_send_new_message_email.delay(instance.id)
+        )
+
+
 # -------------------------------------------------------------------
 # TenancyExtension -> Notifications (proposal / accept / reject)
 # -------------------------------------------------------------------
