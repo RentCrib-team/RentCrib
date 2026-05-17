@@ -35,7 +35,7 @@ from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from django.utils.crypto import get_random_string
-from django.db.models import Q, Exists, OuterRef, Prefetch, Count
+from django.db.models import Q, Exists, OuterRef, Prefetch, Count, Case, When
 
 
 from propertylist_app.validators import validate_radius_miles, haversine_miles
@@ -738,7 +738,8 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
             self._distance_by_id = {rid: d for rid, d in distances}
             qs = qs.filter(id__in=ids_in_radius)
 
-        ordering_param = (params.get("ordering") or "").strip()
+        raw_ordering_param = params.get("ordering")
+        ordering_param = (raw_ordering_param or "").strip()
 
         # Map friendly front-end sort keys to real fields
         # Frontend options:
@@ -768,9 +769,12 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
 
 
         # Defer distance ordering to list() when we have computed distances
-        if ordering_param in {"distance_miles", "-distance_miles"} and self._ordered_ids is not None:
-            pass
-        else:
+        distance_ordering_active = (
+            ordering_param in {"distance_miles", "-distance_miles"}
+            and self._ordered_ids is not None
+        )
+
+        if not distance_ordering_active:
             allowed = {
                 "price_per_month": "price_per_month",
                 "-price_per_month": "-price_per_month",
@@ -781,11 +785,40 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
                 "updated_at": "updated_at",
                 "-updated_at": "-updated_at",
             }
+
             mapped = allowed.get(ordering_param)
             if mapped:
                 qs = qs.order_by(mapped)
 
+            # Fair rotation applies only to normal default browsing.
+            # It must not run for postcode/radius distance ordering.
+            apply_fair_rotation = (
+                not postcode
+                and self._ordered_ids is None
+                and raw_ordering_param in (None, "", "default")
+            )
+
+            if apply_fair_rotation:
+                room_ids = list(qs.values_list("id", flat=True)[:40])
+
+                if len(room_ids) > 1:
+                    random.shuffle(room_ids)
+
+                    remaining_ids = list(
+                        qs.exclude(id__in=room_ids).values_list("id", flat=True)
+                    )
+
+                    final_ids = room_ids + remaining_ids
+
+                    preserved_full = Case(
+                        *[When(id=pk, then=pos) for pos, pk in enumerate(final_ids)]
+                    )
+
+                    qs = qs.order_by(preserved_full)
+
         return qs
+
+        
 
     @extend_schema(
         parameters=[

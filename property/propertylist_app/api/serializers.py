@@ -34,6 +34,7 @@ from propertylist_app.validators import (
     assert_not_duplicate_listing, assert_no_duplicate_files,
     enforce_user_caps,
 )
+from propertylist_app.services.geo import geocode_postcode_cached
 
 from django.utils import timezone
 from django.core import mail
@@ -736,6 +737,68 @@ class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Room
         fields = "__all__"
+        
+        
+    
+    
+    def _apply_geocode(self, room):
+        """
+        Populate latitude/longitude from the room location postcode.
+
+        Safe behaviour:
+        - silently skips if postcode/geocoding fails
+        - never blocks room creation/update
+        """
+        location = (room.location or "").strip()
+
+        if not location:
+            return
+
+        try:
+            parts = location.split()
+
+            if len(parts) >= 2 and len(parts[-1]) <= 3:
+                postcode = f"{parts[-2]} {parts[-1]}"
+            else:
+                postcode = parts[-1]
+
+            lat, lon = geocode_postcode_cached(postcode)
+
+            room.latitude = lat
+            room.longitude = lon
+
+        except Exception:
+            # Do not block listing save if geocoder fails.
+            return
+    
+    
+    def create(self, validated_data):
+        room = super().create(validated_data)
+
+        self._apply_geocode(room)
+
+        room.save(update_fields=["latitude", "longitude"])
+
+        return room
+    
+    
+    def update(self, instance, validated_data):
+        old_location = (instance.location or "").strip()
+
+        room = super().update(instance, validated_data)
+
+        new_location = (room.location or "").strip()
+
+        if old_location != new_location or not room.latitude or not room.longitude:
+            self._apply_geocode(room)
+
+            room.save(update_fields=["latitude", "longitude"])
+
+        return room
+    
+    
+    
+        
 
     def validate_title(self, value):
         return validate_listing_title(value)
