@@ -1,4 +1,4 @@
-﻿#Standard/library
+#Standard/library
 from datetime import datetime, timezone as dt_timezone
 import logging
 import jwt
@@ -38,6 +38,7 @@ from drf_spectacular.utils import (
     OpenApiParameter,
     OpenApiResponse,
     inline_serializer,
+    OpenApiExample,
 )
 
 
@@ -567,9 +568,88 @@ class LoginView(APIView):
                     ),
                 },
             ),
-            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid input or invalid credentials."),
-            403: OpenApiResponse(response=ErrorResponseSerializer, description="Email not verified."),
-            429: OpenApiResponse(response=ErrorResponseSerializer, description="Too many failed attempts"),
+            400: OpenApiResponse(
+                response=inline_serializer(
+                    name="LoginErrorResponse",
+                    fields={
+                        "ok": serializers.BooleanField(default=False),
+                        "message": serializers.CharField(),
+                        "detail": serializers.CharField(),
+                        "status": serializers.IntegerField(),
+                        "code": serializers.CharField(required=False),
+                        "field_errors": serializers.JSONField(required=False),
+                        "details": serializers.JSONField(required=False),
+                    },
+                ),
+                description="Invalid input or invalid credentials.",
+                examples=[
+                    OpenApiExample(
+                        "Invalid credentials",
+                        value={
+                            "ok": False,
+                            "message": "Invalid credentials.",
+                            "detail": "Invalid credentials.",
+                            "status": 400,
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            403: OpenApiResponse(
+                response=inline_serializer(
+                    name="LoginEmailNotVerifiedResponse",
+                    fields={
+                        "ok": serializers.BooleanField(default=False),
+                        "message": serializers.CharField(),
+                        "detail": serializers.CharField(),
+                        "status": serializers.IntegerField(),
+                        "code": serializers.CharField(required=False),
+                        "field_errors": serializers.JSONField(required=False),
+                        "details": serializers.JSONField(required=False),
+                    },
+                ),
+                description="Email not verified.",
+                examples=[
+                    OpenApiExample(
+                        "Email not verified",
+                        value={
+                            "ok": False,
+                            "message": "Please verify your email with the 6-digit code we sent.",
+                            "detail": "Please verify your email with the 6-digit code we sent.",
+                            "status": 403,
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            429: OpenApiResponse(
+                response=inline_serializer(
+                    name="LoginRateLimitedResponse",
+                    fields={
+                        "ok": serializers.BooleanField(default=False),
+                        "message": serializers.CharField(),
+                        "detail": serializers.CharField(),
+                        "status": serializers.IntegerField(),
+                        "code": serializers.CharField(required=False),
+                        "field_errors": serializers.JSONField(required=False),
+                        "details": serializers.JSONField(required=False),
+                    },
+                ),
+                description="Too many failed attempts.",
+                examples=[
+                    OpenApiExample(
+                        "Too many failed attempts",
+                        value={
+                            "ok": False,
+                            "message": "Too many failed attempts. Try again later.",
+                            "detail": "Too many failed attempts. Try again later.",
+                            "status": 429,
+                            "code": "lockout",
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
         },
         auth=[],
         description=(
@@ -824,7 +904,7 @@ class PasswordResetRequestView(APIView):
         email = ser.validated_data["email"].strip()
         UserModel = get_user_model()
 
-        # Always return a generic response (donâ€™t reveal if email exists)
+        # Always return a generic response (don’t reveal if email exists)
         generic_response = ok_response(
             {"detail": "If that email exists, a reset code has been sent."},
             status_code=status.HTTP_200_OK,

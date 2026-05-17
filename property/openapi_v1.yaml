@@ -34,20 +34,45 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/LoginErrorResponse'
+              examples:
+                InvalidCredentials:
+                  value:
+                    ok: false
+                    message: Invalid credentials.
+                    detail: Invalid credentials.
+                    status: 400
+                  summary: Invalid credentials
           description: Invalid input or invalid credentials.
         '403':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/LoginEmailNotVerifiedResponse'
+              examples:
+                EmailNotVerified:
+                  value:
+                    ok: false
+                    message: Please verify your email with the 6-digit code we sent.
+                    detail: Please verify your email with the 6-digit code we sent.
+                    status: 403
+                  summary: Email not verified
           description: Email not verified.
         '429':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: Too many failed attempts
+                $ref: '#/components/schemas/LoginRateLimitedResponse'
+              examples:
+                TooManyFailedAttempts:
+                  value:
+                    ok: false
+                    message: Too many failed attempts. Try again later.
+                    detail: Too many failed attempts. Try again later.
+                    status: 429
+                    code: lockout
+                  summary: Too many failed attempts
+          description: Too many failed attempts.
   /api/v1/auth/logout/:
     post:
       operationId: auth_logout_create
@@ -5814,6 +5839,46 @@ components:
       required:
       - identifier
       - password
+    LoginEmailNotVerifiedResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: false
+        message:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        field_errors: {}
+        details: {}
+      required:
+      - detail
+      - message
+      - status
+    LoginErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: false
+        message:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        field_errors: {}
+        details: {}
+      required:
+      - detail
+      - message
+      - status
     LoginOkData:
       type: object
       properties:
@@ -5840,6 +5905,26 @@ components:
       required:
       - data
       - ok
+    LoginRateLimitedResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: false
+        message:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        field_errors: {}
+        details: {}
+      required:
+      - detail
+      - message
+      - status
     LoginTokenData:
       type: object
       properties:
