@@ -567,9 +567,9 @@ class LoginView(APIView):
                     ),
                 },
             ),
-            400: DetailResponseSerializer,
-            403: DetailResponseSerializer,
-            429: DetailResponseSerializer,
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid input or invalid credentials."),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Email not verified."),
+            429: OpenApiResponse(response=ErrorResponseSerializer, description="Too many failed attempts"),
         },
         auth=[],
         description=(
