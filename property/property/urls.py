@@ -103,6 +103,9 @@ urlpatterns = [
 
     # Redirect any old /api/<path> (except the explicit auth + schema routes above) to /api/v1/<path>
     re_path(r"^api/(?!v1/)(?P<path>.*)$", redirect_api_to_v1),
+    
+    
+    path("api/v1/admin/", include("propertylist_app.admin_api.urls")),
 
 ]
 
