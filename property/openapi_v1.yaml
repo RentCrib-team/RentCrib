@@ -4,6 +4,20 @@ info:
   version: v1
   description: Backend API for RentOut property platform.
 paths:
+  /api/v1/admin/analytics/listing-growth/:
+    get:
+      operationId: admin_analytics_listing_growth_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingGrowthResponse'
+          description: ''
   /api/v1/admin/dashboard/overview/:
     get:
       operationId: admin_dashboard_overview_retrieve
@@ -5876,6 +5890,20 @@ components:
             $ref: '#/components/schemas/InboxItem'
       required:
       - data
+      - ok
+    ListingGrowthResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
       - ok
     Login:
       type: object
