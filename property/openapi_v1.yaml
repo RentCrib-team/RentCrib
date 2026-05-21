@@ -74,6 +74,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminNotificationDropdownResponse'
           description: ''
+  /api/v1/admin/common/profile/dropdown/:
+    get:
+      operationId: admin_common_profile_dropdown_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminProfileDropdownResponse'
+          description: ''
   /api/v1/admin/dashboard/overview/:
     get:
       operationId: admin_dashboard_overview_retrieve
@@ -5179,6 +5193,49 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/AdminNotificationDropdownData'
+      required:
+      - data
+      - message
+      - ok
+    AdminProfileDropdownData:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        admin_role:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+        email_verified:
+          type: boolean
+        phone_verified:
+          type: boolean
+      required:
+      - admin_role
+      - avatar
+      - email
+      - email_verified
+      - first_name
+      - id
+      - last_name
+      - phone_verified
+    AdminProfileDropdownResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminProfileDropdownData'
       required:
       - data
       - message

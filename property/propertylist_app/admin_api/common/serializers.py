@@ -19,3 +19,21 @@ class AdminNotificationDropdownResponseSerializer(serializers.Serializer):
     ok = serializers.BooleanField()
     message = serializers.CharField()
     data = AdminNotificationDropdownDataSerializer()
+    
+    
+    
+class AdminProfileDropdownDataSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.EmailField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    admin_role = serializers.CharField()
+    avatar = serializers.CharField(allow_null=True)
+    email_verified = serializers.BooleanField()
+    phone_verified = serializers.BooleanField()
+
+
+class AdminProfileDropdownResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    message = serializers.CharField()
+    data = AdminProfileDropdownDataSerializer()    
