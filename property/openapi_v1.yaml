@@ -4,6 +4,76 @@ info:
   version: v1
   description: Backend API for RentOut property platform.
 paths:
+  /api/v1/admin/admin-management/admins/:
+    get:
+      operationId: admin_admin_management_admins_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserTableResponse'
+          description: ''
+  /api/v1/admin/admin-management/admins/{admin_user_id}/delete/:
+    delete:
+      operationId: admin_admin_management_admins_delete_destroy
+      parameters:
+      - in: path
+        name: admin_user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/admin/admin-management/admins/create/:
+    post:
+      operationId: admin_admin_management_admins_create_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAdminResponse'
+          description: ''
+  /api/v1/admin/admin-management/permissions/:
+    get:
+      operationId: admin_admin_management_permissions_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRolePermissionsResponse'
+          description: ''
   /api/v1/admin/analytics/booking-trends/:
     get:
       operationId: admin_analytics_booking_trends_retrieve
@@ -5240,6 +5310,67 @@ components:
       - data
       - message
       - ok
+    AdminRolePermissionsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - data
+      - message
+      - ok
+    AdminUserTableItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        username:
+          type: string
+        admin_role:
+          type: string
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+      required:
+      - admin_role
+      - email
+      - first_name
+      - id
+      - is_active
+      - is_staff
+      - last_name
+      - username
+    AdminUserTableResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUserTableItem'
+      required:
+      - data
+      - message
+      - ok
     AppleRegisterData:
       type: object
       properties:
@@ -5599,6 +5730,81 @@ components:
       - message
       - name
       - subject
+    CreateAdminRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        password:
+          type: string
+          writeOnly: true
+        admin_role:
+          enum:
+          - super_admin
+          - ops_admin
+          - moderator
+          - finance_admin
+          - support_admin
+          type: string
+          description: |-
+            * `super_admin` - Super Admin
+            * `ops_admin` - Operations Admin
+            * `moderator` - Moderation Admin
+            * `finance_admin` - Finance Admin
+            * `support_admin` - Support Admin
+          x-spec-enum-id: 95548bdfe1ba1a8e
+      required:
+      - admin_role
+      - email
+      - first_name
+      - last_name
+      - password
+    CreateAdminResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/CreateAdminResponseData'
+      required:
+      - data
+      - message
+      - ok
+    CreateAdminResponseData:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        admin_role:
+          type: string
+        is_staff:
+          type: boolean
+        is_active:
+          type: boolean
+      required:
+      - admin_role
+      - email
+      - first_name
+      - id
+      - is_active
+      - is_staff
+      - last_name
     CreateListingCheckoutSessionResponse:
       type: object
       properties:
