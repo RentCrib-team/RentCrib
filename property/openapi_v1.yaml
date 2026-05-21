@@ -4,6 +4,20 @@ info:
   version: v1
   description: Backend API for RentOut property platform.
 paths:
+  /api/v1/admin/analytics/booking-trends/:
+    get:
+      operationId: admin_analytics_booking_trends_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingTrendsResponse'
+          description: ''
   /api/v1/admin/analytics/listing-growth/:
     get:
       operationId: admin_analytics_listing_growth_retrieve
@@ -17,6 +31,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListingGrowthResponse'
+          description: ''
+  /api/v1/admin/analytics/moderation-backlog-trends/:
+    get:
+      operationId: admin_analytics_moderation_backlog_trends_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationBacklogTrendsResponse'
+          description: ''
+  /api/v1/admin/analytics/payment-status-mix/:
+    get:
+      operationId: admin_analytics_payment_status_mix_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatusMixResponse'
           description: ''
   /api/v1/admin/dashboard/overview/:
     get:
@@ -5308,6 +5350,20 @@ components:
       required:
       - data
       - ok
+    BookingTrendsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
+      - ok
     ChangeEmailData:
       type: object
       properties:
@@ -6143,6 +6199,20 @@ components:
           type: string
       required:
       - message
+    ModerationBacklogTrendsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
+      - ok
     ModerationReportModerateActionData:
       type: object
       properties:
@@ -7483,6 +7553,20 @@ components:
         number_landlord_ratings:
           type: integer
           readOnly: true
+    PaymentStatusMixResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
+      - ok
     PaymentTransactionDetail:
       type: object
       properties:
