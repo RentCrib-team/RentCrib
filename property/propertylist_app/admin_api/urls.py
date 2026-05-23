@@ -7,4 +7,5 @@ urlpatterns = [
     path("admin-management/", include("propertylist_app.admin_api.admin_management.urls")),
     path("listings/", include("propertylist_app.admin_api.listings.urls")),
     path("bookings/", include("propertylist_app.admin_api.bookings.urls")),
+    path("tenancies/", include("propertylist_app.admin_api.tenancies.urls")),
 ]

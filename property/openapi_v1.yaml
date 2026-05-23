@@ -345,6 +345,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListingOverviewResponse'
           description: ''
+  /api/v1/admin/tenancies/:
+    get:
+      operationId: admin_tenancies_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTenancyOverviewResponse'
+          description: ''
   /api/v1/auth/login/:
     post:
       operationId: auth_login_create
@@ -5469,6 +5483,10 @@ components:
           format: date-time
         status:
           type: string
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
         tenant:
           type: object
           additionalProperties: {}
@@ -5480,6 +5498,7 @@ components:
       - booking_date
       - booking_id
       - booking_time
+      - canceled_at
       - id
       - listing
       - status
@@ -6111,6 +6130,101 @@ components:
       - data
       - message
       - ok
+    AdminTenancyOverviewData:
+      type: object
+      properties:
+        stats:
+          $ref: '#/components/schemas/AdminTenancyStats'
+        tenancies:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminTenancyTableItem'
+      required:
+      - stats
+      - tenancies
+    AdminTenancyOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminTenancyOverviewData'
+      required:
+      - data
+      - message
+      - ok
+    AdminTenancyStats:
+      type: object
+      properties:
+        all_tenancies:
+          type: integer
+        proposed_tenancies:
+          type: integer
+        confirmed_tenancies:
+          type: integer
+        active_tenancies:
+          type: integer
+        ended_tenancies:
+          type: integer
+        cancelled_tenancies:
+          type: integer
+      required:
+      - active_tenancies
+      - all_tenancies
+      - cancelled_tenancies
+      - confirmed_tenancies
+      - ended_tenancies
+      - proposed_tenancies
+    AdminTenancyTableItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenancy_id:
+          type: string
+        tenant:
+          type: string
+        tenant_email:
+          type: string
+          format: email
+        landlord:
+          type: string
+        landlord_email:
+          type: string
+          format: email
+        room_id:
+          type: integer
+        room_title:
+          type: string
+        property_type:
+          type: string
+          nullable: true
+        move_in_date:
+          type: string
+          format: date
+        duration_months:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - duration_months
+      - id
+      - landlord
+      - landlord_email
+      - move_in_date
+      - property_type
+      - room_id
+      - room_title
+      - status
+      - tenancy_id
+      - tenant
+      - tenant_email
     AdminUserTableItem:
       type: object
       properties:

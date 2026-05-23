@@ -103,6 +103,7 @@ def get_admin_booking_detail(booking_id):
         "booking_date": booking.start.date(),
         "booking_time": booking.start.strftime("%H:%M"),
         "booking_created": booking.created_at,
+        "canceled_at": booking.canceled_at,
         "status": get_booking_display_status(booking),
 
         "tenant": {

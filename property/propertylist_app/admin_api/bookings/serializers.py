@@ -66,6 +66,7 @@ class AdminBookingDetailDataSerializer(serializers.Serializer):
     booking_time = serializers.CharField()
     booking_created = serializers.DateTimeField()
     status = serializers.CharField()
+    canceled_at = serializers.DateTimeField(allow_null=True)
 
     tenant = serializers.DictField()
     listing = serializers.DictField()
