@@ -130,6 +130,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaymentStatusMixResponse'
           description: ''
+  /api/v1/admin/bookings/:
+    get:
+      operationId: admin_bookings_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBookingOverviewResponse'
+          description: ''
+  /api/v1/admin/bookings/{booking_id}/action/:
+    post:
+      operationId: admin_bookings_action_create
+      parameters:
+      - in: path
+        name: booking_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminBookingActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminBookingActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminBookingActionRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBookingActionResponse'
+          description: ''
   /api/v1/admin/common/notifications/dropdown/:
     get:
       operationId: admin_common_notifications_dropdown_retrieve
@@ -171,6 +217,113 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardOverviewResponse'
+          description: ''
+  /api/v1/admin/listings/{listing_id}/:
+    get:
+      operationId: admin_listings_retrieve
+      parameters:
+      - in: path
+        name: listing_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminListingDetailResponse'
+          description: ''
+  /api/v1/admin/listings/{listing_id}/action/:
+    post:
+      operationId: admin_listings_action_create
+      parameters:
+      - in: path
+        name: listing_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListingActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ListingActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ListingActionRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingActionResponse'
+          description: ''
+  /api/v1/admin/listings/overview/:
+    get:
+      operationId: admin_listings_overview_retrieve
+      parameters:
+      - in: query
+        name: availability
+        schema:
+          type: string
+      - in: query
+        name: bills
+        schema:
+          type: string
+      - in: query
+        name: category
+        schema:
+          type: string
+      - in: query
+        name: furnished
+        schema:
+          type: string
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+      - in: query
+        name: parking
+        schema:
+          type: string
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: sort_by
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingOverviewResponse'
           description: ''
   /api/v1/auth/login/:
     post:
@@ -5219,6 +5372,503 @@ components:
           writeOnly: true
       required:
       - confirm
+    AdminAvailableActions:
+      type: object
+      properties:
+        can_approve:
+          type: boolean
+        can_hide:
+          type: boolean
+        can_restore:
+          type: boolean
+        can_soft_delete:
+          type: boolean
+      required:
+      - can_approve
+      - can_hide
+      - can_restore
+      - can_soft_delete
+    AdminBookingActionRequest:
+      type: object
+      properties:
+        action:
+          enum:
+          - suspend
+          - cancel
+          - restore
+          - soft_delete
+          type: string
+          description: |-
+            * `suspend` - Suspend
+            * `cancel` - Cancel
+            * `restore` - Restore
+            * `soft_delete` - Soft delete
+          x-spec-enum-id: 7ab207006a8337ac
+      required:
+      - action
+    AdminBookingActionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminBookingActionResponseData'
+      required:
+      - data
+      - message
+      - ok
+    AdminBookingActionResponseData:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        is_deleted:
+          type: boolean
+      required:
+      - id
+      - is_deleted
+      - status
+    AdminBookingOverviewData:
+      type: object
+      properties:
+        stats:
+          $ref: '#/components/schemas/AdminBookingStats'
+        bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminBookingTableItem'
+      required:
+      - bookings
+      - stats
+    AdminBookingOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminBookingOverviewData'
+      required:
+      - data
+      - message
+      - ok
+    AdminBookingStats:
+      type: object
+      properties:
+        all_bookings:
+          type: integer
+        confirmed_bookings:
+          type: integer
+        suspended_bookings:
+          type: integer
+        cancelled_bookings:
+          type: integer
+        deleted_bookings:
+          type: integer
+      required:
+      - all_bookings
+      - cancelled_bookings
+      - confirmed_bookings
+      - deleted_bookings
+      - suspended_bookings
+    AdminBookingTableItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        booking_id:
+          type: string
+        user:
+          type: string
+        user_email:
+          type: string
+          format: email
+        property_type:
+          type: string
+          nullable: true
+        room_id:
+          type: integer
+        room_title:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        status:
+          type: string
+        is_deleted:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - booking_id
+      - created_at
+      - end
+      - id
+      - is_deleted
+      - property_type
+      - room_id
+      - room_title
+      - start
+      - status
+      - user
+      - user_email
+    AdminExistingFlatmate:
+      type: object
+      properties:
+        age:
+          type: integer
+          nullable: true
+        nationality:
+          type: string
+        language:
+          type: string
+        gender:
+          type: string
+        occupation:
+          type: string
+        smoking:
+          type: string
+        pets:
+          type: string
+        lgbtqia_household:
+          type: string
+      required:
+      - age
+      - gender
+      - language
+      - lgbtqia_household
+      - nationality
+      - occupation
+      - pets
+      - smoking
+    AdminFlatmatePreferences:
+      type: object
+      properties:
+        nationality:
+          type: string
+        language:
+          type: string
+        min_age:
+          type: integer
+          nullable: true
+        max_age:
+          type: integer
+          nullable: true
+        occupation:
+          type: string
+        pets:
+          type: string
+        gender:
+          type: string
+        smoking:
+          type: string
+        partners_allowed:
+          type: string
+        lgbtqia:
+          type: string
+        vegan_vegetarian:
+          type: string
+      required:
+      - gender
+      - language
+      - lgbtqia
+      - max_age
+      - min_age
+      - nationality
+      - occupation
+      - partners_allowed
+      - pets
+      - smoking
+      - vegan_vegetarian
+    AdminListingAmenities:
+      type: object
+      properties:
+        home:
+          type: array
+          items:
+            type: string
+        property:
+          type: array
+          items:
+            type: string
+        safety:
+          type: array
+          items:
+            type: string
+      required:
+      - home
+      - property
+      - safety
+    AdminListingBasicDetails:
+      type: object
+      properties:
+        address:
+          type: string
+        deposit:
+          type: string
+          nullable: true
+        view_available_days:
+          type: string
+        available_from:
+          type: string
+          format: date
+        availability_start_time:
+          type: string
+          format: time
+          nullable: true
+        availability_end_time:
+          type: string
+          format: time
+          nullable: true
+        minimum_rental_period_months:
+          type: integer
+          nullable: true
+        maximum_rental_period_months:
+          type: integer
+          nullable: true
+        furnished:
+          type: boolean
+        bills_included:
+          type: boolean
+        parking_available:
+          type: boolean
+        is_available:
+          type: boolean
+      required:
+      - address
+      - availability_end_time
+      - availability_start_time
+      - available_from
+      - bills_included
+      - deposit
+      - furnished
+      - is_available
+      - maximum_rental_period_months
+      - minimum_rental_period_months
+      - parking_available
+      - view_available_days
+    AdminListingCoreInformation:
+      type: object
+      properties:
+        ad_title:
+          type: string
+        owner:
+          type: string
+        owner_email:
+          type: string
+          format: email
+        property_type:
+          type: string
+        category:
+          type: string
+          nullable: true
+        price:
+          type: string
+        description:
+          type: string
+        main_photo:
+          type: string
+          nullable: true
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminListingImage'
+      required:
+      - ad_title
+      - category
+      - description
+      - images
+      - owner
+      - owner_email
+      - price
+      - property_type
+    AdminListingDetailData:
+      type: object
+      properties:
+        id:
+          type: integer
+        listing_id:
+          type: string
+        status:
+          type: string
+        basic_information:
+          type: object
+          additionalProperties: {}
+        core_listing_information:
+          $ref: '#/components/schemas/AdminListingCoreInformation'
+        basic_details:
+          $ref: '#/components/schemas/AdminListingBasicDetails'
+        layout_information:
+          $ref: '#/components/schemas/AdminListingLayoutInformation'
+        flatmate_information:
+          $ref: '#/components/schemas/AdminListingFlatmateInformation'
+        metadata:
+          $ref: '#/components/schemas/AdminListingMetadata'
+        related_entities:
+          $ref: '#/components/schemas/AdminRelatedEntities'
+        available_actions:
+          $ref: '#/components/schemas/AdminAvailableActions'
+      required:
+      - available_actions
+      - basic_details
+      - basic_information
+      - core_listing_information
+      - flatmate_information
+      - id
+      - layout_information
+      - listing_id
+      - metadata
+      - related_entities
+      - status
+    AdminListingDetailResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminListingDetailData'
+      required:
+      - data
+      - message
+      - ok
+    AdminListingFlatmateInformation:
+      type: object
+      properties:
+        existing_flatmate:
+          $ref: '#/components/schemas/AdminExistingFlatmate'
+        flatmate_preferences:
+          $ref: '#/components/schemas/AdminFlatmatePreferences'
+      required:
+      - existing_flatmate
+      - flatmate_preferences
+    AdminListingImage:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          nullable: true
+        status:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+      required:
+      - id
+      - status
+      - uploaded_at
+      - url
+    AdminListingItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        owner:
+          type: string
+        owner_email:
+          type: string
+          format: email
+        category:
+          type: string
+          nullable: true
+        price:
+          type: string
+        status:
+          type: string
+        is_deleted:
+          type: boolean
+        furnished:
+          type: boolean
+        bills_included:
+          type: boolean
+        parking_available:
+          type: boolean
+        is_available:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - bills_included
+      - category
+      - created_at
+      - furnished
+      - id
+      - is_available
+      - is_deleted
+      - owner
+      - owner_email
+      - parking_available
+      - price
+      - status
+      - title
+      - updated_at
+    AdminListingLayoutInformation:
+      type: object
+      properties:
+        bedrooms:
+          type: integer
+          nullable: true
+        bathrooms:
+          type: integer
+          nullable: true
+        property_type:
+          type: string
+          nullable: true
+        room_size:
+          type: string
+          nullable: true
+        shared_living:
+          type: boolean
+        amenities:
+          $ref: '#/components/schemas/AdminListingAmenities'
+      required:
+      - amenities
+      - bathrooms
+      - bedrooms
+      - property_type
+      - room_size
+      - shared_living
+    AdminListingMetadata:
+      type: object
+      properties:
+        paid_until:
+          type: string
+          format: date-time
+          nullable: true
+        last_updated:
+          type: string
+          format: date-time
+        views_count:
+          type: integer
+        inquiries_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - inquiries_count
+      - last_updated
+      - paid_until
+      - views_count
     AdminNotificationDropdownData:
       type: object
       properties:
@@ -5267,6 +5917,40 @@ components:
       - data
       - message
       - ok
+    AdminOwnerProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+      required:
+      - email
+      - id
+      - name
+    AdminPaymentHistory:
+      type: object
+      properties:
+        id:
+          type: integer
+        amount:
+          type: string
+        currency:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - created_at
+      - currency
+      - id
+      - status
     AdminProfileDropdownData:
       type: object
       properties:
@@ -5310,6 +5994,41 @@ components:
       - data
       - message
       - ok
+    AdminRelatedBooking:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+      required:
+      - end
+      - id
+      - start
+      - status
+    AdminRelatedEntities:
+      type: object
+      properties:
+        owner_profile:
+          $ref: '#/components/schemas/AdminOwnerProfile'
+        related_bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminRelatedBooking'
+        payment_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminPaymentHistory'
+      required:
+      - owner_profile
+      - payment_history
+      - related_bookings
     AdminRolePermissionsResponse:
       type: object
       properties:
@@ -6272,6 +6991,53 @@ components:
       required:
       - data
       - ok
+    ListingActionData:
+      type: object
+      properties:
+        message:
+          type: string
+        listing:
+          $ref: '#/components/schemas/AdminListingItem'
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - listing
+      - message
+      - updated_at
+    ListingActionRequest:
+      type: object
+      properties:
+        action:
+          enum:
+          - approve
+          - hide
+          - restore
+          - publish
+          - soft_delete
+          type: string
+          description: |-
+            * `approve` - Approve
+            * `hide` - Hide
+            * `restore` - Restore
+            * `publish` - Publish
+            * `soft_delete` - Soft delete
+          x-spec-enum-id: 74b65f74595d873e
+      required:
+      - action
+    ListingActionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ListingActionData'
+      required:
+      - data
+      - message
+      - ok
     ListingGrowthResponse:
       type: object
       properties:
@@ -6286,6 +7052,87 @@ components:
       - data
       - message
       - ok
+    ListingMetrics:
+      type: object
+      properties:
+        total_listing:
+          type: integer
+        active_listing:
+          type: integer
+        pending_listing:
+          type: integer
+        hidden_listing:
+          type: integer
+        drafts_listing:
+          type: integer
+        unpublished_listing:
+          type: integer
+        expired_listing:
+          type: integer
+        edited_listing:
+          type: integer
+        deleted_listing:
+          type: integer
+      required:
+      - active_listing
+      - deleted_listing
+      - drafts_listing
+      - edited_listing
+      - expired_listing
+      - hidden_listing
+      - pending_listing
+      - total_listing
+      - unpublished_listing
+    ListingOverviewData:
+      type: object
+      properties:
+        metrics:
+          $ref: '#/components/schemas/ListingMetrics'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminListingItem'
+        pagination:
+          $ref: '#/components/schemas/ListingPagination'
+      required:
+      - metrics
+      - pagination
+      - results
+    ListingOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ListingOverviewData'
+      required:
+      - data
+      - message
+      - ok
+    ListingPagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_pages:
+          type: integer
+        total_results:
+          type: integer
+        has_next:
+          type: boolean
+        has_previous:
+          type: boolean
+      required:
+      - has_next
+      - has_previous
+      - page
+      - page_size
+      - total_pages
+      - total_results
     Login:
       type: object
       properties:
