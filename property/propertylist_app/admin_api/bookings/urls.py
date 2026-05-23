@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AdminBookingOverviewView,
+    AdminBookingDetailView,
     AdminBookingActionView,
 )
 
@@ -10,6 +11,12 @@ urlpatterns = [
         "",
         AdminBookingOverviewView.as_view(),
         name="admin-booking-overview",
+    ),
+
+    path(
+        "<int:booking_id>/",
+        AdminBookingDetailView.as_view(),
+        name="admin-booking-detail",
     ),
 
     path(

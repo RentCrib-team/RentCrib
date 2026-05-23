@@ -56,3 +56,22 @@ class AdminBookingActionResponseSerializer(serializers.Serializer):
     ok = serializers.BooleanField()
     message = serializers.CharField()
     data = AdminBookingActionResponseDataSerializer()
+    
+    
+    
+class AdminBookingDetailDataSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    booking_id = serializers.CharField()
+    booking_date = serializers.DateField()
+    booking_time = serializers.CharField()
+    booking_created = serializers.DateTimeField()
+    status = serializers.CharField()
+
+    tenant = serializers.DictField()
+    listing = serializers.DictField()
+
+
+class AdminBookingDetailResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    message = serializers.CharField()
+    data = AdminBookingDetailDataSerializer()    

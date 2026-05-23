@@ -5,6 +5,7 @@ from propertylist_app.models import Booking
 
 from .selectors import (
     get_admin_bookings_queryset,
+    get_admin_booking_detail,
     get_booking_stats,
     serialize_admin_booking,
 )
@@ -20,6 +21,11 @@ def get_admin_booking_overview_data(params):
             for booking in queryset
         ],
     }
+
+
+def get_admin_booking_detail_data(booking_id):
+    return get_admin_booking_detail(booking_id)
+
 
 
 def update_admin_booking_action(booking_id, action):

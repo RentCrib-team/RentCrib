@@ -83,3 +83,42 @@ def serialize_admin_booking(booking):
         "is_deleted": booking.is_deleted,
         "created_at": booking.created_at,
     }
+    
+    
+    
+def get_admin_booking_detail(booking_id):
+    booking = (
+        Booking.objects
+        .select_related("user", "user__profile", "room", "room__property_owner")
+        .get(id=booking_id)
+    )
+
+    profile = getattr(booking.user, "profile", None)
+    room = booking.room
+    owner = room.property_owner
+
+    return {
+        "id": booking.id,
+        "booking_id": f"BK{booking.id:04d}",
+        "booking_date": booking.start.date(),
+        "booking_time": booking.start.strftime("%H:%M"),
+        "booking_created": booking.created_at,
+        "status": get_booking_display_status(booking),
+
+        "tenant": {
+            "id": booking.user.id,
+            "name": booking.user.get_full_name() or booking.user.username,
+            "email": booking.user.email,
+            "phone": getattr(profile, "phone", None),
+            "avatar": profile.avatar.url if profile and profile.avatar else None,
+        },
+
+        "listing": {
+            "id": room.id,
+            "title": room.title,
+            "property_type": room.property_type,
+            "price": str(room.price_per_month),
+            "owner": owner.get_full_name() or owner.username,
+            "description": room.description,
+        },
+    }   

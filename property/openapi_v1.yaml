@@ -144,6 +144,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminBookingOverviewResponse'
           description: ''
+  /api/v1/admin/bookings/{booking_id}/:
+    get:
+      operationId: admin_bookings_retrieve_2
+      parameters:
+      - in: path
+        name: booking_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBookingDetailResponse'
+          description: ''
   /api/v1/admin/bookings/{booking_id}/action/:
     post:
       operationId: admin_bookings_action_create
@@ -5432,6 +5452,51 @@ components:
       - id
       - is_deleted
       - status
+    AdminBookingDetailData:
+      type: object
+      properties:
+        id:
+          type: integer
+        booking_id:
+          type: string
+        booking_date:
+          type: string
+          format: date
+        booking_time:
+          type: string
+        booking_created:
+          type: string
+          format: date-time
+        status:
+          type: string
+        tenant:
+          type: object
+          additionalProperties: {}
+        listing:
+          type: object
+          additionalProperties: {}
+      required:
+      - booking_created
+      - booking_date
+      - booking_id
+      - booking_time
+      - id
+      - listing
+      - status
+      - tenant
+    AdminBookingDetailResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminBookingDetailData'
+      required:
+      - data
+      - message
+      - ok
     AdminBookingOverviewData:
       type: object
       properties:

@@ -8,12 +8,14 @@ from propertylist_app.api.views.common import ok_response
 
 from .serializers import (
     AdminBookingOverviewResponseSerializer,
+    AdminBookingDetailResponseSerializer,
     AdminBookingActionRequestSerializer,
     AdminBookingActionResponseSerializer,
 )
 
 from .services import (
     get_admin_booking_overview_data,
+    get_admin_booking_detail_data,
     update_admin_booking_action,
 )
 
@@ -31,6 +33,25 @@ class AdminBookingOverviewView(APIView):
             data=data,
             message="Admin booking overview fetched successfully.",
         )
+
+
+
+class AdminBookingDetailView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @extend_schema(
+        responses=AdminBookingDetailResponseSerializer,
+    )
+    def get(self, request, booking_id):
+        data = get_admin_booking_detail_data(booking_id)
+
+        return ok_response(
+            data=data,
+            message="Admin booking detail fetched successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
 
 
 class AdminBookingActionView(APIView):
