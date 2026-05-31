@@ -183,6 +183,9 @@ def test_room_detail_contract_v1_shape_and_types():
         "updated_at",
         "view_available_custom_dates",
         "view_available_days_mode",
+        "landlord_type",
+        "landlord_type_label",
+        "landlord_verified",
     }
 
     assert_exact_keys(payload, expected_keys)

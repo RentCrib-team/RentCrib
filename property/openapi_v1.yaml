@@ -8330,6 +8330,15 @@ components:
             Returns one of: 'draft', 'active', 'expired', 'hidden'.
             Used by the 'My Listings' page to group into tabs.
           readOnly: true
+        landlord_type:
+          type: string
+          readOnly: true
+        landlord_type_label:
+          type: string
+          readOnly: true
+        landlord_verified:
+          type: boolean
+          readOnly: true
         is_deleted:
           type: boolean
         deleted_at:
@@ -9474,6 +9483,15 @@ components:
             Returns one of: 'draft', 'active', 'expired', 'hidden'.
             Used by the 'My Listings' page to group into tabs.
           readOnly: true
+        landlord_type:
+          type: string
+          readOnly: true
+        landlord_type_label:
+          type: string
+          readOnly: true
+        landlord_verified:
+          type: boolean
+          readOnly: true
         is_deleted:
           type: boolean
         deleted_at:
@@ -9984,6 +10002,9 @@ components:
       - distance_miles
       - id
       - is_saved
+      - landlord_type
+      - landlord_type_label
+      - landlord_verified
       - listing_state
       - location
       - main_photo
