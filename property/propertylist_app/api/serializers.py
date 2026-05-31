@@ -555,6 +555,18 @@ class TenancyRespondSerializer(serializers.Serializer):
         action = attrs["action"]
 
         if action == "propose_changes":
+            if user.id != tenancy.tenant_id:
+                raise serializers.ValidationError(
+                    {"action": "Only the tenant can edit tenancy details at this stage."}
+                )
+
+            if tenancy.tenant_has_edited:
+                raise serializers.ValidationError(
+                    {"action": "You have already edited this tenancy once."}
+                )
+            
+            
+            
             if "move_in_date" not in attrs or "duration_months" not in attrs:
                 raise serializers.ValidationError(
                     {"non_field_errors": "move_in_date and duration_months are required for propose_changes."}
@@ -620,6 +632,7 @@ class TenancyRespondSerializer(serializers.Serializer):
             tenancy.review_deadline_at = None
             tenancy.still_living_check_at = None
             tenancy.still_living_confirmed_at = None
+            tenancy.tenant_has_edited = True
 
             tenancy.save()
             return tenancy
@@ -696,6 +709,9 @@ class RoomSerializer(serializers.ModelSerializer):
     main_photo = serializers.SerializerMethodField(read_only=True)
     photo_count = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
+    landlord_type = serializers.SerializerMethodField(read_only=True)
+    landlord_type_label = serializers.SerializerMethodField(read_only=True)
+    landlord_verified = serializers.SerializerMethodField(read_only=True)
 
     # Amenity keys matching the Step 2/5 chips
     AMENITY_CHOICES = {
@@ -1089,6 +1105,35 @@ class RoomSerializer(serializers.ModelSerializer):
             return ""
         full_name = (user.get_full_name() or "").strip()
         return full_name or user.username
+    
+    
+    
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_type(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        return getattr(profile, "role_detail", "") or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_type_label(self, obj) -> str:
+        value = self.get_landlord_type(obj)
+
+        labels = {
+            "live_in_landlord": "Live-in landlord",
+            "live_out_landlord": "Live-out landlord",
+            "agent_broker": "Agency",
+        }
+
+        return labels.get(value, "")
+    
+    
+    
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_landlord_verified(self, obj) -> bool:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        return bool(getattr(profile, "advertiser_verified", False))
+    
 
     @extend_schema_field(OpenApiTypes.URI)
     def get_owner_avatar(self, obj) -> str | None:
@@ -1400,6 +1445,7 @@ class SearchFiltersSerializer(serializers.Serializer):
         choices=[
             "live_in_landlord",
             "live_out_landlord",
+            "agent_broker",
             "current_flatmate",
             "no_preference",
         ],

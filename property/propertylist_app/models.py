@@ -903,9 +903,14 @@ class Tenancy(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(12)]
     )
 
-    # confirmations (who confirmed + when)
+        # confirmations (who confirmed + when)
     landlord_confirmed_at = models.DateTimeField(null=True, blank=True)
     tenant_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # tenant is allowed to edit tenancy details only once before final confirmation
+    tenant_has_edited = models.BooleanField(default=False)
+
+    
 
     # if the other party proposes changes, we overwrite move_in_date/duration_months
     # and reset confirmations (controlled in serializer logic)
