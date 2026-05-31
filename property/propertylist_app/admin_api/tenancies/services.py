@@ -1,3 +1,5 @@
+
+
 from .selectors import (
     get_admin_tenancies_queryset,
     get_tenancy_stats,
@@ -15,3 +17,5 @@ def get_admin_tenancy_overview_data(params):
             for tenancy in queryset
         ],
     }
+
+

@@ -132,7 +132,7 @@ paths:
           description: ''
   /api/v1/admin/bookings/:
     get:
-      operationId: admin_bookings_retrieve
+      operationId: admin_bookings_overview
       tags:
       - admin
       security:
@@ -146,7 +146,7 @@ paths:
           description: ''
   /api/v1/admin/bookings/{booking_id}/:
     get:
-      operationId: admin_bookings_retrieve_2
+      operationId: admin_booking_detail
       parameters:
       - in: path
         name: booking_id
@@ -347,7 +347,7 @@ paths:
           description: ''
   /api/v1/admin/tenancies/:
     get:
-      operationId: admin_tenancies_retrieve
+      operationId: admin_tenancies_overview
       tags:
       - admin
       security:
@@ -358,6 +358,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminTenancyOverviewResponse'
+          description: ''
+  /api/v1/admin/tenancies/{tenancy_id}/:
+    get:
+      operationId: admin_tenancy_detail
+      parameters:
+      - in: path
+        name: tenancy_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTenancyDetailResponse'
           description: ''
   /api/v1/auth/login/:
     post:
@@ -6126,6 +6146,62 @@ components:
             type: array
             items:
               type: string
+      required:
+      - data
+      - message
+      - ok
+    AdminTenancyDetailData:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenancy_id:
+          type: string
+        status:
+          type: string
+        confirmation:
+          type: string
+        move_in_date:
+          type: string
+          format: date
+        duration_months:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        tenant:
+          type: object
+          additionalProperties: {}
+        landlord:
+          type: object
+          additionalProperties: {}
+        listing:
+          type: object
+          additionalProperties: {}
+      required:
+      - confirmation
+      - created_at
+      - duration_months
+      - id
+      - landlord
+      - listing
+      - move_in_date
+      - status
+      - tenancy_id
+      - tenant
+      - updated_at
+    AdminTenancyDetailResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminTenancyDetailData'
       required:
       - data
       - message

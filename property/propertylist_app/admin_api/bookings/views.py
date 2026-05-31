@@ -24,7 +24,8 @@ class AdminBookingOverviewView(APIView):
     permission_classes = [IsAdminUser]
 
     @extend_schema(
-        responses=AdminBookingOverviewResponseSerializer,
+    operation_id="admin_bookings_overview",
+    responses=AdminBookingOverviewResponseSerializer,
     )
     def get(self, request):
         data = get_admin_booking_overview_data(request.query_params)
@@ -40,6 +41,7 @@ class AdminBookingDetailView(APIView):
     permission_classes = [IsAdminUser]
 
     @extend_schema(
+        operation_id="admin_booking_detail",
         responses=AdminBookingDetailResponseSerializer,
     )
     def get(self, request, booking_id):

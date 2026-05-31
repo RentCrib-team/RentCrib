@@ -70,3 +70,66 @@ def serialize_admin_tenancy(tenancy):
         "status": tenancy.status,
         "created_at": tenancy.created_at,
     }
+    
+    
+    
+def get_tenancy_confirmation_status(tenancy):
+    if tenancy.landlord_confirmed_at and tenancy.tenant_confirmed_at:
+        return "confirmed"
+
+    return "pending"
+
+
+def get_admin_tenancy_detail(tenancy_id):
+    tenancy = (
+        Tenancy.objects
+        .select_related(
+            "tenant",
+            "tenant__profile",
+            "landlord",
+            "landlord__profile",
+            "room",
+            "room__property_owner",
+        )
+        .get(id=tenancy_id)
+    )
+
+    tenant_profile = getattr(tenancy.tenant, "profile", None)
+    landlord_profile = getattr(tenancy.landlord, "profile", None)
+    room = tenancy.room
+
+    return {
+        "id": tenancy.id,
+        "tenancy_id": f"T{tenancy.id:05d}",
+        "status": tenancy.status,
+        "confirmation": get_tenancy_confirmation_status(tenancy),
+        "move_in_date": tenancy.move_in_date,
+        "duration_months": tenancy.duration_months,
+        "created_at": tenancy.created_at,
+        "updated_at": tenancy.updated_at,
+
+        "tenant": {
+            "id": tenancy.tenant.id,
+            "name": tenancy.tenant.get_full_name() or tenancy.tenant.username,
+            "email": tenancy.tenant.email,
+            "phone": getattr(tenant_profile, "phone", None),
+            "avatar": tenant_profile.avatar.url if tenant_profile and tenant_profile.avatar else None,
+        },
+
+        "landlord": {
+            "id": tenancy.landlord.id,
+            "name": tenancy.landlord.get_full_name() or tenancy.landlord.username,
+            "email": tenancy.landlord.email,
+            "phone": getattr(landlord_profile, "phone", None),
+            "avatar": landlord_profile.avatar.url if landlord_profile and landlord_profile.avatar else None,
+        },
+
+        "listing": {
+            "id": room.id,
+            "title": room.title,
+            "property_type": room.property_type,
+            "price": str(room.price_per_month),
+            "owner": room.property_owner.get_full_name() or room.property_owner.username,
+            "description": room.description,
+        },
+    }    

@@ -35,3 +35,31 @@ class AdminTenancyOverviewResponseSerializer(serializers.Serializer):
     ok = serializers.BooleanField()
     message = serializers.CharField()
     data = AdminTenancyOverviewDataSerializer()
+    
+    
+    
+    
+class AdminTenancyDetailDataSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    tenancy_id = serializers.CharField()
+    status = serializers.CharField()
+    confirmation = serializers.CharField()
+    move_in_date = serializers.DateField()
+    duration_months = serializers.IntegerField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+    tenant = serializers.DictField()
+    landlord = serializers.DictField()
+    listing = serializers.DictField()
+
+
+class AdminTenancyDetailResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    message = serializers.CharField()
+    data = AdminTenancyDetailDataSerializer()
+
+
+
+
+
