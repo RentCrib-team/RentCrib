@@ -2105,13 +2105,25 @@ class ContactMessageSerializer(serializers.ModelSerializer):
 # Room Images / Messages / Bookings / Slots / Payments / Reports
 # --------------------
 class RoomImageSerializer(serializers.ModelSerializer):
-    # Use FileField so DRF/Pillow doesn't try to decode the image during tests
-    image = serializers.FileField()
+    # Keep upload handling safe, but return frontend-ready absolute image URL.
+    image = serializers.SerializerMethodField()
 
     class Meta:
         model = RoomImage
         fields = ["id", "room", "image", "status"]
         read_only_fields = ["room", "status"]
+
+    def get_image(self, obj):
+        if not obj.image:
+            return None
+
+        url = obj.image.url
+        request = self.context.get("request")
+
+        if request is not None:
+            return request.build_absolute_uri(url)
+
+        return url
 
     # generate thumbnails after upload
     def create(self, validated_data):

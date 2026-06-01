@@ -638,7 +638,11 @@ class RoomPhotoUploadView(APIView):
         """Return only approved images for a room (for grids on Step 4/5, room cards, etc.)."""
         room = get_object_or_404(Room, pk=pk)
         photos = RoomImage.objects.approved().filter(room=room)
-        data = RoomImageSerializer(photos, many=True).data
+        data = RoomImageSerializer(
+                    photos,
+                    many=True,
+                    context={"request": request},
+                    ).data
 
         return ok_response(data, status_code=status.HTTP_200_OK)
 
@@ -733,7 +737,10 @@ class RoomPhotoUploadView(APIView):
         )
 
         return ok_response(
-            RoomImageSerializer(photo).data,
+            RoomImageSerializer(
+            photo,
+            context={"request": request},
+            ).data,
             message="Room photo uploaded successfully.",
             status_code=status.HTTP_201_CREATED,
         )               
