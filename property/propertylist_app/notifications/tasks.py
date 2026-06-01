@@ -204,11 +204,13 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
     Returns number of bookings processed.
     """
     now = timezone.now()
-    window_start = now - timedelta(hours=hours_back)
+    completion_delay = timedelta(hours=1)
+    completion_cutoff = now - completion_delay
+    window_start = completion_cutoff - timedelta(hours=hours_back)
 
     qs = (
         Booking.objects.filter(is_deleted=False, canceled_at__isnull=True)
-        .filter(end__gte=window_start, end__lte=now)
+        .filter(end__gte=window_start, end__lte=completion_cutoff)
         .select_related("user", "room")
     )
 
