@@ -286,10 +286,15 @@ class RoomAV(APIView):
         # ---- Step 1 Draft-friendly defaults ----
         from django.utils import timezone
         now_token = timezone.now().strftime("%Y%m%d%H%M%S%f")
-        data.setdefault("title", f"Draft listing {request.user.id}-{now_token}")
-        data.setdefault("description", "Draft listing in progress.")
-        #data.setdefault("status", "hidden")  # draft is hidden from public listings
 
+        data.setdefault("title", f"Draft listing {request.user.id}-{now_token}")
+        data.setdefault(
+            "description",
+            "This is a draft room listing created from the first step of the listing wizard. "
+            "The landlord will complete the full title, description, photos, and remaining listing details later."
+        )
+        data.setdefault("property_type", "flat")
+        # Do not force status='hidden'. Draft state is already handled by paid_until=None.
         # ---- Step 1 validation for fields actually on Step 1 ----
         price = data.get("price_per_month")
         if price in (None, "", []):
