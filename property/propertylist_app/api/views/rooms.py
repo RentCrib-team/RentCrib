@@ -22,6 +22,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 
 #DRF
 from rest_framework import generics, permissions, serializers, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import (
@@ -275,14 +276,21 @@ class RoomAV(APIView):
 
         - Creates a Room owned by the logged-in user.
         - `action` can be "next" or "save_close" – backend treats them the same;
-          the frontend decides what to do next.
+        the frontend decides what to do next.
         """
         data = request.data.copy()
 
         # Ignore wizard action flag ("next" / "save_close")
         data.pop("action", None)
 
-        # ---- Basic price validation for the tests ----
+        # ---- Step 1 Draft-friendly defaults ----
+        from django.utils import timezone
+        now_token = timezone.now().strftime("%Y%m%d%H%M%S%f")
+        data.setdefault("title", f"Draft listing {request.user.id}-{now_token}")
+        data.setdefault("description", "Draft listing in progress.")
+        #data.setdefault("status", "hidden")  # draft is hidden from public listings
+
+        # ---- Step 1 validation for fields actually on Step 1 ----
         price = data.get("price_per_month")
         if price in (None, "", []):
             return Response(
@@ -303,7 +311,7 @@ class RoomAV(APIView):
                     "errors": {"price_per_month": ["A valid number is required."]},
                 },
                 status=status.HTTP_400_BAD_REQUEST,
-)
+            )
         if price_value <= 0:
             return Response(
                 {
@@ -339,7 +347,6 @@ class RoomAV(APIView):
             message="Room created successfully.",
             status_code=status.HTTP_201_CREATED,
         )
-            
 
 class RoomDetailAV(APIView):
     permission_classes = [IsOwnerOrReadOnly]

@@ -190,23 +190,25 @@ def test_step1_negative_price_returns_400(auth_client, valid_step1_payload):
 # -------------------------------------------------
 
 @pytest.mark.django_db
-def test_step1_missing_title_returns_400(auth_client, valid_step1_payload):
+def test_step1_missing_title_creates_draft(auth_client, valid_step1_payload):
     """
-    Title is required.
+    Title is not collected on Step 1.
+
+    The backend should create a draft listing title automatically so the
+    frontend can create the room first, then complete later steps with PATCH.
     """
     url = reverse("api:room-list")
 
-    bad_payload = valid_step1_payload.copy()
-    bad_payload.pop("title")
-    bad_payload["action"] = "next"
+    payload = valid_step1_payload.copy()
+    payload.pop("title", None)
+    payload["action"] = "next"
 
-    response = auth_client.post(url, bad_payload, format="json")
+    response = auth_client.post(url, payload, format="json")
 
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    # reason: A4 envelope stores field-level validation errors under field_errors
-    assert response.data.get("ok") is False
-    assert response.data.get("code") == "validation_error"
-    assert "title" in response.data.get("field_errors", {})
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["ok"] is True
+    assert response.data["data"]["id"]
+    assert response.data["data"]["title"].startswith("Draft listing")
 
 
 

@@ -10181,7 +10181,7 @@ components:
           readOnly: true
         image:
           type: string
-          format: uri
+          readOnly: true
         status:
           enum:
           - pending
