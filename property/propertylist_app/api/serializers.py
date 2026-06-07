@@ -1560,14 +1560,14 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
 
     def validate_email(self, value):
-        email = (value or "").strip().lower()
+                email = normalise_email(value)
 
-        if User.objects.filter(email__iexact=email).exists():
-            raise serializers.ValidationError(
-                "Unable to complete registration with the provided credentials."
-            )
+                if User.objects.filter(email__iexact=email).exists():
+                    raise serializers.ValidationError(
+                        "Unable to complete registration with the provided credentials."
+                    )
 
-        return email
+                return email
 
 
     def validate_username(self, value):
