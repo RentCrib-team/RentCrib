@@ -329,7 +329,12 @@ class RegistrationView(generics.CreateAPIView):
             )
 
         # 2) Existing unverified email should allow OTP resend instead of trapping the user.
-        email = normalise_email(request.data.get("email") or "")
+        raw_email = request.data.get("email") or ""
+
+        try:
+            email = normalise_email(raw_email)
+        except Exception:
+            email = ""
         existing_user = (
             get_user_model()
             .objects.filter(email__iexact=email)
