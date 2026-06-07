@@ -5,7 +5,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from propertylist_app.models import UserProfile, EmailOTP
-
+from django.contrib.auth import get_user_model
 
 @pytest.fixture
 def api():
@@ -97,15 +97,56 @@ def test_register_invalid_role_400(api):
 
 
 @pytest.mark.django_db
-def test_register_duplicate_email_400(api):
+def test_register_duplicate_verified_email_400(api):
     res1 = api.post(register_url(), _register_payload(), format="json")
     assert res1.status_code == 201, getattr(res1, "data", res1.content)
+
+    user = get_user_model().objects.get(email=_register_payload()["email"])
+    profile = user.profile
+    profile.email_verified = True
+    profile.save(update_fields=["email_verified"])
 
     dup = _register_payload()
     dup["username"] = "anotheruser"
 
     res2 = api.post(register_url(), dup, format="json")
     assert res2.status_code == 400
+    
+    
+    
+    
+@pytest.mark.django_db
+def test_register_duplicate_unverified_email_resends_otp(api):
+    res1 = api.post(register_url(), _register_payload(), format="json")
+    assert res1.status_code == 201, getattr(res1, "data", res1.content)
+
+    user = get_user_model().objects.get(email=_register_payload()["email"])
+    assert user.profile.email_verified is False
+
+    old_active_otp = EmailOTP.objects.filter(
+        user=user,
+        used_at__isnull=True,
+    ).order_by("-created_at").first()
+    assert old_active_otp is not None
+
+    dup = _register_payload()
+    dup["username"] = "anotheruser"
+
+    res2 = api.post(register_url(), dup, format="json")
+    assert res2.status_code == 200, getattr(res2, "data", res2.content)
+    assert res2.data["data"]["need_otp"] is True
+
+    old_active_otp.refresh_from_db()
+    assert old_active_otp.used_at is not None
+
+    new_active_otp = EmailOTP.objects.filter(
+        user=user,
+        used_at__isnull=True,
+    ).order_by("-created_at").first()
+    assert new_active_otp is not None
+    assert new_active_otp.id != old_active_otp.id
+
+    
 
 
 @pytest.mark.django_db

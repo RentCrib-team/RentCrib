@@ -50,7 +50,7 @@ from propertylist_app.services.security import (
     is_locked_out,
     register_login_failure,
 )
-from propertylist_app.validators import ensure_idempotency
+from propertylist_app.validators import ensure_idempotency, normalise_email
 from propertylist_app.api.throttling import (
     LoginScopedThrottle,
     PasswordResetScopedThrottle,
@@ -328,10 +328,61 @@ class RegistrationView(generics.CreateAPIView):
                 },
             )
 
-        # 2) Duplicate email must give 400
-        email = (request.data.get("email") or "").strip()
-        if email and get_user_model().objects.filter(email__iexact=email).exists():
-           return error_response(
+        # 2) Existing unverified email should allow OTP resend instead of trapping the user.
+        email = normalise_email(request.data.get("email") or "")
+        existing_user = (
+            get_user_model()
+            .objects.filter(email__iexact=email)
+            .first()
+            if email
+            else None
+        )
+
+        if existing_user:
+            profile, _ = UserProfile.objects.get_or_create(user=existing_user)
+
+            if not getattr(profile, "email_verified", False):
+                code = get_random_string(6, allowed_chars="0123456789")
+
+                EmailOTP.objects.filter(
+                    user=existing_user,
+                    purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
+                    used_at__isnull=True,
+                ).update(used_at=timezone.now())
+
+                EmailOTP.create_for(
+                    existing_user,
+                    code,
+                    ttl_minutes=settings.OTP_EXPIRY_MINUTES,
+                    purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
+                )
+
+                mail.send_mail(
+                    subject="Verify your email (RentCrib)",
+                    message=f"Your verification code is: {code}",
+                    from_email=None,
+                    recipient_list=[existing_user.email],
+                    fail_silently=True,
+                )
+
+                masked = (
+                    existing_user.email[:2]
+                    + "â€¢â€¢â€¢@"
+                    + existing_user.email.split("@")[-1]
+                )
+
+                return ok_response(
+                    {
+                        "id": existing_user.id,
+                        "email": existing_user.email,
+                        "email_masked": masked,
+                        "need_otp": True,
+                    },
+                    message="Account already exists but is not verified. A new verification code has been sent.",
+                    status_code=status.HTTP_200_OK,
+                )
+
+            return error_response(
                 message="Invalid input.",
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="validation_error",
@@ -904,7 +955,7 @@ class PasswordResetRequestView(APIView):
         email = ser.validated_data["email"].strip()
         UserModel = get_user_model()
 
-        # Always return a generic response (don’t reveal if email exists)
+        # Always return a generic response (donâ€™t reveal if email exists)
         generic_response = ok_response(
             {"detail": "If that email exists, a reset code has been sent."},
             status_code=status.HTTP_200_OK,
