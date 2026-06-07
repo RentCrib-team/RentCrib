@@ -1658,7 +1658,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         EmailOTP.create_for(user, code, ttl_minutes=10)
 
         mail.send_mail(
-            subject="Verify your email (RentOut)",
+            subject="Welcome to RentCrib – verify your email",
             message=f"Your verification code is: {code}",
             from_email=None,
             recipient_list=[user.email],
