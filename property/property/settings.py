@@ -465,26 +465,24 @@ ALLOWED_IMAGE_FORMATS = {"JPEG", "JPG", "PNG", "WEBP"}
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "40000000"))  # 40 MP safety fuse
 
 # -----------------------------
-# Optional S3 storage (toggle via env)
+# Optional S3-compatible media storage, including Cloudflare R2
 # -----------------------------
 USE_S3 = os.getenv("USE_S3", "false").lower() in {"1", "true", "yes"}
 
 if USE_S3:
     INSTALLED_APPS += ["storages"]  # requires django-storages
+
     DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 
     AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 
-    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
-        raise ImproperlyConfigured("AWS credentials must be set when USE_S3=True")
-
-    if not AWS_STORAGE_BUCKET_NAME:
-        raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set when USE_S3=True")
-    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "eu-west-2")
+    AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL", "")
+    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "auto")
     AWS_S3_SIGNATURE_VERSION = "s3v4"
-    AWS_S3_ADDRESSING_STYLE = "virtual"
+    AWS_S3_ADDRESSING_STYLE = os.getenv("AWS_S3_ADDRESSING_STYLE", "path")
+
     AWS_S3_FILE_OVERWRITE = False
     AWS_DEFAULT_ACL = None
 
@@ -492,11 +490,19 @@ if USE_S3:
     AWS_QUERYSTRING_EXPIRE = int(os.getenv("AWS_QUERYSTRING_EXPIRE", "900"))
 
     AWS_S3_OBJECT_PARAMETERS = {
-        "ServerSideEncryption": "AES256",
         "CacheControl": "max-age=86400, s-maxage=86400",
     }
 
     AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN", "")
+
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        raise ImproperlyConfigured("AWS credentials must be set when USE_S3=True")
+
+    if not AWS_STORAGE_BUCKET_NAME:
+        raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set when USE_S3=True")
+
+    if not AWS_S3_ENDPOINT_URL:
+        raise ImproperlyConfigured("AWS_S3_ENDPOINT_URL must be set when USE_S3=True")
 
 # -----------------------------
 # Webhook secrets (read from environment)
