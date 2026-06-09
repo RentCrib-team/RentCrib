@@ -705,6 +705,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
     # extra fields for Find a Room cards
     owner_name = serializers.SerializerMethodField(read_only=True)
+    owner_username = serializers.SerializerMethodField(read_only=True)
     owner_avatar = serializers.SerializerMethodField(read_only=True)
     main_photo = serializers.SerializerMethodField(read_only=True)
     photo_count = serializers.SerializerMethodField(read_only=True)
@@ -755,6 +756,10 @@ class RoomSerializer(serializers.ModelSerializer):
         fields = "__all__"
         
         
+    
+    
+    
+    
     
     
     def _apply_geocode(self, room):
@@ -812,6 +817,15 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return room
     
+    
+    
+    
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_username(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        if not user:
+            return ""
+        return user.username or ""
     
     
         
