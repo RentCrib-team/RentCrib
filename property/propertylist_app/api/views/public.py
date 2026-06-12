@@ -1208,7 +1208,15 @@ class NearbyRoomsView(generics.ListAPIView):
 
         lat, lon = geocode_postcode_cached(postcode_raw)
 
-        base_qs = Room.objects.alive().exclude(latitude__isnull=True).exclude(longitude__isnull=True)
+        today = timezone.now().date()
+
+        base_qs = (
+            Room.objects.alive()
+            .filter(status="active")
+            .filter(Q(paid_until__isnull=True) | Q(paid_until__gte=today))
+            .exclude(latitude__isnull=True)
+            .exclude(longitude__isnull=True)
+        )
 
         distances = []
         for r in base_qs.only("id", "latitude", "longitude"):
@@ -1220,7 +1228,7 @@ class NearbyRoomsView(generics.ListAPIView):
         self._ordered_ids = [rid for rid, _ in distances]
         self._distance_by_id = {rid: d for rid, d in distances}
 
-        return Room.objects.alive().filter(id__in=self._ordered_ids or [])
+        return base_qs.filter(id__in=self._ordered_ids or [])
 
 
 
