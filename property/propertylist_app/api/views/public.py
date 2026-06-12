@@ -414,10 +414,10 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
             )
         )
 
+
         today = timezone.now().date()
-        qs = qs.filter(status="active").filter(
-            Q(paid_until__isnull=True) | Q(paid_until__gte=today)
-        )
+        
+        qs = qs.filter(status="active", paid_until__gte=today)
 
         # ----- keyword search -----
         if q_text:
@@ -1212,8 +1212,7 @@ class NearbyRoomsView(generics.ListAPIView):
 
         base_qs = (
             Room.objects.alive()
-            .filter(status="active")
-            .filter(Q(paid_until__isnull=True) | Q(paid_until__gte=today))
+            .filter(status="active", paid_until__gte=today)
             .exclude(latitude__isnull=True)
             .exclude(longitude__isnull=True)
         )
