@@ -1258,9 +1258,9 @@ class StartThreadFromRoomView(APIView):
 
         existing = (
             MessageThread.objects
-            .filter(participants__in=users)
-            .annotate(num_participants=Count("participants", distinct=True))
-            .filter(num_participants=2)
+            .filter(participants=room.property_owner)
+            .filter(participants=request.user)
+            .distinct()
             .first()
         )
 
