@@ -50,7 +50,7 @@ def _google_vision_safesearch_allows(uploaded_file) -> bool:
     """
     Uses Google Cloud Vision SafeSearch.
 
-    True  -> safe enough to auto-approve
+    True  -> safe enough to continue moderation
     False -> keep pending for manual/admin review
     """
     api_key = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
@@ -93,7 +93,6 @@ def _google_vision_safesearch_allows(uploaded_file) -> bool:
             return False
 
         safe = response_data.get("safeSearchAnnotation") or {}
-
         blocked_values = {"LIKELY", "VERY_LIKELY"}
 
         if safe.get("adult") in blocked_values:
@@ -105,7 +104,6 @@ def _google_vision_safesearch_allows(uploaded_file) -> bool:
         if safe.get("racy") in blocked_values:
             return False
 
-        # These are weaker signals, so only block at the strongest level.
         if safe.get("medical") == "VERY_LIKELY":
             return False
 
@@ -115,7 +113,158 @@ def _google_vision_safesearch_allows(uploaded_file) -> bool:
         return True
 
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, Exception):
-        # Production-safe behaviour: if AI verification fails, do not auto-approve.
+        return False
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+
+
+def _extract_json_object(text: str) -> dict:
+    """
+    Gemini may return clean JSON or JSON wrapped in markdown.
+    This safely extracts the first JSON object.
+    """
+    if not text:
+        return {}
+
+    cleaned = text.strip()
+
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+
+    if start == -1 or end == -1 or end <= start:
+        return {}
+
+    try:
+        return json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+
+
+def _gemini_property_photo_allows(uploaded_file) -> bool:
+    """
+    Uses Gemini to check whether the image is suitable for a property listing.
+
+    True  -> likely property/room photo
+    False -> keep pending for admin/manual review
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+    # Local/test/dev fallback: if no key is configured, do not break uploads.
+    if not api_key:
+        return True
+
+    try:
+        uploaded_file.seek(0)
+        image_content = base64.b64encode(uploaded_file.read()).decode("utf-8")
+        mime_type = getattr(uploaded_file, "content_type", "") or "image/jpeg"
+
+        prompt = """
+You are moderating images for a UK room/property rental marketplace.
+
+Decide whether this image is suitable as a property listing photo.
+
+Accept if it clearly shows:
+- bedroom
+- kitchen
+- bathroom
+- living room
+- dining room
+- hallway
+- garden
+- exterior of a property/building
+- balcony
+- utility room
+- shared household space
+
+Reject if it mainly shows:
+- selfie or person portrait
+- car or vehicle
+- meme
+- screenshot
+- document
+- logo/advert
+- animal only
+- food only
+- unrelated object
+- random outdoor scene not clearly linked to a property
+
+Return JSON only in this exact shape:
+{
+  "is_property_photo": true,
+  "category": "bedroom",
+  "confidence": 90,
+  "reason": "short reason"
+}
+""".strip()
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": image_content,
+                            }
+                        },
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0,
+                "maxOutputTokens": 200,
+            },
+        }
+
+        model = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.5-flash").strip()
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent"
+        )
+
+        req = urlrequest.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+            method="POST",
+        )
+
+        with urlrequest.urlopen(req, timeout=12) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return False
+
+        parts = (
+            candidates[0]
+            .get("content", {})
+            .get("parts", [])
+        )
+
+        text = ""
+        for part in parts:
+            if "text" in part:
+                text += part.get("text") or ""
+
+        result = _extract_json_object(text)
+
+        is_property_photo = bool(result.get("is_property_photo"))
+        confidence = int(result.get("confidence") or 0)
+
+        return is_property_photo and confidence >= 65
+
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, Exception):
         return False
     finally:
         try:
@@ -135,6 +284,9 @@ def should_auto_approve_upload(uploaded_file) -> bool:
         return False
 
     if not _google_vision_safesearch_allows(uploaded_file):
+        return False
+
+    if not _gemini_property_photo_allows(uploaded_file):
         return False
 
     return True
