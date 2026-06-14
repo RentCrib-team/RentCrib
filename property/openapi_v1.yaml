@@ -8313,6 +8313,9 @@ components:
         owner_name:
           type: string
           readOnly: true
+        owner_username:
+          type: string
+          readOnly: true
         owner_avatar:
           type: string
           format: uri
@@ -9466,6 +9469,9 @@ components:
         owner_name:
           type: string
           readOnly: true
+        owner_username:
+          type: string
+          readOnly: true
         owner_avatar:
           type: string
           format: uri
@@ -10010,6 +10016,7 @@ components:
       - main_photo
       - owner_avatar
       - owner_name
+      - owner_username
       - photo_count
       - price_per_month
       - property_owner

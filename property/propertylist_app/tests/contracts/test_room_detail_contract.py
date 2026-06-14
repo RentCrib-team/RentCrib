@@ -154,6 +154,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "number_rating",
         "owner_avatar",
         "owner_name",
+        "owner_username",
         "paid_until",
         "parking_available",
         "pets_allowed",

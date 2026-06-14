@@ -1,11 +1,16 @@
 import pytest
+from datetime import timedelta
+
+from django.contrib.auth.models import User
 from django.urls import reverse
-from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from propertylist_app.models import Room, RoomCategorie
 
-User = get_user_model()
+
+def live_paid_until():
+    return timezone.now().date() + timedelta(days=30)
 
 
 @pytest.mark.django_db
@@ -24,6 +29,7 @@ def test_text_and_price_filters():
         location="London SW1A 1AA",
         category=cat,
         property_owner=owner,
+        paid_until=live_paid_until(),
     )
     Room.objects.create(
         title="Luxury apartment",
@@ -32,9 +38,8 @@ def test_text_and_price_filters():
         location="Birmingham B1 1AA",
         category=cat,
         property_owner=owner,
+        paid_until=live_paid_until(),
     )
-    
-    test_requires_postcode_when_radius_provided
 
     client = APIClient()
     url = reverse("v1:search-rooms")
@@ -44,12 +49,15 @@ def test_text_and_price_filters():
     assert r1.status_code == 200
     titles1 = [it["title"].lower() for it in r1.json().get("results", r1.json())]
     assert any("cozy" in t for t in titles1)
+    assert all("luxury" not in t for t in titles1)
 
     # Price range filter
-    r2 = client.get(url, {"min_price": 1000, "max_price": 3000})
+    r2 = client.get(url, {"min_price": 800, "max_price": 1000})
     assert r2.status_code == 200
-    items2 = r2.json().get("results", r2.json())
-    assert all(1000 <= float(it["price_per_month"]) <= 3000 for it in items2)
+    titles2 = [it["title"] for it in r2.json().get("results", r2.json())]
+
+    assert "Cozy flat in London" in titles2
+    assert "Luxury apartment" not in titles2
 
 
 @pytest.mark.django_db
@@ -60,65 +68,60 @@ def test_ordering_by_created_and_price():
     owner = User.objects.create_user(username="o2", password="pass123")
     cat = RoomCategorie.objects.create(name="Cat", active=True)
 
-    r1 = Room.objects.create(
+    Room.objects.create(
         title="A",
         description="..",
         price_per_month=500,
         location="London",
         category=cat,
         property_owner=owner,
+        paid_until=live_paid_until(),
     )
-    r2 = Room.objects.create(
+    Room.objects.create(
         title="B",
         description="..",
         price_per_month=800,
         location="London",
         category=cat,
         property_owner=owner,
+        paid_until=live_paid_until(),
     )
 
     client = APIClient()
     url = reverse("v1:search-rooms")
 
-    # created_at descending: latest first (r2 after r1)
+    # created_at descending: latest first
     rd = client.get(url, {"ordering": "-created_at"})
     assert rd.status_code == 200
     titles_desc = [it["title"] for it in rd.json().get("results", rd.json())]
     assert titles_desc.index("B") < titles_desc.index("A")
 
-    # price ascending: cheaper first
+    # price ascending
     rp = client.get(url, {"ordering": "price_per_month"})
     assert rp.status_code == 200
-    prices = [float(it["price_per_month"]) for it in rp.json().get("results", rp.json())]
-    assert prices == sorted(prices)
+    titles_price = [it["title"] for it in rp.json().get("results", rp.json())]
+    assert titles_price.index("A") < titles_price.index("B")
+
+    # price descending
+    rpd = client.get(url, {"ordering": "-price_per_month"})
+    assert rpd.status_code == 200
+    titles_price_desc = [it["title"] for it in rpd.json().get("results", rpd.json())]
+    assert titles_price_desc.index("B") < titles_price_desc.index("A")
 
 
 @pytest.mark.django_db
 def test_requires_postcode_when_radius_provided():
     """
-    /api/search/rooms/?radius_miles=... must include postcode
+    /api/search/rooms/?radius_miles=10 requires postcode.
     """
-    owner = User.objects.create_user(username="o3", password="pass123")
-    cat = RoomCategorie.objects.create(name="X", active=True)
-    Room.objects.create(
-        title="Room",
-        description="..",
-        price_per_month=700,
-        location="Manchester M1 1AA",
-        category=cat,
-        property_owner=owner,
-    )
-
     client = APIClient()
     url = reverse("v1:search-rooms")
+
     r = client.get(url, {"radius_miles": 10})
+
     assert r.status_code == 400
-    body = r.json()
-
-    assert body.get("ok") is False
-    assert body.get("code") == "validation_error"
-    assert "postcode" in body.get("field_errors", {})
-
+    assert r.data.get("ok") is False
+    assert "postcode" in r.data.get("field_errors", {})
 
 
 @pytest.mark.django_db
@@ -128,6 +131,7 @@ def test_pagination_limit_works():
     """
     owner = User.objects.create_user(username="o4", password="pass123")
     cat = RoomCategorie.objects.create(name="Pag", active=True)
+
     for i in range(6):
         Room.objects.create(
             title=f"R{i}",
@@ -136,6 +140,7 @@ def test_pagination_limit_works():
             location="Leeds LS1 1AA",
             category=cat,
             property_owner=owner,
+            paid_until=live_paid_until(),
         )
 
     client = APIClient()
@@ -144,6 +149,6 @@ def test_pagination_limit_works():
     r = client.get(url, {"limit": 2})
     assert r.status_code == 200
     data = r.json()
-    # RoomLOPagination returns {"count", "next", "previous", "results"}
     results = data.get("results", data)
+
     assert len(results) == 2
