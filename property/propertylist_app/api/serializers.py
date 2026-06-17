@@ -793,12 +793,104 @@ class RoomSerializer(serializers.ModelSerializer):
             return
     
     
+    def _sync_availability_slots(self, room):
+            """
+            Convert landlord-selected viewing dates/times into real bookable slots.
+
+            Example:
+            dates: ["2026-06-18"]
+            from: 07:00
+            to: 17:00
+
+            Creates:
+            07:00-07:15
+            07:15-07:30
+            etc.
+
+            Already-booked slots are not deleted.
+            """
+            dates = room.view_available_custom_dates or []
+            start_time = room.availability_from_time
+            end_time = room.availability_to_time
+
+            if room.view_available_days_mode != "custom":
+                return
+
+            if not dates or not start_time or not end_time:
+                return
+
+            slot_minutes = 15
+            desired_slots = []
+
+            for d in dates:
+                if isinstance(d, str):
+                    day = datetime.fromisoformat(d).date()
+                else:
+                    day = d
+
+                current = datetime.combine(day, start_time)
+                finish = datetime.combine(day, end_time)
+
+                if timezone.is_naive(current):
+                    current = timezone.make_aware(current)
+
+                if timezone.is_naive(finish):
+                    finish = timezone.make_aware(finish)
+
+                while current + timedelta(minutes=slot_minutes) <= finish:
+                    slot_end = current + timedelta(minutes=slot_minutes)
+                    desired_slots.append((current, slot_end))
+                    current = slot_end
+
+            desired_set = set(desired_slots)
+
+            # Remove only future unbooked slots that are no longer part of landlord's selected availability.
+            future_slots = AvailabilitySlot.objects.filter(
+                room=room,
+                end__gt=timezone.now(),
+            )
+
+            for slot in future_slots:
+                has_booking = Booking.objects.filter(
+                    slot=slot,
+                    canceled_at__isnull=True,
+                    is_deleted=False,
+                ).exists()
+
+                if has_booking:
+                    continue
+
+                if (slot.start, slot.end) not in desired_set:
+                    slot.delete()
+
+            existing_set = set(
+                AvailabilitySlot.objects.filter(room=room).values_list("start", "end")
+            )
+
+            new_slots = [
+                AvailabilitySlot(
+                    room=room,
+                    start=start,
+                    end=end,
+                    max_bookings=1,
+                )
+                for start, end in desired_slots
+                if (start, end) not in existing_set
+            ]
+
+            AvailabilitySlot.objects.bulk_create(new_slots, ignore_conflicts=True)    
+        
+        
+        
+    
     def create(self, validated_data):
         room = super().create(validated_data)
 
         self._apply_geocode(room)
 
         room.save(update_fields=["latitude", "longitude"])
+
+        self._sync_availability_slots(room)
 
         return room
     
@@ -814,6 +906,8 @@ class RoomSerializer(serializers.ModelSerializer):
             self._apply_geocode(room)
 
             room.save(update_fields=["latitude", "longitude"])
+
+        self._sync_availability_slots(room)
 
         return room
     
