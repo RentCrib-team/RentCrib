@@ -7137,6 +7137,15 @@ components:
       properties:
         token:
           type: string
+        role:
+          enum:
+          - landlord
+          - seeker
+          type: string
+          description: |-
+            * `landlord` - Landlord
+            * `seeker` - Seeker
+          x-spec-enum-id: 0ef412fbe3235c72
       required:
       - token
     GoogleRegisterResponse:
