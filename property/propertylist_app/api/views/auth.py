@@ -410,6 +410,30 @@ class RegistrationView(generics.CreateAPIView):
         )
 
 
+
+def build_login_payload(user):
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    refresh = RefreshToken.for_user(user)
+    access_token = refresh.access_token
+
+    access_exp = datetime.fromtimestamp(int(access_token["exp"]), tz=dt_timezone.utc)
+    refresh_exp = datetime.fromtimestamp(int(refresh["exp"]), tz=dt_timezone.utc)
+
+    return {
+        "tokens": {
+            "access": str(access_token),
+            "refresh": str(refresh),
+            "access_expires_at": access_exp,
+            "refresh_expires_at": refresh_exp,
+        },
+        "user": UserSerializer(user).data,
+        "profile": UserProfileSerializer(profile).data,
+    }
+
+
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class GoogleRegisterView(APIView):
     permission_classes = [AllowAny]
@@ -510,13 +534,8 @@ class GoogleRegisterView(APIView):
             profile.role = role
             profile.save(update_fields=["role"])
 
-        refresh = RefreshToken.for_user(user)
-
         return ok_response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-            },
+            build_login_payload(user),
             message="Login successful",
             status_code=status.HTTP_200_OK,
         )
@@ -594,13 +613,8 @@ class AppleRegisterView(APIView):
         # which checks user.profile.email_verified
         mark_profile_email_verified(user)
 
-        refresh = RefreshToken.for_user(user)
-
         return ok_response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-            },
+            build_login_payload(user),
             message="Login successful",
             status_code=status.HTTP_200_OK,
         )
