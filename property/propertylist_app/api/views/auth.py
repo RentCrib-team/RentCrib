@@ -420,6 +420,10 @@ class GoogleRegisterView(APIView):
             name="GoogleRegisterRequest",
             fields={
                 "token": serializers.CharField(),
+                "role": serializers.ChoiceField(
+                    choices=[("landlord", "Landlord"), ("seeker", "Seeker")],
+                    required=False,
+                ),
             },
         ),
         responses={
@@ -452,6 +456,14 @@ class GoogleRegisterView(APIView):
     )
     def post(self, request, *args, **kwargs):
         token = request.data.get("token")
+        role = (request.data.get("role") or "").strip().lower()
+
+        if role and role not in {"landlord", "seeker"}:
+            return error_response(
+                message="Invalid role",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="bad_request",
+            )
 
         if not token:
             return error_response(
@@ -490,9 +502,13 @@ class GoogleRegisterView(APIView):
             },
         )
 
-        # Keep social auth consistent with the main login flow,
-        # which checks user.profile.email_verified
-        mark_profile_email_verified(user)
+        profile = mark_profile_email_verified(user)
+
+        # Apply role only for newly created Google accounts.
+        # Existing users keep their current role.
+        if created and role:
+            profile.role = role
+            profile.save(update_fields=["role"])
 
         refresh = RefreshToken.for_user(user)
 
