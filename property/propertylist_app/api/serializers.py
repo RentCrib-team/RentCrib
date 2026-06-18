@@ -2539,7 +2539,11 @@ class AvailabilitySlotSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_full(self, obj) -> bool:
-            return bool(obj.is_full)
+        active_bookings = obj.bookings.filter(
+            canceled_at__isnull=True,
+            is_deleted=False,
+        ).count()
+        return active_bookings >= obj.max_bookings
 
 
 
