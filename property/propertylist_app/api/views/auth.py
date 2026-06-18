@@ -930,6 +930,13 @@ class TokenRefreshView(APIView):
 
         try:
             refresh = RefreshToken(refresh_str)
+
+            user_id = refresh.get("user_id")
+            User = get_user_model()
+
+            if not user_id or not User.objects.filter(id=user_id, is_active=True).exists():
+                raise ValidationError({"refresh": "Invalid or expired refresh token."})
+
             access_token = refresh.access_token
 
             access_exp = datetime.fromtimestamp(int(access_token["exp"]), tz=dt_timezone.utc)
