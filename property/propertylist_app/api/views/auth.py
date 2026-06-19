@@ -497,10 +497,28 @@ class GoogleRegisterView(APIView):
             )
 
         try:
-            idinfo = views_mod.id_token.verify_oauth2_token(
-                token,
-                google_requests.Request(),
-                settings.GOOGLE_WEB_CLIENT_ID,
+            idinfo = None
+            last_error = None
+
+            for client_id in settings.GOOGLE_ALLOWED_CLIENT_IDS:
+                try:
+                    idinfo = views_mod.id_token.verify_oauth2_token(
+                        token,
+                        google_requests.Request(),
+                        client_id,
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+
+            if idinfo is None:
+                raise last_error
+
+        except Exception:
+            return error_response(
+                message="Invalid Google token",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
             )
         except Exception:
             return error_response(
