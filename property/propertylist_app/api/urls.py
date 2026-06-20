@@ -19,7 +19,7 @@ from .views.profile import DeleteAccountRequestView, DeleteAccountCancelView
 from propertylist_app.api.views import (
     # Rooms & Categories
     RoomAV, RoomDetailAV, RoomListGV, ModerationReportModerateActionView,
-    RoomCategorieAV, RoomCategorieDetailAV, RoomPreviewView,
+    RoomCategorieAV, RoomCategorieDetailAV, RoomPreviewView,  CreateViewingBookingView,
 
     # Reviews
     UserReviewsView,UserReviewSummaryView, ReviewCreateView, ReviewListView, ReviewDetailView,
@@ -225,6 +225,16 @@ urlpatterns = [
     # Do not confuse with the GDPR erasure flow below.
     path("users/me/delete-account/", DeleteAccountRequestView.as_view(), name="user-delete-account"),
     path("users/me/delete-account/cancel/", DeleteAccountCancelView.as_view(), name="user-delete-account-cancel"),
+
+
+
+
+    path(
+    "bookings/viewing/",
+    CreateViewingBookingView.as_view(),
+    name="create-viewing-booking"
+        ),
+
 
 
 

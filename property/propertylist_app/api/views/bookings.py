@@ -120,6 +120,77 @@ def create_booking(request):
 
 
 
+# propertylist_app/api/views/bookings.py
+@extend_schema(
+    request={
+        "type": "object",
+        "properties": {
+            "slot_id": {"type": "integer"},
+            "room_id": {"type": "integer"},
+            "start": {"type": "string", "format": "date-time"},
+        },
+        "required": [],
+    },
+    responses={
+        200: {
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "message": {"type": "string"},
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "room_id": {"type": "integer"},
+                        "start": {"type": "string"},
+                        "status": {"type": "string"},
+                    },
+                },
+            },
+        }
+    }
+)
+class CreateViewingBookingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        slot_id = request.data.get("slot_id")
+        room_id = request.data.get("room_id")
+        start = request.data.get("start")
+
+        if slot_id:
+            slot = AvailabilitySlot.objects.get(id=slot_id)
+
+            booking = Booking.objects.create(
+                user=request.user,
+                room=slot.room,
+                start=slot.start,
+                end=slot.end,
+                status="confirmed"
+            )
+
+        else:
+            booking = Booking.objects.create(
+                user=request.user,
+                room_id=room_id,
+                start=start,
+                status="confirmed"
+            )
+
+        return Response({
+            "ok": True,
+            "message": "Viewing booked successfully",
+            "data": {
+                "room_id": booking.room_id,
+                "start": booking.start,
+                "status": booking.status
+            }
+        })
+
+
+
+
+
+
 # --------------------
 # Booking
 # --------------------

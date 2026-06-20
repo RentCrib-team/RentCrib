@@ -757,7 +757,12 @@ class RoomSerializer(serializers.ModelSerializer):
         
         
     
-    
+# propertylist_app/api/serializers.py
+
+class CreateViewingBookingSerializer(serializers.Serializer):
+    slot_id = serializers.IntegerField(required=False)
+    room_id = serializers.IntegerField(required=False)
+    start = serializers.DateTimeField(required=False)    
     
     
     

@@ -153,3 +153,6 @@ from .notifications import (
     NotificationMarkAllReadView,
     MyNotificationPreferencesView,
 )
+
+
+from .bookings import CreateViewingBookingView
