@@ -819,7 +819,7 @@ class RoomSerializer(serializers.ModelSerializer):
             if not dates or not start_time or not end_time:
                 return
 
-            slot_minutes = 15
+            slot_minutes = 60
             desired_slots = []
 
             for d in dates:

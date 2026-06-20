@@ -1,10 +1,10 @@
-"""
-Compatibility wrapper so BOTH imports work:
+import os
+from celery import Celery
 
-- import celery_app
-- import property.celery_app
-"""
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "property.settings")
 
-from celery_app import app
+app = Celery("property")
 
-__all__ = ("app",)
+app.config_from_object("django.conf:settings", namespace="CELERY")
+
+app.autodiscover_tasks()

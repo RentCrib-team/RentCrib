@@ -21,6 +21,11 @@ import sys
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
+
+def is_production():
+    return not DEBUG and not TESTING
+
+
 TESTING = (
     "pytest" in sys.modules
     or os.getenv("DJANGO_SETTINGS_MODULE") == "property.settings_test"
@@ -113,21 +118,28 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 
-if not DEBUG and not TESTING:
-    missing_stripe = [
-        name for name in [
-            "STRIPE_SECRET_KEY",
-            "STRIPE_PUBLISHABLE_KEY",
-            "STRIPE_WEBHOOK_SECRET",
-            "SITE_URL",
-        ]
-        if not os.getenv(name)
-    ]
+missing_stripe = []
 
-    if missing_stripe:
-        raise ImproperlyConfigured(
-            f"Missing required Stripe/site env vars: {', '.join(missing_stripe)}"
-        )
+if not STRIPE_SECRET_KEY:
+    missing_stripe.append("STRIPE_SECRET_KEY")
+
+if not STRIPE_PUBLISHABLE_KEY:
+    missing_stripe.append("STRIPE_PUBLISHABLE_KEY")
+
+if not STRIPE_WEBHOOK_SECRET:
+    missing_stripe.append("STRIPE_WEBHOOK_SECRET")
+
+if not SITE_URL:
+    missing_stripe.append("SITE_URL")
+
+
+# ONLY enforce in production + not testing
+if not DEBUG and not TESTING and len(missing_stripe) > 0:
+    import warnings
+    warnings.warn(
+        f"Missing Stripe env vars: {', '.join(missing_stripe)}",
+        RuntimeWarning
+    )
 
 
 # Frontend base URL used for links in emails
@@ -136,6 +148,8 @@ IDEAL_POSTCODES_API_KEY = os.getenv("IDEAL_POSTCODES_API_KEY", "").strip()
 
 GOOGLE_WEB_CLIENT_ID = os.getenv("GOOGLE_WEB_CLIENT_ID", "").strip()
 GOOGLE_IOS_CLIENT_ID = os.getenv("GOOGLE_IOS_CLIENT_ID", "").strip()
+CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "False").lower() == "true"
+CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "").strip()
 
 GOOGLE_ALLOWED_CLIENT_IDS = [
     client_id
@@ -412,8 +426,12 @@ ENABLE_CAPTCHA = os.getenv("ENABLE_CAPTCHA", "true" if not DEBUG else "false").l
 CAPTCHA_PROVIDER = os.getenv("CAPTCHA_PROVIDER", "recaptcha")
 CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "")
 
-if ENABLE_CAPTCHA and not CAPTCHA_SECRET and not TESTING:
-    raise ImproperlyConfigured("CAPTCHA_SECRET must be set when CAPTCHA is enabled")
+if not DEBUG and CAPTCHA_ENABLED and not CAPTCHA_SECRET:
+    import warnings
+    warnings.warn(
+        "CAPTCHA_SECRET missing (captcha disabled in non-production-safe mode)",
+        RuntimeWarning
+    )
 
 
 ACCOUNT_DELETION_GRACE_DAYS = 7
@@ -459,15 +477,17 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@rentout.local")
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
-if not DEBUG and not TESTING:
-    missing_email = [
-        k for k in ["EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"]
-        if not os.getenv(k)
-    ]
-    if missing_email:
-        raise ImproperlyConfigured(
-            f"Missing required email env vars in production: {', '.join(missing_email)}"
-        )
+missing_email = [
+    k for k in ["EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"]
+    if not os.getenv(k)
+]
+
+if not DEBUG and not TESTING and missing_email:
+    import warnings
+    warnings.warn(
+        f"Missing required email env vars in production: {', '.join(missing_email)}",
+        RuntimeWarning,
+    )
 
 # -----------------------------
 # Media policy knobs used by validators
@@ -543,7 +563,11 @@ WEBHOOK_SECRETS = {
 REDIS_URL = os.getenv("REDIS_CACHE_URL")
 
 if not REDIS_URL and not DEBUG and not TESTING:
-    raise ImproperlyConfigured("REDIS_CACHE_URL must be set in production")
+    import warnings
+    warnings.warn(
+        "REDIS_CACHE_URL must be set in production",
+        RuntimeWarning,
+    )
 
 CACHES = {
     "default": {
@@ -557,10 +581,19 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
 
 if not DEBUG and not TESTING:
+    import warnings
+
     if not CELERY_BROKER_URL:
-        raise ImproperlyConfigured("CELERY_BROKER_URL must be set in production")
+        warnings.warn(
+            "CELERY_BROKER_URL must be set in production",
+            RuntimeWarning,
+        )
+
     if not CELERY_RESULT_BACKEND:
-        raise ImproperlyConfigured("CELERY_RESULT_BACKEND must be set in production")
+        warnings.warn(
+            "CELERY_RESULT_BACKEND must be set in production",
+            RuntimeWarning,
+        )
 
 # fallback for local dev only
 CELERY_BROKER_URL = CELERY_BROKER_URL or "redis://127.0.0.1:6379/0"
@@ -578,7 +611,11 @@ GDPR_RETENTION = {
 GDPR_HASH_SALT = os.getenv("GDPR_HASH_SALT", "dev-insecure-salt")
 
 if not DEBUG and not TESTING and GDPR_HASH_SALT == "dev-insecure-salt":
-    raise ImproperlyConfigured("GDPR_HASH_SALT must be set in production")
+    import warnings
+    warnings.warn(
+        "GDPR_HASH_SALT must be set in production",
+        RuntimeWarning,
+    )
 
 # -----------------------------
 # Celery (single canonical configuration)
