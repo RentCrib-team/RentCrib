@@ -985,10 +985,14 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
 
 
 class RoomListAlt(CachedAnonymousGETMixin, generics.ListAPIView):
-    queryset = Room.objects.alive().order_by("-avg_rating")
+    queryset = (
+        Room.objects.alive()
+        .filter(status="active")
+        .order_by("-avg_rating")
+    )
     serializer_class = RoomSerializer
     permission_classes = [AllowAny]
-    cache_timeout = 120  # cache this endpoint for 2 minutes
+    cache_timeout = 120
 
     @extend_schema(
         request=RoomSerializer,

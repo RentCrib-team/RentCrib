@@ -716,7 +716,6 @@ class RoomSerializer(serializers.ModelSerializer):
 
     # Amenity keys matching the Step 2/5 chips
     AMENITY_CHOICES = {
-        # Home
         "in_unit_laundry",
         "broadband_inclusive",
         "en_suite",
@@ -729,7 +728,6 @@ class RoomSerializer(serializers.ModelSerializer):
         "pets_allowed",
         "large_closet",
         "private_bath",
-        # Property
         "exercise_equipment",
         "elevator",
         "doorman",
@@ -741,7 +739,6 @@ class RoomSerializer(serializers.ModelSerializer):
         "bbq_grill",
         "fire_pit",
         "pool_table",
-        # Safety
         "smoke_alarm",
         "first_aid_kit",
         "security_system",
@@ -751,10 +748,303 @@ class RoomSerializer(serializers.ModelSerializer):
         "must_climb_stairs",
     }
 
+    
+    def validate_security_deposit(self, value):
+        try:
+            value = normalise_price(value)
+        except serializers.ValidationError as exc:
+            raise serializers.ValidationError(exc.detail)
+
+        if value < 0:
+            raise serializers.ValidationError("Security deposit cannot be negative.")
+
+        return validate_price(value, min_val=0.0, max_val=50000.0)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        min_stay = attrs.get("min_stay_months")
+        max_stay = attrs.get("max_stay_months")
+
+        if self.instance is not None:
+            if "min_stay_months" not in attrs:
+                min_stay = getattr(self.instance, "min_stay_months", None)
+
+            if "max_stay_months" not in attrs:
+                max_stay = getattr(self.instance, "max_stay_months", None)
+
+        if (
+            min_stay is not None
+            and max_stay is not None
+            and min_stay > max_stay
+        ):
+            raise serializers.ValidationError(
+                {
+                    "min_stay_months":
+                    "Minimum stay cannot be greater than maximum stay."
+                }
+            )
+            
+        # -----------------------------
+        # Flatmate age preference rules
+        # -----------------------------
+        # -----------------------------
+        # Flatmate preference age rules (Step 3)
+        # -----------------------------
+        min_age = attrs.get("preferred_flatmate_min_age")
+        max_age = attrs.get("preferred_flatmate_max_age")
+
+        if self.instance is not None:
+            if "preferred_flatmate_min_age" not in attrs:
+                min_age = getattr(self.instance, "preferred_flatmate_min_age", None)
+
+            if "preferred_flatmate_max_age" not in attrs:
+                max_age = getattr(self.instance, "preferred_flatmate_max_age", None)
+
+        if (
+            min_age is not None
+            and max_age is not None
+            and min_age > max_age
+        ):
+            raise serializers.ValidationError(
+                {
+                    "preferred_flatmate_min_age": (
+                        "Minimum age cannot be greater than maximum age."
+                    )
+                }
+            )    
+
+        price = attrs.get("price_per_month")
+        bills_included = attrs.get("bills_included")
+
+        if self.instance is not None:
+            if "price_per_month" not in attrs:
+                price = getattr(self.instance, "price_per_month", None)
+
+            if "bills_included" not in attrs:
+                bills_included = getattr(self.instance, "bills_included", None)
+
+        if bills_included and price is not None and float(price) < 100.0:
+            raise serializers.ValidationError(
+                {
+                    "bills_included":
+                    "Bills cannot be included for such a low price."
+                }
+            )
+
+        mode = attrs.get("view_available_days_mode")
+        custom_dates = attrs.get("view_available_custom_dates")
+
+        if self.instance is not None:
+            if "view_available_days_mode" not in attrs:
+                mode = getattr(self.instance, "view_available_days_mode", "everyday")
+
+            if "view_available_custom_dates" not in attrs:
+                custom_dates = getattr(self.instance, "view_available_custom_dates", [])
+
+        if mode == "custom":
+            if not custom_dates:
+                raise serializers.ValidationError(
+                    {
+                        "view_available_custom_dates":
+                        "Provide at least one date when using custom mode."
+                    }
+                )
+        else:
+            attrs["view_available_custom_dates"] = []
+
+        start_time = attrs.get("availability_from_time")
+        end_time = attrs.get("availability_to_time")
+
+        if self.instance is not None:
+            if "availability_from_time" not in attrs:
+                start_time = getattr(self.instance, "availability_from_time", None)
+
+            if "availability_to_time" not in attrs:
+                end_time = getattr(self.instance, "availability_to_time", None)
+
+        if start_time and not end_time:
+            raise serializers.ValidationError(
+                {"availability_to_time": "Please provide an end time as well."}
+            )
+
+        if end_time and not start_time:
+            raise serializers.ValidationError(
+                {"availability_from_time": "Please provide a start time as well."}
+            )
+
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError(
+                {"availability_to_time": "End time must be after start time."}
+            )
+
+        return attrs
+
+    preferred_flatmate_min_age = serializers.IntegerField(required=False, allow_null=True)
+    preferred_flatmate_max_age = serializers.IntegerField(required=False, allow_null=True)    
+
+
+
     class Meta:
         model = Room
         fields = "__all__"
-        
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_saved(self, obj) -> bool:
+        annotated = getattr(obj, "_is_saved", None)
+        if annotated is not None:
+            return bool(annotated)
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request is not None else None
+
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+
+        return SavedRoom.objects.filter(user=user, room=obj).exists()
+
+    @extend_schema_field(OpenApiTypes.NUMBER)
+    def get_distance_miles(self, obj) -> float | None:
+        val = getattr(obj, "distance_miles", None)
+        if val is None:
+            return None
+
+        try:
+            return round(float(val), 2)
+        except (TypeError, ValueError):
+            return None
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_allow_search_indexing_effective(self, obj) -> bool:
+        val = getattr(obj, "allow_search_indexing_effective", None)
+        if val is not None:
+            return bool(val)
+
+        override = getattr(obj, "allow_search_indexing_override", None)
+        if override is not None:
+            return bool(override)
+
+        owner = getattr(obj, "property_owner", None)
+        profile = getattr(owner, "profile", None) if owner else None
+        default = getattr(profile, "allow_search_indexing_default", True)
+
+        return bool(default)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_name(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        if not user:
+            return ""
+
+        full_name = (user.get_full_name() or "").strip()
+        return full_name or user.username
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_username(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        if not user:
+            return ""
+
+        return user.username or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_avatar(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        avatar = getattr(profile, "avatar", None)
+
+        if not avatar:
+            return ""
+
+        request = self.context.get("request")
+        url = avatar.url
+
+        if request is not None:
+            return request.build_absolute_uri(url)
+
+        return url
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_main_photo(self, obj) -> str:
+        request = self.context.get("request")
+
+        approved_photo = (
+            obj.roomimage_set.filter(status="approved")
+            .order_by("id")
+            .first()
+        )
+
+        if approved_photo and approved_photo.image:
+            url = approved_photo.image.url
+            if request is not None:
+                return request.build_absolute_uri(url)
+            return url
+
+        legacy_image = getattr(obj, "image", None)
+        if legacy_image:
+            url = legacy_image.url
+            if request is not None:
+                return request.build_absolute_uri(url)
+            return url
+
+        return ""
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_photo_count(self, obj) -> int:
+        approved_count = obj.roomimage_set.filter(status="approved").count()
+        legacy_image = getattr(obj, "image", None)
+
+        if approved_count:
+            return approved_count
+
+        if legacy_image:
+            return 1
+
+        return 0
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_listing_state(self, obj) -> str:
+        annotated = getattr(obj, "listing_state", None)
+        if annotated:
+            return annotated
+
+        paid_until = getattr(obj, "paid_until", None)
+        status = getattr(obj, "status", None)
+
+        if status == "hidden":
+            return "hidden"
+
+        if paid_until is None:
+            return "draft"
+
+        if paid_until < timezone.now().date():
+            return "expired"
+
+        return "active"
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_type(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        return getattr(profile, "role_detail", "") or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_type_label(self, obj) -> str:
+        value = self.get_landlord_type(obj)
+
+        labels = {
+            "live_in_landlord": "Live-in landlord",
+            "live_out_landlord": "Live-out landlord",
+            "agent_broker": "Agency",
+        }
+
+        return labels.get(value, "")
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_landlord_verified(self, obj) -> bool:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        return bool(getattr(profile, "advertiser_verified", False))
         
     
 # propertylist_app/api/serializers.py
@@ -919,12 +1209,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
     
     
     
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_owner_username(self, obj) -> str:
-        user = getattr(obj, "property_owner", None)
-        if not user:
-            return ""
-        return user.username or ""
+  
     
     
         
@@ -1172,80 +1457,6 @@ class CreateViewingBookingSerializer(serializers.Serializer):
     # SerializerMethodField getters (schema-typed)
     # ---------------------------
 
-    @extend_schema_field(OpenApiTypes.BOOL)
-    def get_is_saved(self, obj) -> bool:
-        annotated = getattr(obj, "_is_saved", None)
-        if annotated is not None:
-            return bool(annotated)
-
-        request = self.context.get("request")
-        user = getattr(request, "user", None) if request is not None else None
-        if not user or not user.is_authenticated:
-            return False
-
-        return SavedRoom.objects.filter(user=user, room=obj).exists()
-
-    @extend_schema_field(OpenApiTypes.NUMBER)
-    def get_distance_miles(self, obj) -> float | None:
-        val = getattr(obj, "distance_miles", None)
-        if val is None:
-            return None
-        try:
-            return round(float(val), 2)
-        except (TypeError, ValueError):
-            return None
-
-    @extend_schema_field(OpenApiTypes.BOOL)
-    def get_allow_search_indexing_effective(self, obj) -> bool:
-        val = getattr(obj, "allow_search_indexing_effective", None)
-        if val is not None:
-            return bool(val)
-
-        override = getattr(obj, "allow_search_indexing_override", None)
-        if override is not None:
-            return bool(override)
-
-        owner = getattr(obj, "property_owner", None)
-        profile = getattr(owner, "profile", None) if owner else None
-        default = getattr(profile, "allow_search_indexing_default", True)
-
-        return bool(default)
-
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_owner_name(self, obj) -> str:
-        user = getattr(obj, "property_owner", None)
-        if not user:
-            return ""
-        full_name = (user.get_full_name() or "").strip()
-        return full_name or user.username
-    
-    
-    
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_landlord_type(self, obj) -> str:
-        user = getattr(obj, "property_owner", None)
-        profile = getattr(user, "profile", None) if user else None
-        return getattr(profile, "role_detail", "") or ""
-
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_landlord_type_label(self, obj) -> str:
-        value = self.get_landlord_type(obj)
-
-        labels = {
-            "live_in_landlord": "Live-in landlord",
-            "live_out_landlord": "Live-out landlord",
-            "agent_broker": "Agency",
-        }
-
-        return labels.get(value, "")
-    
-    
-    
-    @extend_schema_field(OpenApiTypes.BOOL)
-    def get_landlord_verified(self, obj) -> bool:
-        user = getattr(obj, "property_owner", None)
-        profile = getattr(user, "profile", None) if user else None
-        return bool(getattr(profile, "advertiser_verified", False))
     
 
     @extend_schema_field(OpenApiTypes.URI)

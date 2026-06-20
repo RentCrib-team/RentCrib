@@ -67,6 +67,7 @@ def test_hidden_room_excluded_from_search_and_rooms_alt():
 
     # /api/v1/rooms-alt/ (public list)
     url_list = reverse("v1:room-list-alt")
+    client.raise_request_exception = True
     r1 = client.get(url_list)
     assert r1.status_code == 200
     items1 = _extract_items(r1.json())
