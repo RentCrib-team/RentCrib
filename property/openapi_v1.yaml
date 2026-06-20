@@ -1095,6 +1095,55 @@ paths:
           description: Missing/invalid fields or invalid datetime format.
         '401':
           description: Authentication required.
+  /api/v1/bookings/viewing/:
+    post:
+      operationId: bookings_viewing_create
+      tags:
+      - bookings
+      requestBody:
+        content:
+          type:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          properties:
+            schema:
+              slot_id:
+                type: integer
+              room_id:
+                type: integer
+              start:
+                type: string
+                format: date-time
+          required:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      room_id:
+                        type: integer
+                      start:
+                        type: string
+                      status:
+                        type: string
+          description: ''
   /api/v1/cities/:
     get:
       operationId: cities_retrieve
@@ -8327,20 +8376,15 @@ components:
           readOnly: true
         owner_avatar:
           type: string
-          format: uri
           readOnly: true
         main_photo:
           type: string
-          format: uri
           readOnly: true
         photo_count:
           type: integer
           readOnly: true
         listing_state:
           type: string
-          description: |-
-            Returns one of: 'draft', 'active', 'expired', 'hidden'.
-            Used by the 'My Listings' page to group into tabs.
           readOnly: true
         landlord_type:
           type: string
@@ -8351,6 +8395,12 @@ components:
         landlord_verified:
           type: boolean
           readOnly: true
+        preferred_flatmate_min_age:
+          type: integer
+          nullable: true
+        preferred_flatmate_max_age:
+          type: integer
+          nullable: true
         is_deleted:
           type: boolean
         deleted_at:
@@ -8714,16 +8764,6 @@ components:
           type: string
           description: Preferred language of future flatmate (free text from dropdown).
           maxLength: 100
-        preferred_flatmate_min_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
-        preferred_flatmate_max_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
         preferred_flatmate_occupation:
           enum:
           - students_only
@@ -9483,20 +9523,15 @@ components:
           readOnly: true
         owner_avatar:
           type: string
-          format: uri
           readOnly: true
         main_photo:
           type: string
-          format: uri
           readOnly: true
         photo_count:
           type: integer
           readOnly: true
         listing_state:
           type: string
-          description: |-
-            Returns one of: 'draft', 'active', 'expired', 'hidden'.
-            Used by the 'My Listings' page to group into tabs.
           readOnly: true
         landlord_type:
           type: string
@@ -9507,6 +9542,12 @@ components:
         landlord_verified:
           type: boolean
           readOnly: true
+        preferred_flatmate_min_age:
+          type: integer
+          nullable: true
+        preferred_flatmate_max_age:
+          type: integer
+          nullable: true
         is_deleted:
           type: boolean
         deleted_at:
@@ -9870,16 +9911,6 @@ components:
           type: string
           description: Preferred language of future flatmate (free text from dropdown).
           maxLength: 100
-        preferred_flatmate_min_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
-        preferred_flatmate_max_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
         preferred_flatmate_occupation:
           enum:
           - students_only
