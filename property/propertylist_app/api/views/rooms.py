@@ -946,11 +946,22 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return AvailabilitySlot.objects.none()
+
         room = get_object_or_404(Room.objects.alive(), pk=self.kwargs["pk"])
         qs = room.availability_slots.order_by("start")
+
+        date_value = self.request.query_params.get("date")
         f = self.request.query_params.get("from")
         t = self.request.query_params.get("to")
         only_free = self.request.query_params.get("only_free") in {"1", "true", "True"}
+
+        if date_value:
+            try:
+                selected_date = datetime.fromisoformat(date_value).date()
+            except Exception:
+                raise ValidationError({"date": "date must use YYYY-MM-DD format."})
+
+            qs = qs.filter(start__date=selected_date)
 
         if f and t:
             try:
@@ -958,17 +969,22 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
                 end = datetime.fromisoformat(t)
             except Exception:
                 raise ValidationError({"detail": "from/to must be ISO 8601"})
+
             qs = qs.filter(start__lt=end, end__gt=start)
 
         if only_free:
             available_ids = [
-                s.id for s in qs if Booking.objects.filter(slot=s, canceled_at__isnull=True).count() < s.max_bookings
+                s.id
+                for s in qs
+                if Booking.objects.filter(
+                    slot=s,
+                    canceled_at__isnull=True,
+                ).count() < s.max_bookings
             ]
             qs = qs.filter(id__in=available_ids)
 
         return qs
-           
-      
+        
       
       
 

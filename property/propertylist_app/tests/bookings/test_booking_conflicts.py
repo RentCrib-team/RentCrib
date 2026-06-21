@@ -204,6 +204,73 @@ def test_slot_booking_response_returns_selected_slot_only():
 
     assert "results" not in booking_data
     assert "count" not in booking_data    
+    
+    
+    
+    
+@pytest.mark.django_db
+def test_public_availability_slots_can_be_filtered_by_date():
+    """
+    Public availability endpoint should allow frontend/mobile to request
+    available viewing slots for one selected day only.
+    """
+    owner = User.objects.create_user(
+        username="date_filter_owner",
+        password="pass12345",
+        email="date-filter-owner@example.com",
+    )
+
+    cat = RoomCategorie.objects.create(name="Date Filter", active=True)
+    room = Room.objects.create(
+        title="Room with date filtered slots",
+        category=cat,
+        price_per_month=800,
+        property_owner=owner,
+    )
+
+    day_one_start = (timezone.now() + timedelta(days=3)).replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    day_one_end = day_one_start + timedelta(minutes=30)
+
+    day_two_start = (timezone.now() + timedelta(days=4)).replace(
+        hour=9,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    day_two_end = day_two_start + timedelta(minutes=30)
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_one_start,
+        end=day_one_end,
+        max_bookings=1,
+    )
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_two_start,
+        end=day_two_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse("v1:room-slots-public", args=[room.id])
+    response = client.get(
+        url,
+        {"date": day_one_start.date().isoformat(), "only_free": "true"},
+    )
+
+    assert response.status_code == 200, response.data
+    results = response.data.get("results", [])
+
+    assert len(results) == 1
+    assert results[0]["id"] == AvailabilitySlot.objects.get(start=day_one_start).id
+    assert results[0]["start"].startswith(day_one_start.date().isoformat())    
 
 
 
