@@ -21,9 +21,10 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 
 
 #DRF
-from rest_framework import generics, permissions, serializers, status, viewsets
+from rest_framework import generics, permissions, serializers, status, viewsets,status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+
 from rest_framework.views import APIView
 from rest_framework.permissions import (
     AllowAny,
@@ -984,7 +985,28 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
             qs = qs.filter(id__in=available_ids)
 
         return qs
-        
+
+    def list(self, request, *args, **kwargs):
+        mode = request.query_params.get("mode")
+
+        if mode == "dates":
+            qs = self.get_queryset()
+
+            available_dates = sorted(
+                {
+                    slot.start.date().isoformat()
+                    for slot in qs
+                }
+            )
+
+            return Response(
+                {
+                    "available_dates": available_dates,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return super().list(request, *args, **kwargs)
       
       
 

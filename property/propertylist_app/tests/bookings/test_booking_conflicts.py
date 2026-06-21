@@ -273,5 +273,72 @@ def test_public_availability_slots_can_be_filtered_by_date():
     assert results[0]["start"].startswith(day_one_start.date().isoformat())    
 
 
+@pytest.mark.django_db
+def test_public_availability_slots_can_return_available_dates_only():
+    """
+    Public availability endpoint should return available dates only
+    when mode=dates is supplied.
+    """
+    owner = User.objects.create_user(
+        username="dates_only_owner",
+        password="pass12345",
+        email="dates-only-owner@example.com",
+    )
 
+    cat = RoomCategorie.objects.create(name="Dates Only", active=True)
+    room = Room.objects.create(
+        title="Room with dates only slots",
+        category=cat,
+        price_per_month=800,
+        property_owner=owner,
+    )
+
+    day_one_start = (timezone.now() + timedelta(days=3)).replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    day_two_start = (timezone.now() + timedelta(days=4)).replace(
+        hour=9,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_one_start,
+        end=day_one_start + timedelta(minutes=30),
+        max_bookings=1,
+    )
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_one_start + timedelta(minutes=30),
+        end=day_one_start + timedelta(minutes=60),
+        max_bookings=1,
+    )
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_two_start,
+        end=day_two_start + timedelta(minutes=30),
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse("v1:room-slots-public", args=[room.id])
+    response = client.get(
+        url,
+        {"mode": "dates", "only_free": "true"},
+    )
+
+    assert response.status_code == 200, response.data
+
+    assert response.data == {
+        "available_dates": [
+            day_one_start.date().isoformat(),
+            day_two_start.date().isoformat(),
+        ]
+    }
 
