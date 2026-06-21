@@ -1153,8 +1153,8 @@ class CreateViewingBookingSerializer(serializers.Serializer):
             to: 17:00
 
             Creates:
-            07:00-07:15
-            07:15-07:30
+            07:00-07:30
+            07:30-08:00
             etc.
 
             Already-booked slots are not deleted.
@@ -1169,7 +1169,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
             if not dates or not start_time or not end_time:
                 return
 
-            slot_minutes = 60
+            slot_minutes = 30
             desired_slots = []
 
             for d in dates:

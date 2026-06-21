@@ -2,8 +2,8 @@ import pytest
 from datetime import timedelta
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.contrib.auth.models import User
-
 from rest_framework.test import APIClient
 
 from propertylist_app.models import Room, RoomCategorie, AvailabilitySlot, Booking
@@ -136,6 +136,74 @@ def test_slot_booking_capacity_and_past_slot():
     slot_val = err.get("field_errors", {}).get("slot")
     assert slot_val is not None, f"Expected slot error list, got {err}"
     assert any("past" in str(x).lower() for x in slot_val), f"Unexpected slot error: {slot_val}"
+    
+    
+    
+    
+@pytest.mark.django_db
+def test_slot_booking_response_returns_selected_slot_only():
+    """
+    When a tenant books one availability slot:
+    - backend must create booking for that exact slot
+    - response must return that selected slot start/end
+    - response must not return the landlord's full availability list
+    """
+    owner = User.objects.create_user(
+        username="slot_owner",
+        password="pass12345",
+        email="slot-owner@example.com",
+    )
+    guest = User.objects.create_user(
+        username="slot_guest",
+        password="pass12345",
+        email="slot-guest@example.com",
+    )
+
+    cat = RoomCategorie.objects.create(name="Slot Test", active=True)
+    room = Room.objects.create(
+        title="Room with selectable slots",
+        category=cat,
+        price_per_month=800,
+        property_owner=owner,
+    )
+
+    selected_start = (timezone.now() + timedelta(days=3)).replace(
+        hour=8,
+        minute=30,
+        second=0,
+        microsecond=0,
+    )
+    selected_end = selected_start + timedelta(minutes=30)
+
+    slot = AvailabilitySlot.objects.create(
+        room=room,
+        start=selected_start,
+        end=selected_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=guest)
+
+    url = reverse("v1:bookings-list-create")
+    response = client.post(url, {"slot": slot.id}, format="json")
+
+    assert response.status_code == 201, response.data
+    assert response.data.get("ok") is True
+
+    booking_data = response.data.get("data", {})
+
+    assert booking_data.get("slot") == slot.id
+    assert booking_data.get("room") == room.id
+
+    response_start = parse_datetime(booking_data.get("start"))
+    response_end = parse_datetime(booking_data.get("end"))
+
+    assert response_start == selected_start
+    assert response_end == selected_end
+
+    assert "results" not in booking_data
+    assert "count" not in booking_data    
 
 
 
