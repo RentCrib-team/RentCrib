@@ -117,6 +117,7 @@ def test_step1_next_creates_room_and_returns_201(auth_client, valid_step1_payloa
         "action": "next",
     }
 
+    
     response = auth_client.post(url, payload, format="json")
 
     assert response.status_code == status.HTTP_201_CREATED, response.data
@@ -163,7 +164,9 @@ def test_step1_missing_price_returns_400(auth_client, valid_step1_payload):
     response = auth_client.post(url, bad_payload, format="json")
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "price_per_month" in response.data["errors"]
+    assert response.data.get("ok") is False
+    assert response.data.get("code") == "validation_error"
+    assert "price_per_month" in response.data.get("field_errors", {})
 
 
 @pytest.mark.django_db
@@ -182,7 +185,10 @@ def test_step1_negative_price_returns_400(auth_client, valid_step1_payload):
     response = auth_client.post(url, bad_payload, format="json")
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "price_per_month" in response.data["errors"]
+    assert response.data.get("ok") is False
+    assert response.data.get("code") == "validation_error"
+    
+    assert "price_per_month" in response.data.get("field_errors", {})
 
 
 # -------------------------------------------------
