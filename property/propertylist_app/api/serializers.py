@@ -749,6 +749,18 @@ class RoomSerializer(serializers.ModelSerializer):
     }
 
     
+    def validate_price_per_month(self, value):
+        try:
+            value = normalise_price(value)
+        except serializers.ValidationError as exc:
+            raise serializers.ValidationError(exc.detail)
+
+        if value < 0:
+            raise serializers.ValidationError("Monthly rent cannot be negative.")
+
+        return validate_price(value, min_val=50.0, max_val=20000.0)
+    
+    
     def validate_security_deposit(self, value):
         try:
             value = normalise_price(value)
@@ -759,9 +771,69 @@ class RoomSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Security deposit cannot be negative.")
 
         return validate_price(value, min_val=0.0, max_val=50000.0)
+    
+    
+    
+    def validate_view_available_custom_dates(self, value):
+        if value in (None, ""):
+            return []
 
+        if not isinstance(value, (list, tuple)):
+            raise serializers.ValidationError("Must be a list of dates.")
+
+        normalised = []
+
+        for item in value:
+            if isinstance(item, date):
+                normalised.append(item.isoformat())
+                continue
+
+            if isinstance(item, str):
+                try:
+                    parsed = datetime.strptime(item, "%Y-%m-%d")
+                except ValueError:
+                    raise serializers.ValidationError(
+                        "Invalid date format. Use YYYY-MM-DD."
+                    )
+
+                normalised.append(parsed.date().isoformat())
+                continue
+
+            raise serializers.ValidationError(
+                "Invalid date format. Use YYYY-MM-DD."
+            )
+
+        return normalised
+    
+    
+    
     def validate(self, attrs):
         attrs = super().validate(attrs)
+
+        price = attrs.get("price_per_month")
+        bills_included = attrs.get("bills_included")
+        available_from = attrs.get("available_from")
+
+        if self.instance is not None:
+            if "price_per_month" not in attrs:
+                price = getattr(self.instance, "price_per_month", None)
+
+            if "bills_included" not in attrs:
+                bills_included = getattr(self.instance, "bills_included", None)
+
+            if "available_from" not in attrs:
+                available_from = getattr(self.instance, "available_from", None)
+
+        if price is not None:
+            attrs["price_per_month"] = self.validate_price_per_month(price)
+
+        if available_from is not None:
+            try:
+                validate_available_from(available_from)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError(
+                    {"available_from": exc.detail}
+                )
 
         min_stay = attrs.get("min_stay_months")
         max_stay = attrs.get("max_stay_months")
@@ -784,13 +856,7 @@ class RoomSerializer(serializers.ModelSerializer):
                     "Minimum stay cannot be greater than maximum stay."
                 }
             )
-            
-        # -----------------------------
-        # Flatmate age preference rules
-        # -----------------------------
-        # -----------------------------
-        # Flatmate preference age rules (Step 3)
-        # -----------------------------
+
         min_age = attrs.get("preferred_flatmate_min_age")
         max_age = attrs.get("preferred_flatmate_max_age")
 
@@ -808,21 +874,10 @@ class RoomSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError(
                 {
-                    "preferred_flatmate_min_age": (
-                        "Minimum age cannot be greater than maximum age."
-                    )
+                    "preferred_flatmate_min_age":
+                    "Minimum age cannot be greater than maximum age."
                 }
-            )    
-
-        price = attrs.get("price_per_month")
-        bills_included = attrs.get("bills_included")
-
-        if self.instance is not None:
-            if "price_per_month" not in attrs:
-                price = getattr(self.instance, "price_per_month", None)
-
-            if "bills_included" not in attrs:
-                bills_included = getattr(self.instance, "bills_included", None)
+            )
 
         if bills_included and price is not None and float(price) < 100.0:
             raise serializers.ValidationError(
@@ -1230,9 +1285,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
         return clean
 
-    def validate_price_per_month(self, value):
-        value = normalise_price(value)
-        return validate_price(value, min_val=50.0, max_val=20000.0)
+   
 
     def validate_amenities(self, value):
         """
@@ -1269,11 +1322,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
         return cleaned
 
-    def validate_security_deposit(self, value):
-        # normalise_price handles strings like "Â£200" or "200.00"
-        value = normalise_price(value)
-        # allow zero, but cap it to something sensible
-        return validate_price(value, min_val=0.0, max_val=50000.0)
+  
 
     def validate_location(self, value):
         text = str(value or "").strip()
@@ -1300,6 +1349,8 @@ class CreateViewingBookingSerializer(serializers.Serializer):
         validate_listing_photos([value])
         assert_no_duplicate_files([value])
         return value
+    
+    
 
     def validate(self, attrs):
         price = attrs.get("price_per_month")
@@ -1555,43 +1606,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
     # --- New helpers for 'View Available Days' ---
 
-    def validate_view_available_days_mode(self, value):
-        # DRF already checks choices; this is just a safety normaliser.
-        return (value or "everyday").strip()
-
-    def validate_view_available_custom_dates(self, value):
-        """
-        Front-end sends an array of dates (strings) when mode='custom'.
-        We accept:
-          - ["2025-12-01", "2025-12-03"]
-          - [date(2025, 12, 1), ...]
-        and normalise everything to list of YYYY-MM-DD strings.
-        """
-        if value in (None, ""):
-            return []
-
-        if not isinstance(value, (list, tuple)):
-            raise serializers.ValidationError("Must be a list of dates.")
-
-        normalised = []
-        for item in value:
-            if isinstance(item, date):
-                normalised.append(item.isoformat())
-                continue
-            if isinstance(item, str):
-                try:
-                    d = date.fromisoformat(item)
-                except ValueError:
-                    raise serializers.ValidationError(
-                        "Dates must be in 'YYYY-MM-DD' format."
-                    )
-                normalised.append(d.isoformat())
-                continue
-            raise serializers.ValidationError(
-                "Each item must be a date or 'YYYY-MM-DD' string."
-            )
-
-        return normalised
+    
 
 
 # --------------------

@@ -267,92 +267,81 @@ class RoomAV(APIView):
     },
     description="Create a room owned by the logged-in user.",
     )
+    
+    
     def post(self, request, *args, **kwargs):
-
         """
         POST /api/v1/rooms/
 
-        Used by the 'List a Room – Step 1' screen.
-
-        - Creates a Room owned by the logged-in user.
-        - `action` can be "next" or "save_close" – backend treats them the same;
-        the frontend decides what to do next.
+        Step 1 Room creation endpoint.
         """
+
+
+      
         data = request.data.copy()
 
-        # Ignore wizard action flag ("next" / "save_close")
+        # Remove wizard control flag
         data.pop("action", None)
 
-        # ---- Step 1 Draft-friendly defaults ----
+        # -----------------------------
+        # Step 1 defaults (safe only)
+        # -----------------------------
         from django.utils import timezone
         now_token = timezone.now().strftime("%Y%m%d%H%M%S%f")
 
         data.setdefault("title", f"Draft listing {request.user.id}-{now_token}")
         data.setdefault(
             "description",
-            "This is a draft room listing created from the first step of the listing wizard. "
-            "The landlord will complete the full title, description, photos, and remaining listing details later."
+            "Draft listing created via Step 1 wizard."
         )
         data.setdefault("property_type", "flat")
-        # Do not force status='hidden'. Draft state is already handled by paid_until=None.
-        # ---- Step 1 validation for fields actually on Step 1 ----
-        price = data.get("price_per_month")
-        if price in (None, "", []):
-            return Response(
-                {
-                    "ok": False,
-                    "message": "Validation error.",
-                    "errors": {"price_per_month": ["This field is required."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            price_value = float(price)
-        except (TypeError, ValueError):
-            return Response(
-                {
-                    "ok": False,
-                    "message": "Validation error.",
-                    "errors": {"price_per_month": ["A valid number is required."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if price_value <= 0:
-            return Response(
-                {
-                    "ok": False,
-                    "message": "Validation error.",
-                    "errors": {"price_per_month": ["Must be greater than 0."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
-        # ---- Ensure we always have a category_id for the serializer ----
+        # -----------------------------
+        # REQUIRED FIELD: price validation MUST go through serializer
+        # (REMOVE manual float validation — it was bypassing rules)
+        # -----------------------------
+
+        # -----------------------------
+        # Ensure category exists
+        # -----------------------------
         if not data.get("category_id"):
             category = (
                 RoomCategorie.objects.filter(active=True).order_by("id").first()
                 or RoomCategorie.objects.order_by("id").first()
             )
+
             if not category:
                 category, _ = RoomCategorie.objects.get_or_create(
-                    name="General", defaults={"active": True}
+                    name="General",
+                    defaults={"active": True},
                 )
+
             data["category_id"] = category.id
 
-        # ---- Force the logged-in user as owner ----
+        # -----------------------------
+        # Force owner
+        # -----------------------------
         data["property_owner"] = request.user.id
 
-        serializer = RoomSerializer(data=data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        serializer.save(property_owner=request.user)
+        # -----------------------------
+        # SERIALIZER VALIDATION (IMPORTANT FIX)
+        # -----------------------------
+        serializer = RoomSerializer(
+            data=data,
+            context={"request": request},
+        )
 
-        # Return plain DRF object so tests can access response.data["id"]
+        #serializer.is_valid(raise_exception=True)  # 🔥 THIS FIXES YOUR 400 vs 201 BUG
+        serializer.is_valid(raise_exception=True)
+
+        room = serializer.save(property_owner=request.user)
+
         return ok_response(
-            serializer.data,
+            RoomSerializer(room, context={"request": request}).data,
             message="Room created successfully.",
             status_code=status.HTTP_201_CREATED,
         )
-
+        
 class RoomDetailAV(APIView):
     permission_classes = [IsOwnerOrReadOnly]
     http_method_names = ["get", "put", "patch", "delete"]
