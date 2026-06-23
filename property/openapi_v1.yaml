@@ -345,6 +345,76 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListingOverviewResponse'
           description: ''
+  /api/v1/admin/support/landlord-verification-requests/:
+    get:
+      operationId: admin_support_landlord_verification_requests_list
+      tags:
+      - Admin - Support
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminLandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
+  /api/v1/admin/support/landlord-verification-requests/{request_id}/review/:
+    post:
+      operationId: admin_support_landlord_verification_requests_review_create
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Admin - Support
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLandlordVerificationAction'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminLandlordVerificationAction'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminLandlordVerificationAction'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/AdminLandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
   /api/v1/admin/tenancies/:
     get:
       operationId: admin_tenancies_overview
@@ -4946,6 +5016,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/DataExportLatestNotFoundResponse'
           description: ''
+  /api/v1/users/me/landlord-verification/:
+    get:
+      operationId: users_me_landlord_verification_retrieve
+      tags:
+      - Verification
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/LandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
+    post:
+      operationId: users_me_landlord_verification_create
+      tags:
+      - Verification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LandlordVerificationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LandlordVerificationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LandlordVerificationRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/LandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
   /api/v1/users/me/notification-preferences/:
     get:
       operationId: users_me_notification_preferences_retrieve
@@ -5742,6 +5872,79 @@ components:
       - pets
       - smoking
       - vegan_vegetarian
+    AdminLandlordVerificationAction:
+      type: object
+      properties:
+        action:
+          enum:
+          - approve
+          - reject
+          type: string
+          description: |-
+            * `approve` - approve
+            * `reject` - reject
+          x-spec-enum-id: 55f4f79b5c0ebf21
+        rejection_reason:
+          type: string
+      required:
+      - action
+    AdminLandlordVerificationRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user_id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        status:
+          enum:
+          - pending
+          - approved
+          - rejected
+          type: string
+          description: |-
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          x-spec-enum-id: de3702061fc1d433
+        document:
+          type: string
+          format: uri
+          nullable: true
+        notes:
+          type: string
+        reviewed_by:
+          type: integer
+          nullable: true
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejection_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - email
+      - id
+      - updated_at
+      - user_id
+      - username
     AdminListingAmenities:
       type: object
       properties:
@@ -7304,6 +7507,53 @@ components:
       required:
       - data
       - ok
+    LandlordVerificationRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        status:
+          enum:
+          - pending
+          - approved
+          - rejected
+          type: string
+          description: |-
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          x-spec-enum-id: de3702061fc1d433
+          readOnly: true
+        document:
+          type: string
+          format: uri
+          nullable: true
+        notes:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - rejection_reason
+      - reviewed_at
+      - status
+      - updated_at
     ListingActionData:
       type: object
       properties:
@@ -9017,6 +9267,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        advertiser_verified:
+          type: boolean
+          readOnly: true
         marketing_consent:
           type: boolean
         notify_rentout_updates:
@@ -11179,6 +11432,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        advertiser_verified:
+          type: boolean
+          readOnly: true
         marketing_consent:
           type: boolean
         notify_rentout_updates:
@@ -11206,6 +11462,7 @@ components:
       required:
       - address_line_1
       - address_line_2
+      - advertiser_verified
       - avatar
       - avg_landlord_rating
       - avg_tenant_rating

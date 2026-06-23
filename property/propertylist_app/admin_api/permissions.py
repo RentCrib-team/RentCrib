@@ -17,8 +17,13 @@ class IsAdminUser(BasePermission):
     def has_permission(self, request, view):
         user = request.user
 
-        return bool(
-            user
-            and user.is_authenticated
-            and getattr(user, "admin_role", "") in self.ALLOWED_ADMIN_ROLES
-        )
+        if not user or not user.is_authenticated:
+            return False
+
+        if getattr(user, "is_superuser", False):
+            return True
+
+        profile = getattr(user, "profile", None)
+        admin_role = getattr(profile, "admin_role", "") if profile else ""
+
+        return admin_role in self.ALLOWED_ADMIN_ROLES

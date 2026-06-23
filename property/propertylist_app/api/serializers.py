@@ -20,7 +20,7 @@ from propertylist_app.models import (
     Room, RoomCategorie, Review, UserProfile, RoomImage,
     SavedRoom, MessageThread, Message, Booking,
     AvailabilitySlot, Payment, Report, Notification, EmailOTP,
-    MessageThreadState, ContactMessage,PhoneOTP,Tenancy,
+    MessageThreadState, ContactMessage,PhoneOTP,Tenancy,LandlordVerificationRequest,
 
 )
 from propertylist_app.validators import (
@@ -2094,6 +2094,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "email_verified",
             "phone_verified",
             "phone_verified_at",
+            "advertiser_verified",
             "marketing_consent",
             "notify_rentout_updates",
             "notify_reminders",
@@ -2111,6 +2112,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "user",
             "avatar",
             "email_verified",
+            "advertiser_verified",
         )
 
     # ---------- address placeholders (until you implement structured address fields) ----------
@@ -2196,6 +2198,36 @@ class UserProfileSerializer(serializers.ModelSerializer):
             data["gender"] = ""
 
         return data
+
+
+
+class LandlordVerificationRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LandlordVerificationRequest
+        fields = (
+            "id",
+            "status",
+            "document",
+            "notes",
+            "reviewed_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "status",
+            "reviewed_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_document(self, value):
+        max_size_mb = 10
+        if value and value.size > max_size_mb * 1024 * 1024:
+            raise serializers.ValidationError("Verification document must not exceed 10MB.")
+        return value
 
 
 

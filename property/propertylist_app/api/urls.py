@@ -88,6 +88,8 @@ from propertylist_app.api.views import (
     ContactMessageCreateView,
 
     MyListingsView,
+    
+    MyLandlordVerificationRequestView,
 
 
 
@@ -229,13 +231,9 @@ urlpatterns = [
 
 
 
-    path(
-    "bookings/viewing/",
-    CreateViewingBookingView.as_view(),
-    name="create-viewing-booking"
-        ),
+    path("bookings/viewing/",CreateViewingBookingView.as_view(),name="create-viewing-booking"),
 
-
+    path("users/me/landlord-verification/",MyLandlordVerificationRequestView.as_view(),name="my-landlord-verification",),
 
 
         # --- Auth ---
