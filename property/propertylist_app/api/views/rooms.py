@@ -283,6 +283,20 @@ class RoomAV(APIView):
 
         # Remove wizard control flag
         data.pop("action", None)
+        
+        # Server-controlled fields must not be accepted from client payloads.
+        # Ratings come from reviews; payment/expiry comes from Stripe; deletion/search overrides are backend/admin controlled.
+        data.pop("avg_rating", None)
+        data.pop("number_rating", None)
+        data.pop("paid_until", None)
+        data.pop("is_deleted", None)
+        data.pop("deleted_at", None)
+        data.pop("allow_search_indexing_override", None)
+        
+        
+        
+        
+        
 
         # -----------------------------
         # Step 1 defaults (safe only)

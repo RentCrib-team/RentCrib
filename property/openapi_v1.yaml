@@ -8653,9 +8653,11 @@ components:
           nullable: true
         is_deleted:
           type: boolean
+          readOnly: true
         deleted_at:
           type: string
           format: date-time
+          readOnly: true
           nullable: true
         title:
           type: string
@@ -8852,10 +8854,10 @@ components:
         avg_rating:
           type: number
           format: double
+          readOnly: true
         number_rating:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          readOnly: true
         latitude:
           type: number
           format: double
@@ -8867,6 +8869,7 @@ components:
         paid_until:
           type: string
           format: date
+          readOnly: true
           nullable: true
         status:
           enum:
@@ -9803,9 +9806,11 @@ components:
           nullable: true
         is_deleted:
           type: boolean
+          readOnly: true
         deleted_at:
           type: string
           format: date-time
+          readOnly: true
           nullable: true
         title:
           type: string
@@ -10002,10 +10007,10 @@ components:
         avg_rating:
           type: number
           format: double
+          readOnly: true
         number_rating:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          readOnly: true
         latitude:
           type: number
           format: double
@@ -10017,6 +10022,7 @@ components:
         paid_until:
           type: string
           format: date
+          readOnly: true
           nullable: true
         status:
           enum:
@@ -10294,12 +10300,15 @@ components:
           type: integer
       required:
       - allow_search_indexing_effective
+      - avg_rating
       - category
       - category_id
       - created_at
+      - deleted_at
       - description
       - distance_miles
       - id
+      - is_deleted
       - is_saved
       - landlord_type
       - landlord_type_label
@@ -10307,9 +10316,11 @@ components:
       - listing_state
       - location
       - main_photo
+      - number_rating
       - owner_avatar
       - owner_name
       - owner_username
+      - paid_until
       - photo_count
       - price_per_month
       - property_owner

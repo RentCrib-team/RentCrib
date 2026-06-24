@@ -943,6 +943,13 @@ class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Room
         fields = "__all__"
+        read_only_fields = (
+            "avg_rating",
+            "number_rating",
+            "paid_until",
+            "is_deleted",
+            "deleted_at",
+        )
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_saved(self, obj) -> bool:
