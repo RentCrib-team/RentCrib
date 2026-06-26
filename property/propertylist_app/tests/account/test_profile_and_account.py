@@ -4,8 +4,7 @@ from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
-
-from propertylist_app.models import UserProfile
+from propertylist_app.models import User, UserProfile
 
 User = get_user_model()
 
@@ -123,6 +122,9 @@ def test_change_password_success_mismatch_and_bad_current_and_login_with_new_pas
 @pytest.mark.django_db
 def test_deactivate_account_and_login_fails():
     u = User.objects.create_user(username="deact", password="pass123", email="d@example.com")
+    profile, _ = UserProfile.objects.get_or_create(user=u)
+    profile.email_verified = True
+    profile.save(update_fields=["email_verified"])
     c = APIClient()
     c.force_authenticate(user=u)
 
@@ -136,4 +138,5 @@ def test_deactivate_account_and_login_fails():
     c2 = APIClient()
     r_login = c2.post(login_url, {"username": "deact", "password": "pass123"}, format="json")
     # Depending on auth behavior for inactive users, it's typically 400 Invalid credentials
-    assert r_login.status_code in (400, 401)
+    assert r_login.status_code == 403
+    assert r_login.data["code"] == "ACCOUNT_DEACTIVATED"

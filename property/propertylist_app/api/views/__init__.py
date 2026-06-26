@@ -11,6 +11,7 @@ from .auth import (
     _verify_apple_identity_token,
     id_token,
     verify_captcha,
+    AccountReactivateView,
 )
 
 from .privacy import (

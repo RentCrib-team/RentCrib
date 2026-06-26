@@ -431,7 +431,39 @@ def build_login_payload(user):
         "profile": UserProfileSerializer(profile).data,
     }
 
+def _mask_email(email):
+    email = (email or "").strip()
+    if "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    return f"{local[:2]}•••@{domain}"
 
+
+def _send_account_reactivation_otp(user):
+    code = get_random_string(6, allowed_chars="0123456789")
+
+    EmailOTP.objects.filter(
+        user=user,
+        purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
+        used_at__isnull=True,
+    ).update(used_at=timezone.now())
+
+    EmailOTP.create_for(
+        user,
+        code,
+        ttl_minutes=settings.OTP_EXPIRY_MINUTES,
+        purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
+    )
+
+    mail.send_mail(
+        subject="Reactivate your RentCrib account",
+        message=f"Your RentCrib account reactivation code is: {code}",
+        from_email=None,
+        recipient_list=[user.email],
+        fail_silently=True,
+    )
+
+    return code
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -808,6 +840,43 @@ class LoginView(APIView):
                     lookup_username = u.username
                 except get_user_model().DoesNotExist:
                     pass
+                
+                
+                
+                
+            candidate_user = None
+            UserModel = get_user_model()
+
+            try:
+                if "@" in identifier:
+                    candidate_user = UserModel.objects.get(email__iexact=identifier)
+                else:
+                    candidate_user = UserModel.objects.get(username__iexact=lookup_username)
+            except UserModel.DoesNotExist:
+                candidate_user = None
+
+            if candidate_user and candidate_user.check_password(password) and not candidate_user.is_active:
+                profile, _ = UserProfile.objects.get_or_create(user=candidate_user)
+
+                if not getattr(profile, "email_verified", False):
+                    return error_response(
+                        message="Please verify your email with the 6-digit code we sent.",
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        code="email_not_verified",
+                    )
+
+                _send_account_reactivation_otp(candidate_user)
+
+                return error_response(
+                    message="Your account is deactivated. We have sent a verification code to your email.",
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="ACCOUNT_DEACTIVATED",
+                    details={
+                        "identifier": identifier,
+                        "email_masked": _mask_email(candidate_user.email),
+                        "requires_otp": True,
+                    },
+                )    
 
             user = authenticate(request, username=lookup_username, password=password)
             if user:
@@ -868,6 +937,128 @@ class LoginView(APIView):
         except Exception:
             logger.exception("LoginView crashed")
             raise
+
+
+class AccountReactivateView(APIView):
+    permission_classes = [AllowAny]
+    versioning_class = None
+    throttle_scope = "login"
+    throttle_classes = [ScopedRateThrottle]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="AccountReactivateRequest",
+            fields={
+                "identifier": serializers.CharField(),
+                "otp": serializers.CharField(),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name="AccountReactivateOkResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(required=False, allow_null=True),
+                    "data": inline_serializer(
+                        name="AccountReactivateData",
+                        fields={
+                            "tokens": serializers.DictField(),
+                            "user": serializers.DictField(),
+                            "profile": serializers.DictField(),
+                        },
+                    ),
+                },
+            ),
+            400: OpenApiResponse(description="Invalid OTP."),
+            404: OpenApiResponse(description="User not found."),
+            429: OpenApiResponse(description="Too many OTP attempts."),
+        },
+        auth=[],
+        description="Reactivate a deactivated account using the OTP sent after login attempt.",
+    )
+    def post(self, request):
+        identifier = (request.data.get("identifier") or "").strip()
+        token = (request.data.get("otp") or request.data.get("token") or "").strip()
+
+        if not identifier or not token:
+            return error_response(
+                message="identifier and otp are required.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="missing_required_fields",
+            )
+
+        UserModel = get_user_model()
+
+        try:
+            if "@" in identifier:
+                user = UserModel.objects.get(email__iexact=identifier)
+            else:
+                user = UserModel.objects.get(username__iexact=identifier)
+        except UserModel.DoesNotExist:
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+        otp = (
+            EmailOTP.objects.filter(
+                user=user,
+                purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
+                used_at__isnull=True,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not otp:
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+        if otp.is_expired:
+            return error_response(
+                message="Token expired.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="token_expired",
+            )
+
+        if otp.attempts >= settings.OTP_MAX_ATTEMPTS:
+            return error_response(
+                message="Too many attempts. Request a new reactivation code.",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                code="rate_limited",
+            )
+
+        if not otp.matches(token):
+            otp.attempts = int(otp.attempts or 0) + 1
+            otp.save(update_fields=["attempts"])
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+        otp.mark_used()
+
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+
+        clear_login_failures(
+            request.META.get("REMOTE_ADDR"),
+            identifier,
+        )
+
+        return ok_response(
+            build_login_payload(user),
+            message="Account reactivated successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
 
 
 

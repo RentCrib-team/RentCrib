@@ -50,7 +50,7 @@ from propertylist_app.api.views import (
     RoomPhotoUploadView, RoomPhotoDeleteView,
 
     # Auth & Profile
-    RegistrationView, LoginView, LogoutView,
+    RegistrationView, LoginView, LogoutView,AccountReactivateView,
     PasswordResetRequestView, PasswordResetConfirmView,
     MeView, UserProfileView,
     UserAvatarUploadView, ChangeEmailView, ChangePasswordView, DeactivateAccountView, MyRoomsView,MyProfilePageView,
@@ -62,6 +62,8 @@ from propertylist_app.api.views import (
 
     #Account deletion
     #DeleteAccountRequestView,DeleteAccountCancelView,
+    
+    
 
     # Payments
     CreateListingCheckoutSessionView, stripe_webhook, StripeSuccessView, StripeCancelView, SavedCardsListView, CreateSetupIntentView,DetachSavedCardView,
@@ -115,8 +117,8 @@ urlpatterns = [
     path("room-categories/",           RoomCategorieAV.as_view(),         name="roomcategory-list"),
     path("room-categories/<int:pk>/",  RoomCategorieDetailAV.as_view(),   name="roomcategory-detail"),
 
-
-
+    #account_reactivation
+    path("auth/login/", LoginView.as_view(), name="auth-login"),
 
     path("users/<int:user_id>/review-summary/", UserReviewSummaryView.as_view(), name="user-review-summary"),
     path("users/<int:user_id>/reviews/", UserReviewsView.as_view(), name="user-reviews"),
