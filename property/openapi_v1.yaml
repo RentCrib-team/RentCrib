@@ -4884,6 +4884,23 @@ paths:
           description: Validation error.
         '401':
           description: Authentication required.
+  /api/v1/users/me/delete-account/request-otp/:
+    post:
+      operationId: users_me_delete_account_request_otp_create
+      description: Send OTP to confirm account deletion.
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteAccountOtpRequestOkResponse'
+          description: ''
+        '401':
+          description: Authentication required.
   /api/v1/users/me/delete/confirm/:
     post:
       operationId: users_me_delete_confirm_create
@@ -5600,11 +5617,12 @@ components:
       properties:
         confirm:
           type: boolean
-        current_password:
+        otp:
           type: string
           writeOnly: true
       required:
       - confirm
+      - otp
     AdminAvailableActions:
       type: object
       properties:
@@ -7203,6 +7221,29 @@ components:
           nullable: true
         data:
           $ref: '#/components/schemas/DeleteAccountCancelData'
+      required:
+      - data
+      - ok
+    DeleteAccountOtpRequestData:
+      type: object
+      properties:
+        detail:
+          type: string
+        email_masked:
+          type: string
+      required:
+      - detail
+      - email_masked
+    DeleteAccountOtpRequestOkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+          nullable: true
+        data:
+          $ref: '#/components/schemas/DeleteAccountOtpRequestData'
       required:
       - data
       - ok

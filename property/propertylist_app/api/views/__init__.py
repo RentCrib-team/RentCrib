@@ -127,8 +127,10 @@ from .profile import (
     MyProfilePageView,
     DeleteAccountRequestView,
     DeleteAccountCancelView,
+    DeleteAccountOtpRequestView,
     DeactivateAccountView,
     OnboardingCompleteView,
+    
 )
 
 from .payments import stripe

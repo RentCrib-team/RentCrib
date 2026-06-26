@@ -2294,25 +2294,17 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 class AccountDeleteRequestSerializer(serializers.Serializer):
     confirm = serializers.BooleanField()
-    current_password = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    otp = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-
         if not attrs.get("confirm"):
             raise serializers.ValidationError({"confirm": "You must confirm account deletion."})
 
-        # if user has a password, require it (extra safety)
-        if user and user.has_usable_password():
-            pw = (attrs.get("current_password") or "").strip()
-            if not pw:
-                raise serializers.ValidationError({"current_password": "This field is required."})
+        otp = (attrs.get("otp") or "").strip()
+        if not otp:
+            raise serializers.ValidationError({"otp": "OTP is required."})
 
-            authed = authenticate(username=user.username, password=pw)
-            if not authed:
-                raise serializers.ValidationError({"current_password": "Password is incorrect."})
-
+        attrs["otp"] = otp
         return attrs
 
 

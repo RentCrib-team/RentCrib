@@ -14,7 +14,7 @@ from drf_spectacular.utils import extend_schema
 from propertylist_app.api import views
 
 from .views import EmailOTPVerifyView, EmailOTPResendView,PhoneOTPStartView, PhoneOTPVerifyView,RoomListAlt
-from .views.profile import DeleteAccountRequestView, DeleteAccountCancelView
+from .views.profile import DeleteAccountRequestView, DeleteAccountCancelView,DeleteAccountOtpRequestView
 
 from propertylist_app.api.views import (
     # Rooms & Categories
@@ -227,6 +227,7 @@ urlpatterns = [
     # Used when the user requests account deletion with a grace/cancellation period.
     # This disables the account immediately and stores pending deletion timestamps.
     # Do not confuse with the GDPR erasure flow below.
+    path("users/me/delete-account/request-otp/", DeleteAccountOtpRequestView.as_view(), name="user-delete-account-request-otp"),
     path("users/me/delete-account/", DeleteAccountRequestView.as_view(), name="user-delete-account"),
     path("users/me/delete-account/cancel/", DeleteAccountCancelView.as_view(), name="user-delete-account-cancel"),
 

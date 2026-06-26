@@ -1446,11 +1446,13 @@ class EmailOTP(models.Model):
     PURPOSE_EMAIL_VERIFY = "email_verify"
     PURPOSE_PASSWORD_RESET = "password_reset"
     PURPOSE_ACCOUNT_REACTIVATION = "account_reactivation"
+    PURPOSE_ACCOUNT_DELETE = "account_delete"
 
     PURPOSE_CHOICES = [
         (PURPOSE_EMAIL_VERIFY, "Email verification"),
         (PURPOSE_PASSWORD_RESET, "Password reset"),
         (PURPOSE_ACCOUNT_REACTIVATION, "Account reactivation"),
+        (PURPOSE_ACCOUNT_DELETE, "Account delete"),
     ]
 
     user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name="email_otps")
