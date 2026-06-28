@@ -495,7 +495,11 @@ class BookingCancelView(APIView):
     )
     def post(self, request, pk):
         qs = Booking.objects.filter(is_deleted=False)
-        qs = qs if request.user.is_staff else qs.filter(user=request.user)
+
+        if not request.user.is_staff:
+            qs = qs.filter(
+                Q(user=request.user) | Q(room__property_owner=request.user)
+            )
 
         booking = get_object_or_404(qs, pk=pk)
 
@@ -572,9 +576,16 @@ class BookingSuspendView(APIView):
         description="Suspend a booking. Returns ok_response envelope.",
     )
     def post(self, request, pk):
-        booking = get_object_or_404(Booking, pk=pk, is_deleted=False)
+        booking = get_object_or_404(
+            Booking.objects.filter(is_deleted=False).select_related("room"),
+            pk=pk,
+        )
 
-        if booking.user != request.user:
+        if (
+            not request.user.is_staff
+            and booking.user_id != request.user.id
+            and booking.room.property_owner_id != request.user.id
+        ):
             return error_response(
                 message="You are not allowed to suspend this booking.",
                 status_code=status.HTTP_403_FORBIDDEN,
