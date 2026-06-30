@@ -564,9 +564,9 @@ class TenancyRespondSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {"action": "You have already edited this tenancy once."}
                 )
-            
-            
-            
+
+
+
             if "move_in_date" not in attrs or "duration_months" not in attrs:
                 raise serializers.ValidationError(
                     {"non_field_errors": "move_in_date and duration_months are required for propose_changes."}
@@ -685,6 +685,10 @@ class UserReviewSummarySerializer(serializers.Serializer):
     overall_rating_average = serializers.FloatField(allow_null=True)
 
 
+class CreateViewingBookingSerializer(serializers.Serializer):
+    slot_id = serializers.IntegerField(required=False)
+    room_id = serializers.IntegerField(required=False)
+    start = serializers.DateTimeField(required=False)
 
 
 
@@ -748,7 +752,7 @@ class RoomSerializer(serializers.ModelSerializer):
         "must_climb_stairs",
     }
 
-    
+
     def validate_price_per_month(self, value):
         try:
             value = normalise_price(value)
@@ -759,8 +763,8 @@ class RoomSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Monthly rent cannot be negative.")
 
         return validate_price(value, min_val=50.0, max_val=20000.0)
-    
-    
+
+
     def validate_security_deposit(self, value):
         try:
             value = normalise_price(value)
@@ -771,9 +775,9 @@ class RoomSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Security deposit cannot be negative.")
 
         return validate_price(value, min_val=0.0, max_val=50000.0)
-    
-    
-    
+
+
+
     def validate_view_available_custom_dates(self, value):
         if value in (None, ""):
             return []
@@ -804,9 +808,9 @@ class RoomSerializer(serializers.ModelSerializer):
             )
 
         return normalised
-    
-    
-    
+
+
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
 
@@ -936,7 +940,7 @@ class RoomSerializer(serializers.ModelSerializer):
         return attrs
 
     preferred_flatmate_min_age = serializers.IntegerField(required=False, allow_null=True)
-    preferred_flatmate_max_age = serializers.IntegerField(required=False, allow_null=True)    
+    preferred_flatmate_max_age = serializers.IntegerField(required=False, allow_null=True)
 
 
 
@@ -1107,18 +1111,9 @@ class RoomSerializer(serializers.ModelSerializer):
         user = getattr(obj, "property_owner", None)
         profile = getattr(user, "profile", None) if user else None
         return bool(getattr(profile, "advertiser_verified", False))
-        
-    
-# propertylist_app/api/serializers.py
 
-class CreateViewingBookingSerializer(serializers.Serializer):
-    slot_id = serializers.IntegerField(required=False)
-    room_id = serializers.IntegerField(required=False)
-    start = serializers.DateTimeField(required=False)    
-    
-    
-    
-    
+
+
     def _apply_geocode(self, room):
         """
         Populate latitude/longitude from the room location postcode.
@@ -1148,8 +1143,8 @@ class CreateViewingBookingSerializer(serializers.Serializer):
         except Exception:
             # Do not block listing save if geocoder fails.
             return
-    
-    
+
+
     def _sync_availability_slots(self, room):
             """
             Convert landlord-selected viewing dates/times into real bookable slots.
@@ -1235,11 +1230,11 @@ class CreateViewingBookingSerializer(serializers.Serializer):
                 if (start, end) not in existing_set
             ]
 
-            AvailabilitySlot.objects.bulk_create(new_slots, ignore_conflicts=True)    
-        
-        
-        
-    
+            AvailabilitySlot.objects.bulk_create(new_slots, ignore_conflicts=True)
+
+
+
+
     def create(self, validated_data):
         room = super().create(validated_data)
 
@@ -1250,8 +1245,8 @@ class CreateViewingBookingSerializer(serializers.Serializer):
         self._sync_availability_slots(room)
 
         return room
-    
-    
+
+
     def update(self, instance, validated_data):
         old_location = (instance.location or "").strip()
 
@@ -1267,14 +1262,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
         self._sync_availability_slots(room)
 
         return room
-    
-    
-    
-    
-  
-    
-    
-        
+
 
     def validate_title(self, value):
         return validate_listing_title(value)
@@ -1292,7 +1280,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
         return clean
 
-   
+
 
     def validate_amenities(self, value):
         """
@@ -1329,7 +1317,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
         return cleaned
 
-  
+
 
     def validate_location(self, value):
         text = str(value or "").strip()
@@ -1356,8 +1344,8 @@ class CreateViewingBookingSerializer(serializers.Serializer):
         validate_listing_photos([value])
         assert_no_duplicate_files([value])
         return value
-    
-    
+
+
 
     def validate(self, attrs):
         price = attrs.get("price_per_month")
@@ -1515,7 +1503,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
     # SerializerMethodField getters (schema-typed)
     # ---------------------------
 
-    
+
 
     @extend_schema_field(OpenApiTypes.URI)
     def get_owner_avatar(self, obj) -> str | None:
@@ -1613,7 +1601,7 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
     # --- New helpers for 'View Available Days' ---
 
-    
+
 
 
 # --------------------
