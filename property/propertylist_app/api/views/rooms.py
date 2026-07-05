@@ -684,50 +684,78 @@ class RoomPhotoUploadView(APIView):
         },
         description="Upload a room image. Returns ok_response envelope.",
     )
+    
+    
     def post(self, request, pk):
         room = get_object_or_404(Room, pk=pk)
 
+        # Owner check
         if room.property_owner_id != request.user.id:
             return Response(
-                {"ok": False, "message": "You do not have permission to perform this action."},
+                {
+                    "ok": False,
+                    "message": "You do not have permission to perform this action.",
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         file_obj = request.FILES.get("image")
         if not file_obj:
             return Response(
-                {"ok": False, "message": "Validation error.", "errors": {"image": ["This field is required."]}},
+                {
+                    "ok": False,
+                    "message": "Validation error.",
+                    "errors": {"image": ["This field is required."]},
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Extension validation
         allowed_exts = {"jpg", "jpeg", "png", "webp"}
         name_lower = (file_obj.name or "").lower()
         ext = name_lower.rsplit(".", 1)[-1] if "." in name_lower else ""
 
         if ext not in allowed_exts:
             return Response(
-                {"ok": False, "message": "Validation error.", "errors": {"image": ["Only JPG, JPEG, PNG, or WEBP files are allowed."]}},
+                {
+                    "ok": False,
+                    "message": "Validation error.",
+                    "errors": {
+                        "image": ["Only JPG, JPEG, PNG, or WEBP files are allowed."]
+                    },
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Size + duplicate validation
         try:
             validate_listing_photos([file_obj], max_mb=5)
             assert_no_duplicate_files([file_obj])
         except DjangoValidationError as e:
-            msg = e.message if hasattr(e, "message") else str(e)
+            msg = getattr(e, "message", str(e))
             return Response(
-                {"ok": False, "message": "Validation error.", "errors": {"image": [msg]}},
+                {
+                    "ok": False,
+                    "message": "Validation error.",
+                    "errors": {"image": [msg]},
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 🔥 FIXED: create ONLY ONCE
+        # IMPORTANT: reset file pointer before any downstream processing
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+
+        #  SINGLE SOURCE OF TRUTH: create ONCE
         image = RoomImage.objects.create(
             room=room,
             image=file_obj,
             status="pending",
         )
 
-        # AI moderation (non-blocking)
+        #  AI moderation (non-blocking, safe)
         try:
             file_obj.seek(0)
             if should_auto_approve_upload(file_obj):
@@ -736,15 +764,20 @@ class RoomPhotoUploadView(APIView):
         except Exception:
             pass
 
+        # Response (serializer safe context)
         return ok_response(
             RoomImageSerializer(
                 image,
-                context={"request": request, "room": room},
+                context={
+                    "request": request,
+                    "room": room,   # safe for downstream logic if needed
+                },
             ).data,
             message="Room photo uploaded successfully.",
             status_code=status.HTTP_201_CREATED,
         )
             
+        
         
 class RoomPhotoDeleteView(APIView):
     """
