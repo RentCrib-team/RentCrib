@@ -40,7 +40,7 @@ class SoftDeleteQuerySet(models.QuerySet):
         try:
             field_names = {f.name for f in self.model._meta.fields}
             if "status" in field_names:
-                qs = qs.filter(status="active")
+                qs = qs.exclude(status=Room.Lifecycle.HIDDEN)
         except Exception:
             pass
         return qs
@@ -275,6 +275,17 @@ class Room(SoftDeleteModel):
         ("active", "Active"),
         ("hidden", "Hidden"),
     )
+    class Lifecycle:
+        DRAFT = "draft"
+        ACTIVE = "active"
+        HIDDEN = "hidden"
+
+        ALL = {DRAFT, ACTIVE, HIDDEN}
+
+        PUBLIC = {ACTIVE}
+        EDITABLE = {DRAFT, ACTIVE}
+    
+    
     status = models.CharField(
         max_length=16,
         choices=STATUS_CHOICES,
@@ -553,6 +564,30 @@ class Room(SoftDeleteModel):
     def __str__(self):
         return self.title
 
+
+
+
+
+    def set_status(self, new_status: str):
+        """
+        Controlled lifecycle transition gate.
+        """
+
+        allowed = {
+            self.Lifecycle.DRAFT: {self.Lifecycle.DRAFT, self.Lifecycle.ACTIVE, self.Lifecycle.HIDDEN},
+            self.Lifecycle.ACTIVE: {self.Lifecycle.ACTIVE, self.Lifecycle.HIDDEN},
+            self.Lifecycle.HIDDEN: set(),
+        }
+
+        if new_status not in self.Lifecycle.ALL:
+            raise ValidationError("Invalid status value")
+
+        if self.status not in allowed or new_status not in allowed[self.status]:
+            raise ValidationError(
+                f"Invalid transition: {self.status} → {new_status}"
+            )
+
+        self.status = new_status
 
 # -----------
 # UserProfile
@@ -1196,6 +1231,13 @@ class SavedRoom(models.Model):
 # MessageThread
 # -------------
 class MessageThread(SoftDeleteModel):
+    room = models.ForeignKey(
+        "Room",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message_threads",
+    )
     participants = models.ManyToManyField(User, related_name="message_threads")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1410,6 +1452,50 @@ class Report(models.Model):
             models.Index(fields=["target_type", "object_id"]),
             models.Index(fields=["created_at"]),
         ]
+
+    @classmethod
+    def can_transition_status(cls, current: str, new: str) -> bool:
+        """
+        Enforce the moderation report status lifecycle.
+
+        Allowed transitions:
+        open -> in_review/resolved/rejected
+        in_review -> resolved/rejected
+        resolved -> terminal
+        rejected -> terminal
+
+        Same-status updates are allowed as no-op updates.
+        """
+        if not current or not new:
+            return False
+
+        if current == new:
+            return True
+
+        allowed = {
+            "open": {"in_review", "resolved", "rejected"},
+            "in_review": {"resolved", "rejected"},
+            "resolved": set(),
+            "rejected": set(),
+        }
+        return new in allowed.get(current, set())
+
+    def transition_to(self, new_status: str, *, handled_by=None, resolution_notes: str = "") -> None:
+        """
+        Safely transition this report to a new moderation status.
+        """
+        if not self.can_transition_status(self.status, new_status):
+            raise ValidationError(f"Invalid transition from '{self.status}' to '{new_status}'.")
+
+        if resolution_notes:
+            self.resolution_notes = resolution_notes
+
+        self.status = new_status
+
+        if handled_by is not None:
+            self.handled_by = handled_by
+
+        self.save(update_fields=["status", "resolution_notes", "handled_by", "updated_at"])
 
     def __str__(self):
         return f"Report #{self.pk} {self.target_type}:{self.object_id} ({self.status})"

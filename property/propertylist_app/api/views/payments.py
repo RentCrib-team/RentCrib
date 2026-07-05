@@ -328,7 +328,10 @@ def stripe_webhook(request):
                         today = timezone.now().date()
                         base = room.paid_until if (room.paid_until and room.paid_until > today) else today
                         room.paid_until = base + timedelta(days=30)
-                        room.save(update_fields=["paid_until"])
+
+                        # Payment webhook is the only trusted place that can publish a listing.
+                        room.set_status(Room.Lifecycle.ACTIVE)
+                        room.save(update_fields=["status", "paid_until"])
 
                     Notification.objects.create(
                         user=payment.user,
@@ -632,12 +635,12 @@ class CreateListingCheckoutSessionView(APIView):
                     }
                 ],
                 success_url=(
-                    f"{base}{success_path}"
-                    f"?session_id={{CHECKOUT_SESSION_ID}}&payment_id={payment.id}"
+                    f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/success"
+                    f"?session_id={{CHECKOUT_SESSION_ID}}&payment_id={payment.id}&room_id={room.id}"
                 ),
                 cancel_url=(
-                    f"{base}{cancel_path}"
-                    f"?payment_id={payment.id}"
+                    f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/cancel"
+                    f"?payment_id={payment.id}&room_id={room.id}"
                 ),
                 metadata={
                     "payment_id": str(payment.id),

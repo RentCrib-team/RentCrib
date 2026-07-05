@@ -289,6 +289,7 @@ class RoomAV(APIView):
         data.pop("avg_rating", None)
         data.pop("number_rating", None)
         data.pop("paid_until", None)
+        data.pop("status", None)
         data.pop("is_deleted", None)
         data.pop("deleted_at", None)
         data.pop("allow_search_indexing_override", None)
@@ -310,6 +311,9 @@ class RoomAV(APIView):
             "Draft listing created via Step 1 wizard."
         )
         data.setdefault("property_type", "flat")
+        # New listings must always start as draft.
+        # Only successful Stripe payment/webhook can make them active.
+        data["status"] = "draft"
 
         # -----------------------------
         # REQUIRED FIELD: price validation MUST go through serializer
@@ -616,8 +620,9 @@ class RoomUnpublishView(APIView):
             )
 
         # Set hidden (unpublished)
-        room.status = "hidden"
-        room.save(update_fields=["status", "updated_at"])
+        if room.status != "hidden":
+            room.status = "hidden"
+            room.save(update_fields=["status", "updated_at"])
 
         return ok_response(
             {

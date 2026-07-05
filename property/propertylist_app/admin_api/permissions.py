@@ -1,29 +1,14 @@
 from rest_framework.permissions import BasePermission
 
+from propertylist_app.api.permissions import ADMIN_ROLES, user_has_any_admin_role
+
 
 class IsAdminUser(BasePermission):
     """
     Allows access only to approved admin dashboard users.
     """
 
-    ALLOWED_ADMIN_ROLES = {
-        "super_admin",
-        "ops_admin",
-        "moderator",
-        "finance_admin",
-        "support_admin",
-    }
+    ALLOWED_ADMIN_ROLES = ADMIN_ROLES
 
     def has_permission(self, request, view):
-        user = request.user
-
-        if not user or not user.is_authenticated:
-            return False
-
-        if getattr(user, "is_superuser", False):
-            return True
-
-        profile = getattr(user, "profile", None)
-        admin_role = getattr(profile, "admin_role", "") if profile else ""
-
-        return admin_role in self.ALLOWED_ADMIN_ROLES
+        return user_has_any_admin_role(request.user)

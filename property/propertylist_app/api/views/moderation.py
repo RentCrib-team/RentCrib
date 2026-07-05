@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 
-
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 
@@ -150,23 +150,26 @@ class ModerationReportUpdateView(generics.UpdateAPIView):
         hide_room = bool(request.data.get("hide_room"))
 
         if status_new in {"in_review", "resolved", "rejected"}:
-            if not _can_transition_report_status(report.status, status_new):
+            try:
+                report.transition_to(
+                    status_new,
+                    handled_by=request.user,
+                    resolution_notes=notes,
+                )
+            except DjangoValidationError as exc:
                 return Response(
                     {
                         "ok": False,
                         "message": "Validation error.",
-                        "errors": {
-                            "status": [f"Invalid transition from '{report.status}' to '{status_new}'."]
-                        },
+                        "errors": {"status": [str(exc)]},
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            report.status = status_new
-
-        if notes:
-            report.resolution_notes = notes
-        report.handled_by = request.user
-        report.save(update_fields=["status", "resolution_notes", "handled_by", "updated_at"])
+        else:
+            if notes:
+                report.resolution_notes = notes
+            report.handled_by = request.user
+            report.save(update_fields=["resolution_notes", "handled_by", "updated_at"])
 
         if hide_room and report.target_type == "room" and isinstance(report.target, Room):
             if report.target.status != "hidden":
@@ -263,18 +266,17 @@ class ModerationReportModerateActionView(APIView):
                 code="invalid_action",
             )
 
-        if not _can_transition_report_status(report.status, new_status):
+        try:
+            report.transition_to(
+                new_status,
+                handled_by=request.user,
+                resolution_notes=notes,
+            )
+        except DjangoValidationError as exc:
             return Response(
-                {"status": f"Invalid transition from '{report.status}' to '{new_status}'."},
+                {"status": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        # update report
-        if notes:
-            report.resolution_notes = notes
-        report.status = new_status
-        report.handled_by = request.user
-        report.save(update_fields=["status", "resolution_notes", "handled_by", "updated_at"])
 
         # optional: hide the room if requested and target is a room
         if hide_room and report.target_type == "room" and isinstance(report.target, Room):
@@ -489,6 +491,7 @@ def _can_transition_report_status(current: str, new: str) -> bool:
         "open": {"in_review", "resolved", "rejected"},
         "in_review": {"resolved", "rejected"},
         "resolved": set(),
+        
         "rejected": set(),
     }
     return new in allowed.get(current, set())

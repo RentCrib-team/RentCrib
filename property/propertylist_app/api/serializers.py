@@ -656,8 +656,10 @@ class TenancyRespondSerializer(serializers.Serializer):
 
 
 
-
 class TenancyDetailSerializer(serializers.ModelSerializer):
+    can_leave_review = serializers.SerializerMethodField()
+    review_button_reason = serializers.SerializerMethodField()
+
     class Meta:
         model = Tenancy
         fields = [
@@ -666,10 +668,39 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
             "landlord_confirmed_at", "tenant_confirmed_at",
             "status",
             "review_open_at", "review_deadline_at",
+            "can_leave_review", "review_button_reason",
             "still_living_check_at", "still_living_confirmed_at",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+    def get_can_leave_review(self, obj):
+        now = timezone.now()
+
+        if not obj.review_open_at:
+            return False
+
+        if now < obj.review_open_at:
+            return False
+
+        if obj.review_deadline_at and now > obj.review_deadline_at:
+            return False
+
+        return True
+
+    def get_review_button_reason(self, obj):
+        now = timezone.now()
+
+        if not obj.review_open_at:
+            return "Review window is not open yet."
+
+        if now < obj.review_open_at:
+            return "Review will be available later."
+
+        if obj.review_deadline_at and now > obj.review_deadline_at:
+            return "Review window has closed."
+
+        return "Review is available."
 
 
 
@@ -717,6 +748,8 @@ class RoomSerializer(serializers.ModelSerializer):
     landlord_type = serializers.SerializerMethodField(read_only=True)
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
     landlord_verified = serializers.SerializerMethodField(read_only=True)
+    
+    viewing_summary = serializers.SerializerMethodField()
 
     # Amenity keys matching the Step 2/5 chips
     AMENITY_CHOICES = {
@@ -751,6 +784,9 @@ class RoomSerializer(serializers.ModelSerializer):
         "disabled_accessible",
         "must_climb_stairs",
     }
+
+
+
 
 
     def validate_price_per_month(self, value):
@@ -809,7 +845,28 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return normalised
 
+    
+    
+    def get_viewing_summary(self, obj):
+        now = timezone.now()
 
+        qs = Booking.objects.filter(
+            room=obj,
+            is_deleted=False,
+            canceled_at__isnull=True,
+            start__gte=now,
+        ).order_by("start")
+
+        next_booking = qs.first()
+
+        return {
+            "upcoming_count": qs.count(),
+            "next_viewing_at": next_booking.start if next_booking else None,
+            "next_booking_id": next_booking.id if next_booking else None,
+        }
+        
+    
+    
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

@@ -1258,13 +1258,19 @@ class StartThreadFromRoomView(APIView):
 
         existing = (
             MessageThread.objects
+            .filter(Q(room=room) | Q(room__isnull=True))
             .filter(participants=room.property_owner)
             .filter(participants=request.user)
             .distinct()
             .first()
         )
 
-        thread = existing or MessageThread.objects.create()
+        thread = existing or MessageThread.objects.create(room=room)
+
+        if existing and thread.room_id is None:
+            thread.room = room
+            thread.save(update_fields=["room"])
+
         if not existing:
             thread.participants.set(users)
 

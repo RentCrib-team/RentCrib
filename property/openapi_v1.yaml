@@ -8667,15 +8667,20 @@ components:
           readOnly: true
         owner_avatar:
           type: string
+          format: uri
           readOnly: true
         main_photo:
           type: string
+          format: uri
           readOnly: true
         photo_count:
           type: integer
           readOnly: true
         listing_state:
           type: string
+          description: |-
+            Returns one of: 'draft', 'active', 'expired', 'hidden'.
+            Used by the 'My Listings' page to group into tabs.
           readOnly: true
         landlord_type:
           type: string
@@ -9820,15 +9825,20 @@ components:
           readOnly: true
         owner_avatar:
           type: string
+          format: uri
           readOnly: true
         main_photo:
           type: string
+          format: uri
           readOnly: true
         photo_count:
           type: integer
           readOnly: true
         listing_state:
           type: string
+          description: |-
+            Returns one of: 'draft', 'active', 'expired', 'hidden'.
+            Used by the 'My Listings' page to group into tabs.
           readOnly: true
         landlord_type:
           type: string
@@ -10989,6 +10999,12 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        can_leave_review:
+          type: string
+          readOnly: true
+        review_button_reason:
+          type: string
+          readOnly: true
         still_living_check_at:
           type: string
           format: date-time
@@ -11008,6 +11024,7 @@ components:
           format: date-time
           readOnly: true
       required:
+      - can_leave_review
       - created_at
       - duration_months
       - id
@@ -11015,6 +11032,7 @@ components:
       - landlord_confirmed_at
       - move_in_date
       - proposed_by
+      - review_button_reason
       - review_deadline_at
       - review_open_at
       - room

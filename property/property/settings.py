@@ -320,15 +320,15 @@ REST_FRAMEWORK = {
 
     "DEFAULT_THROTTLE_RATES": {
 
-        "user": "120/hour",
-        "anon": "30/hour",
+        "user": "1000/hour",
+        "anon": "100/hour",
 
         "login": "5/minute",
         "register": "5/hour",
         "register_anon": "3/hour",
 
-        "message_user": "12/hour",
-        "messaging": "24/hour",
+        "message_user": "60/hour",
+        "messaging": "120/hour",
 
         "review-create": "5/hour",
 
