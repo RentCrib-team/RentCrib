@@ -41,7 +41,7 @@ from drf_spectacular.utils import (
     OpenApiExample,
 )
 
-
+from propertylist_app.services.turnstile import verify_turnstile
 
 #Project helpers/services
 from propertylist_app.services.captcha import verify_captcha
@@ -97,6 +97,10 @@ logger = logger_auth
 from rest_framework.throttling import ScopedRateThrottle
 
 from .common import error_response
+
+
+
+
 
 
 
@@ -793,7 +797,27 @@ class LoginView(APIView):
             "Returns JWT refresh/access tokens on success."
         ),
     )
+    
+    
     def post(self, request, *args, **kwargs):
+        
+        
+        
+
+        turnstile_token = request.data.get("turnstile_token")
+
+        if not turnstile_token:
+            return Response(
+                {"detail": "Missing security verification"},
+                status=400
+            )
+
+        if not verify_turnstile(turnstile_token, request.META.get("REMOTE_ADDR")):
+            return Response(
+                {"detail": "Security check failed"},
+                status=400
+            )
+
 
 
         try:

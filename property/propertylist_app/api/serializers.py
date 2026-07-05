@@ -1073,11 +1073,11 @@ class RoomSerializer(serializers.ModelSerializer):
     def get_main_photo(self, obj) -> str:
         request = self.context.get("request")
 
-        approved_photo = (
-            obj.roomimage_set.filter(status="approved")
-            .order_by("id")
-            .first()
-        )
+        images_qs = obj.roomimage_set.filter(
+            status__in=["approved", "pending"]
+        ).order_by("id")
+
+        approved_photo = images_qs.first()
 
         if approved_photo and approved_photo.image:
             url = approved_photo.image.url
@@ -1086,6 +1086,7 @@ class RoomSerializer(serializers.ModelSerializer):
             return url
 
         legacy_image = getattr(obj, "image", None)
+
         if legacy_image:
             url = legacy_image.url
             if request is not None:
@@ -1689,7 +1690,7 @@ class RoomPreviewSerializer(serializers.Serializer):
         request = self.context.get("request")
         photos = []
 
-        qs = obj.roomimage_set.filter(status="approved").order_by("id")
+        qs = obj.roomimage_set.filter(status__in=["approved", "pending"]).order_by("id")
         for img in qs:
             if not img.image:
                 continue
@@ -2553,22 +2554,35 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
     # generate thumbnails after upload
     def create(self, validated_data):
-        obj = super().create(validated_data)
-        f = validated_data.get("image")
-        if f:
-            from django.utils.crypto import get_random_string  # local import if needed
-            from propertylist_app.services.image import (
-                generate_thumbnails_and_return_paths,
-            )
+            request = self.context.get("request")
 
-            stem = get_random_string(12)  # unique-ish stem
-            base_dir = "room_images/thumbs"
-            try:
-                generate_thumbnails_and_return_paths(f, base_dir, stem)
-            except Exception:
-                # Do not fail the main upload if thumbnail generation fails
-                pass
-        return obj
+            #  ALWAYS get room from context (NOT payload)
+            room = self.context.get("room")
+
+            if not room:
+                raise ValidationError("Room is required for image upload")
+
+            validated_data["room"] = room
+            validated_data["property_owner"] = room.property_owner
+            validated_data["category"] = room.category
+
+            obj = super().create(validated_data)
+
+            f = validated_data.get("image")
+            if f:
+                from django.utils.crypto import get_random_string
+                from propertylist_app.services.image import generate_thumbnails_and_return_paths
+
+                stem = get_random_string(12)
+                base_dir = "room_images/thumbs"
+
+                try:
+                    generate_thumbnails_and_return_paths(f, base_dir, stem)
+                except Exception:
+                    pass
+
+            return obj
+
 
 
 class AvatarUploadResponseSerializer(serializers.Serializer):

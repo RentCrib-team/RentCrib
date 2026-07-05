@@ -827,26 +827,26 @@ class RoomImage(models.Model):
         is_new = self.pk is None
 
         # Only auto-approve on create, and only when still pending.
-        if is_new and self.status == "pending" and self.image:
-            try:
-                from propertylist_app.services.image import should_auto_approve_upload
+        # if is_new and self.status == "pending" and self.image:
+        #     try:
+        #         from propertylist_app.services.image import should_auto_approve_upload
 
-                file_obj = getattr(self.image, "file", None)
-                if file_obj and should_auto_approve_upload(file_obj):
-                    self.status = "approved"
+        #         file_obj = getattr(self.image, "file", None)
+        #         if file_obj and should_auto_approve_upload(file_obj):
+        #             self.status = "approved"
 
-                # Important: reset pointer for Django storage save
-                if file_obj:
-                    try:
-                        file_obj.seek(0)
-                    except Exception:
-                        pass
+        #         # Important: reset pointer for Django storage save
+        #         if file_obj:
+        #             try:
+        #                 file_obj.seek(0)
+        #             except Exception:
+        #                 pass
 
-            except Exception:
-                # if anything goes wrong, leave as pending for manual moderation
-                pass
+        #     except Exception:
+        #         # if anything goes wrong, leave as pending for manual moderation
+        #         pass
 
-        super().save(*args, **kwargs)
+        # super().save(*args, **kwargs)
 
 
 # -----------------
