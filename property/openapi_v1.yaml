@@ -8691,9 +8691,6 @@ components:
         landlord_verified:
           type: boolean
           readOnly: true
-        viewing_summary:
-          type: string
-          readOnly: true
         preferred_flatmate_min_age:
           type: integer
           nullable: true
@@ -9852,9 +9849,6 @@ components:
         landlord_verified:
           type: boolean
           readOnly: true
-        viewing_summary:
-          type: string
-          readOnly: true
         preferred_flatmate_min_age:
           type: integer
           nullable: true
@@ -10384,7 +10378,6 @@ components:
       - property_type
       - title
       - updated_at
-      - viewing_summary
     RoomAvailabilityBadRequest:
       type: object
       properties:

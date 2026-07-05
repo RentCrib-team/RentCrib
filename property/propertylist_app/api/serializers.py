@@ -749,7 +749,7 @@ class RoomSerializer(serializers.ModelSerializer):
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
     landlord_verified = serializers.SerializerMethodField(read_only=True)
     
-    viewing_summary = serializers.SerializerMethodField()
+    
 
     # Amenity keys matching the Step 2/5 chips
     AMENITY_CHOICES = {
@@ -845,25 +845,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return normalised
 
-    
-    
-    def get_viewing_summary(self, obj):
-        now = timezone.now()
 
-        qs = Booking.objects.filter(
-            room=obj,
-            is_deleted=False,
-            canceled_at__isnull=True,
-            start__gte=now,
-        ).order_by("start")
-
-        next_booking = qs.first()
-
-        return {
-            "upcoming_count": qs.count(),
-            "next_viewing_at": next_booking.start if next_booking else None,
-            "next_booking_id": next_booking.id if next_booking else None,
-        }
         
     
     
@@ -1657,6 +1639,35 @@ class RoomSerializer(serializers.ModelSerializer):
         return "active"
 
     # --- New helpers for 'View Available Days' ---
+
+
+
+class MyListingRoomSerializer(RoomSerializer):
+    viewing_summary = serializers.SerializerMethodField()
+
+    class Meta(RoomSerializer.Meta):
+                fields = "__all__"
+
+    def get_viewing_summary(self, obj):
+        now = timezone.now()
+
+        qs = Booking.objects.filter(
+            room=obj,
+            is_deleted=False,
+            canceled_at__isnull=True,
+            start__gte=now,
+        ).order_by("start")
+
+        next_booking = qs.first()
+
+        return {
+            "upcoming_count": qs.count(),
+            "next_viewing_at": next_booking.start if next_booking else None,
+            "next_booking_id": next_booking.id if next_booking else None,
+        }
+
+
+
 
 
 

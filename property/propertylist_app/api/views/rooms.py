@@ -67,6 +67,7 @@ from propertylist_app.api.serializers import (
     AvatarUploadRequestSerializer,
     AvatarUploadResponseSerializer,
     DetailResponseSerializer,
+    MyListingRoomSerializer,
 )
 from .common import ok_response, _listing_state_for_room, _pagination_meta, _wrap_response_success
 
@@ -201,7 +202,7 @@ class RoomCategorieDetailAV(APIView):
         
 class RoomListGV(CachedAnonymousGETMixin, generics.ListAPIView):
     queryset = Room.objects.alive()
-    serializer_class = RoomSerializer
+    serializer_class = MyListingRoomSerializer
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["avg_rating", "category__name"]
     pagination_class = StandardLimitOffsetPagination
