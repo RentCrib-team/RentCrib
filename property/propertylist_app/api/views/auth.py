@@ -417,24 +417,45 @@ class RegistrationView(generics.CreateAPIView):
         )
 
 
+    # def perform_create(self, serializer):
+    #     request = self.request
+
+    #     turnstile_token = request.data.get("turnstile_token")
+
+    #     if not turnstile_token:
+    #         raise ValidationError("Missing security verification")
+
+    #     if not verify_turnstile(
+    #         turnstile_token,
+    #         request.META.get("REMOTE_ADDR")
+    #     ):
+    #         raise ValidationError("Security check failed")
+
+    #     serializer.save()
+        
+        
+        
+        
+    # TEMPORARY (STAGING ONLY)
+    # Turnstile enforcement is disabled while frontend/mobile complete integration.
+    # Re-enable before production launch.    
     def perform_create(self, serializer):
         request = self.request
 
-        turnstile_token = request.data.get("turnstile_token")
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            turnstile_token = request.data.get("turnstile_token")
 
-        if not turnstile_token:
-            raise ValidationError("Missing security verification")
+            if not turnstile_token:
+                raise ValidationError("Missing security verification")
 
-        if not verify_turnstile(
-            turnstile_token,
-            request.META.get("REMOTE_ADDR")
-        ):
-            raise ValidationError("Security check failed")
+            if not verify_turnstile(
+                turnstile_token,
+                request.META.get("REMOTE_ADDR")
+            ):
+                raise ValidationError("Security check failed")
 
         serializer.save()
         
-    
-    
     
     
 
@@ -852,21 +873,44 @@ class LoginView(APIView):
         
         
 
-        turnstile_token = request.data.get("turnstile_token")
+        # turnstile_token = request.data.get("turnstile_token")
 
-        if not turnstile_token:
-            return Response(
-                {"detail": "Missing security verification"},
-                status=400
-            )
+        # if not turnstile_token:
+        #     return Response(
+        #         {"detail": "Missing security verification"},
+        #         status=400
+        #     )
 
-        if not verify_turnstile(turnstile_token, request.META.get("REMOTE_ADDR")):
-            return Response(
-                {"detail": "Security check failed"},
-                status=400
-            )
+        # if not verify_turnstile(turnstile_token, request.META.get("REMOTE_ADDR")):
+        #     return Response(
+        #         {"detail": "Security check failed"},
+        #         status=400
+        #     )
 
 
+        # TEMPORARY (STAGING ONLY)
+        # Turnstile enforcement is disabled while frontend/mobile complete integration.
+        # Re-enable before production launch.
+        
+        
+        
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            turnstile_token = request.data.get("turnstile_token")
+
+            if not turnstile_token:
+                return Response(
+                    {"detail": "Missing security verification"},
+                    status=400
+                )
+
+            if not verify_turnstile(
+                turnstile_token,
+                request.META.get("REMOTE_ADDR")
+            ):
+                return Response(
+                    {"detail": "Security check failed"},
+                    status=400
+                )
 
         try:
             data = request.data.copy()
