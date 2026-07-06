@@ -42,6 +42,7 @@ from drf_spectacular.utils import (
 )
 
 from propertylist_app.services.turnstile import verify_turnstile
+from drf_spectacular.utils import extend_schema, OpenApiExample
 
 #Project helpers/services
 from propertylist_app.services.captcha import verify_captcha
@@ -67,6 +68,7 @@ from propertylist_app.api.schema_helpers import (
 )
 from .common import ok_response, error_response
 
+from propertylist_app.services.turnstile import verify_turnstile
 
 #Project serializers/models
 from propertylist_app.models import EmailOTP, IdempotencyKey, UserProfile
@@ -291,6 +293,7 @@ def generate_unique_username_from_email(email: str) -> str:
 
 
 class RegistrationView(generics.CreateAPIView):
+    
     serializer_class = RegistrationSerializer
     permission_classes = [AllowAny]
     throttle_classes = [RegisterAnonThrottle]
@@ -414,6 +417,26 @@ class RegistrationView(generics.CreateAPIView):
         )
 
 
+    def perform_create(self, serializer):
+        request = self.request
+
+        turnstile_token = request.data.get("turnstile_token")
+
+        if not turnstile_token:
+            raise ValidationError("Missing security verification")
+
+        if not verify_turnstile(
+            turnstile_token,
+            request.META.get("REMOTE_ADDR")
+        ):
+            raise ValidationError("Security check failed")
+
+        serializer.save()
+        
+    
+    
+    
+    
 
 def build_login_payload(user):
     profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -675,7 +698,32 @@ class AppleRegisterView(APIView):
 
 
 
-
+@extend_schema(
+    request={
+        "type": "object",
+        "properties": {
+            "identifier": {"type": "string"},
+            "password": {"type": "string"},
+            "turnstile_token": {"type": "string"},
+        },
+        "required": ["identifier", "password", "turnstile_token"],
+    },
+    responses={
+        200: "Login successful",
+        400: "Invalid credentials or missing security verification",
+        429: "Rate limited",
+    },
+    examples=[
+        OpenApiExample(
+            "Login Request",
+            value={
+                "identifier": "user@email.com",
+                "password": "password123",
+                "turnstile_token": "cf-turnstile-token-example"
+            }
+        )
+    ]
+)
 class LoginView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "login"
