@@ -7904,10 +7904,18 @@ components:
           type: string
           format: date-time
           readOnly: true
+        is_read:
+          type: string
+          readOnly: true
+        read_at:
+          type: string
+          readOnly: true
       required:
       - body
       - created
       - id
+      - is_read
+      - read_at
       - sender
       - thread
     MessageCreate:

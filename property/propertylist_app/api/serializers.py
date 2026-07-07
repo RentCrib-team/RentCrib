@@ -2681,11 +2681,38 @@ class AvatarUploadRequestSerializer(serializers.Serializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.StringRelatedField(read_only=True)
+    is_read = serializers.SerializerMethodField()
+    read_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ["id", "thread", "sender", "body", "created"]
-        read_only_fields = ["thread", "sender", "created"]
+        fields = ["id", "thread", "sender", "body", "created", "is_read", "read_at"]
+        read_only_fields = ["thread", "sender", "created", "is_read", "read_at"]
+
+    def get_is_read(self, obj):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return False
+
+        # The sender has already "read" their own message.
+        if obj.sender_id == request.user.id:
+            return True
+
+        return obj.reads.filter(user=request.user).exists()
+
+    def get_read_at(self, obj):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return None
+
+        # For sender's own message, no receiver read timestamp is available here.
+        if obj.sender_id == request.user.id:
+            return None
+
+        read = obj.reads.filter(user=request.user).first()
+        return read.read_at if read else None
 
 
 class MessageThreadSerializer(serializers.ModelSerializer):
