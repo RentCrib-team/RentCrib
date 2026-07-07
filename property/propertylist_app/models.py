@@ -816,15 +816,14 @@ class RoomImage(models.Model):
 
 
     def save(self, *args, **kwargs):
-        """
-        Reason:
-        Images created via Django Admin bypass RoomPhotoUploadView,
-        so they can stay with default status='pending'.
+            """
+            Reason:
+            Always call Django's real save so RoomImage rows are written to the database.
 
-        This applies auto-approval consistently on CREATE (Admin/API/shell),
-        but does not override manual moderation (approved/rejected).
-        """
-        is_new = self.pk is None
+            Auto-approval is handled by RoomPhotoUploadView during API upload.
+            Admin/shell-created images can remain pending unless manually approved.
+            """
+            super().save(*args, **kwargs)
 
         # Only auto-approve on create, and only when still pending.
         # if is_new and self.status == "pending" and self.image:
