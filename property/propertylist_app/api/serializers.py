@@ -1309,14 +1309,20 @@ class RoomSerializer(serializers.ModelSerializer):
 
     def validate_description(self, value):
         """
-        Clean the HTML and enforce a minimum description length.
-        User must write at least 25 words.
+        Draft listings can have incomplete descriptions.
+        Completed listings must have at least 25 words.
         """
         clean = sanitize_html_description(value or "")
 
+        # Allow incomplete wizard saves while listing is still a draft.
+        if self.initial_data.get("status") == "draft":
+            return clean
+
         words = [w for w in clean.split() if w.strip()]
         if len(words) < 25:
-            raise serializers.ValidationError("Description must be at least 25 words.")
+            raise serializers.ValidationError(
+                "Description must be at least 25 words."
+            )
 
         return clean
 
@@ -2452,6 +2458,8 @@ class ProfilePageSerializer(serializers.Serializer):
         email = serializers.EmailField()
         username = serializers.CharField()
         date_joined = serializers.DateTimeField()
+        
+        landlord_verified = serializers.BooleanField()
 
         # profile fields
         avatar = serializers.URLField(allow_blank=True, allow_null=True, required=False)

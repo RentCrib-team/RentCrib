@@ -213,6 +213,7 @@ class MyProfilePageView(APIView):
             "tenant_reviews_count": tenant_count,
             "tenant_rating_average": tenant_avg,
             "reviews_preview": preview,
+            "landlord_verified": bool(getattr(profile, "advertiser_verified", False)),
         }
 
         ser = ProfilePageSerializer(payload, context={"request": request})

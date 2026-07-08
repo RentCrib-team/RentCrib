@@ -10378,7 +10378,6 @@ components:
       - category_id
       - created_at
       - deleted_at
-      - description
       - distance_miles
       - id
       - is_deleted

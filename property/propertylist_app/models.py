@@ -113,7 +113,7 @@ class RoomCategorie(models.Model):
 # ----
 class Room(SoftDeleteModel):
     title = models.CharField(max_length=200)
-    description = models.TextField()
+    description = models.TextField(blank=True, default="")
     price_per_month = models.DecimalField(max_digits=8, decimal_places=2)
     security_deposit = models.DecimalField(
         max_digits=8,
