@@ -209,12 +209,18 @@ class NotificationService:
             notification.save(update_fields=["status", "error"])
             return
 
+       
         # render now injects cta_url/inbox_url/next_path/frontend_base_url
         subject, body = NotificationService.render(tpl, notification.context)
 
         try:
             if notification.channel == "email":
-                res = EmailTransport.send(notification.user.email, subject, body)
+                res = EmailTransport.send(
+                    notification.user.email,
+                    subject,
+                    body,
+                    html_message=body,
+                )
             else:
                 res = {"sent": 0}
 
