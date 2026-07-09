@@ -6,9 +6,10 @@ import re
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
+
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-
+from django.conf import settings
 
 from typing import Optional, Any, Dict, List
 from drf_spectacular.types import OpenApiTypes
@@ -42,7 +43,7 @@ from django.utils.crypto import get_random_string
 import re
 
 
-
+from notifications.services import send_security_code_email
 
 
 
@@ -2066,12 +2067,14 @@ class RegistrationSerializer(serializers.ModelSerializer):
         )
         EmailOTP.create_for(user, code, ttl_minutes=10)
 
-        mail.send_mail(
-            subject="Welcome to RentCrib – verify your email",
-            message=f"Your verification code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+        send_security_code_email(
+            to_email=user.email,
+            subject="Welcome to RentCrib – Verify your email",
+            first_name=user.first_name,
+            title="Verify your email",
+            intro="Welcome to RentCrib. Please use the verification code below to confirm your email address.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         return user

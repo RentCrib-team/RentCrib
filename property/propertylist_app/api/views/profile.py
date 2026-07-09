@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-
+from notifications.services import send_security_code_email
 
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -469,12 +469,14 @@ class DeleteAccountOtpRequestView(APIView):
             purpose=EmailOTP.PURPOSE_ACCOUNT_DELETE,
         )
 
-        mail.send_mail(
+        send_security_code_email(
+            to_email=user.email,
             subject="Confirm your RentCrib account deletion",
-            message=f"Your RentCrib account deletion code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+            first_name=user.first_name,
+            title="Confirm account deletion",
+            intro="Use the code below to confirm your RentCrib account deletion request.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         email = user.email or ""

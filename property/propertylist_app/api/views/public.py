@@ -14,6 +14,8 @@ from django.utils import timezone
 from datetime import timedelta
 
 
+from notifications.services import send_security_code_email
+
 from rest_framework import generics
 from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
@@ -1516,12 +1518,14 @@ class EmailOTPResendView(APIView):
             purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
         )
 
-        mail.send_mail(
-            subject="Your new verification code",
-            message=f"Your verification code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+        send_security_code_email(
+            to_email=user.email,
+            subject="Your new RentCrib verification code",
+            first_name=user.first_name,
+            title="Your new verification code",
+            intro="Use the code below to verify your RentCrib email address.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         return ok_response(

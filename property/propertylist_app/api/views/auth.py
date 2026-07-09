@@ -6,7 +6,7 @@ from jwt import PyJWKClient
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-
+from notifications.services import send_security_code_email
 
 #Django
 from django.conf import settings
@@ -369,12 +369,14 @@ class RegistrationView(generics.CreateAPIView):
                     purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
                 )
 
-                mail.send_mail(
+                send_security_code_email(
+                    to_email=existing_user.email,
                     subject="Verify your email (RentCrib)",
-                    message=f"Your verification code is: {code}",
-                    from_email=None,
-                    recipient_list=[existing_user.email],
-                    fail_silently=True,
+                    first_name=existing_user.first_name,
+                    title="Verify your email",
+                    intro="Use the code below to verify your RentCrib email address.",
+                    code=code,
+                    expiry_minutes=settings.OTP_EXPIRY_MINUTES,
                 )
 
                 masked = (
@@ -503,13 +505,15 @@ def _send_account_reactivation_otp(user):
         purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
     )
 
-    mail.send_mail(
-        subject="Reactivate your RentCrib account",
-        message=f"Your RentCrib account reactivation code is: {code}",
-        from_email=None,
-        recipient_list=[user.email],
-        fail_silently=True,
-    )
+    send_security_code_email(
+            to_email=user.email,
+            subject="Reactivate your RentCrib account",
+            first_name=user.first_name,
+            title="Reactivate your account",
+            intro="Use the code below to reactivate your RentCrib account.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
+        )
 
     return code
 
@@ -1355,12 +1359,14 @@ class PasswordResetRequestView(APIView):
         )
 
         # Send email (locmem backend in tests will capture this)
-        mail.send_mail(
-            subject="Reset your password (RentOut)",
-            message=f"Your password reset code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+        send_security_code_email(
+            to_email=user.email,
+            subject="Reset your password (RentCrib)",
+            first_name=user.first_name,
+            title="Reset your password",
+            intro="Use the code below to reset your RentCrib password.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         # Important for tests/dev: return token so tests can use it easily.

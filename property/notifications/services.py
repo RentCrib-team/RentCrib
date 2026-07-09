@@ -107,6 +107,96 @@ class EmailTransport:
         return {"sent": sent}
 
 
+
+def send_security_code_email(
+    *,
+    to_email: str,
+    subject: str,
+    first_name: str = "",
+    title: str,
+    intro: str,
+    code: str,
+    expiry_minutes: int | None = None,
+):
+    """
+    Sends branded RentCrib security/OTP emails.
+    Keeps a plain-text fallback so existing tests can still find the 6-digit code.
+    """
+    expiry_text = f"This code expires in {expiry_minutes} minutes." if expiry_minutes else "This code will expire shortly."
+
+    text_body = (
+        f"Hi {first_name or 'there'},\n\n"
+        f"{intro}\n\n"
+        f"Your code is: {code}\n\n"
+        f"{expiry_text}\n\n"
+        "If you did not request this, you can safely ignore this email.\n\n"
+        "RentCrib"
+    )
+
+    html_body = Template("""
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+{{ title }}
+</h2>
+
+<p>
+Hi {{ first_name|default:"there" }},
+</p>
+
+<p>
+{{ intro }}
+</p>
+
+<p style="
+font-size:32px;
+font-weight:700;
+letter-spacing:6px;
+text-align:center;
+background:#f5f7fb;
+padding:18px;
+border-radius:10px;
+font-family:Arial,sans-serif;
+color:#357af0;
+">
+{{ code }}
+</p>
+
+<p>
+{{ expiry_text }}
+</p>
+
+<p style="color:#666666;">
+If you did not request this, you can safely ignore this email.
+</p>
+
+<p>
+Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""").render(Context({
+        "title": title,
+        "first_name": first_name or "",
+        "intro": intro,
+        "code": code,
+        "expiry_text": expiry_text,
+    }))
+
+    return EmailTransport.send(
+        to_email,
+        subject,
+        text_body,
+        html_message=html_body,
+    )
+
+
+
+
+
+
 class NotificationService:
     @staticmethod
     def _enrich_context(context_dict: dict) -> dict:
