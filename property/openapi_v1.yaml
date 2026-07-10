@@ -1085,6 +1085,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: ''
+  /api/v1/bookings/{id}/reschedule/:
+    patch:
+      operationId: bookings_reschedule_partial_update
+      description: Reschedule a viewing. Only the room owner can reschedule.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBookingReschedule'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBookingReschedule'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBookingReschedule'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/BookingRescheduleResponse'
+                required:
+                - ok
+                - data
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
   /api/v1/bookings/{id}/suspend/:
     post:
       operationId: bookings_suspend_create
@@ -5047,6 +5108,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/DataExportLatestNotFoundResponse'
           description: ''
+  /api/v1/users/me/identity-verification/:
+    get:
+      operationId: users_me_identity_verification_retrieve
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: users_me_identity_verification_create
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/users/me/landlord-verification/:
     get:
       operationId: users_me_landlord_verification_retrieve
@@ -6725,6 +6805,12 @@ components:
           readOnly: true
         room:
           type: integer
+        user_id:
+          type: integer
+          readOnly: true
+        user_name:
+          type: string
+          readOnly: true
         slot:
           type: integer
           nullable: true
@@ -6762,6 +6848,8 @@ components:
       - created_at
       - id
       - room_title
+      - user_id
+      - user_name
     BookingCancelData:
       type: object
       properties:
@@ -6831,6 +6919,16 @@ components:
           type: string
       required:
       - detail
+    BookingRescheduleResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: true
+        message:
+          type: string
+      required:
+      - message
     BookingSuspendData:
       type: object
       properties:
@@ -8544,6 +8642,15 @@ components:
       required:
       - data
       - ok
+    PatchedBookingReschedule:
+      type: object
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
     PatchedMessageThreadStateUpdate:
       type: object
       description: |-

@@ -22,6 +22,7 @@ from propertylist_app.models import (
     SavedRoom, MessageThread, Message, Booking,
     AvailabilitySlot, Payment, Report, Notification, EmailOTP,
     MessageThreadState, ContactMessage,PhoneOTP,Tenancy,LandlordVerificationRequest,
+    IdentityVerificationRequest,
 
 )
 from propertylist_app.validators import (
@@ -2303,6 +2304,38 @@ class LandlordVerificationRequestSerializer(serializers.ModelSerializer):
         return value
 
 
+class IdentityVerificationRequestSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = IdentityVerificationRequest
+        fields = [
+            "id",
+            "document",
+            "status",
+            "notes",
+            "rejection_reason",
+            "reviewed_at",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "status",
+            "rejection_reason",
+            "reviewed_at",
+            "created_at",
+        ]
+
+    def validate_document(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "Verification document must not exceed 10MB."
+            )
+
+        return value
+
+
+
+
 
 class LoginSuccessDataSerializer(serializers.Serializer):
     tokens = LoginTokensSerializer()
@@ -2861,12 +2894,16 @@ class ThreadMarkReadRequestSerializer(serializers.Serializer):
 
 class BookingSerializer(serializers.ModelSerializer):
     room_title = serializers.CharField(source="room.title", read_only=True)
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    user_name = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
         model = Booking
         fields = [
             "id",
             "room",
+            "user_id",
+            "user_name",
             "slot",
             "room_title",
             "start",
@@ -2875,14 +2912,19 @@ class BookingSerializer(serializers.ModelSerializer):
             "created_at",
             "canceled_at",
         ]
-        read_only_fields = ["created_at", "canceled_at"]
+        read_only_fields = [
+            "user_id",
+            "user_name",
+            "created_at",
+            "canceled_at",
+        ]
         extra_kwargs = {
             "room": {"required": False},
             "slot": {"required": False},
             "start": {"required": False},
             "end": {"required": False},
         }
-
+        
 
 class BookingCreateRequestSerializer(serializers.Serializer):
     room = serializers.IntegerField(required=False)
@@ -2892,6 +2934,29 @@ class BookingCreateRequestSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         return Booking.objects.create(**validated_data)
+    
+    
+    
+    
+class BookingRescheduleSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+
+    def validate(self, attrs):
+        start = attrs["start"]
+        end = attrs["end"]
+
+        if start >= end:
+            raise serializers.ValidationError(
+                {"end": "End time must be after start time."}
+            )
+
+        if start <= timezone.now():
+            raise serializers.ValidationError(
+                {"start": "Cannot reschedule a viewing into the past."}
+            )
+
+        return attrs   
 
 
 class BookingResponseEnvelopeSerializer(serializers.Serializer):
