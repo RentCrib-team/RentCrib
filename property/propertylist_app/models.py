@@ -665,6 +665,16 @@ class UserProfile(models.Model):
     phone_verified_at = models.DateTimeField(null=True, blank=True)
     advertiser_verified = models.BooleanField(default=False, db_index=True)
 
+    identity_verified = models.BooleanField(
+        default=False,
+        db_index=True
+    )
+
+    identity_verified_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
     terms_version = models.CharField(max_length=20, blank=True, default="")
     marketing_consent = models.BooleanField(default=False)
@@ -743,6 +753,58 @@ class LandlordVerificationRequest(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.status}"    
+
+
+
+class IdentityVerificationRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="identity_verification_requests",
+    )
+
+    document = models.FileField(
+        upload_to="identity_verification_documents/",
+        blank=True,
+        null=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+
+    notes = models.TextField(blank=True, default="")
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_identity_verifications",
+    )
+
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    rejection_reason = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+
     
 
 # --------
