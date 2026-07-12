@@ -138,10 +138,10 @@ TEMPLATES = [
     },
     
     {
-        "key": "booking.updated",
-        "subject": "Your viewing time has been updated for {{ room.title }}",
-        "body": """
-        {% extends "emails/base.html" %}
+            "key": "booking.updated",
+            "subject": "Your viewing time has been updated for {{ room.title }}",
+            "body": """
+            {% extends "emails/base.html" %}
 
         {% block content %}
 
@@ -337,7 +337,7 @@ TEMPLATES = [
         "key": "tenancy.confirmed",
         "subject": "Tenancy information confirmed for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -385,7 +385,7 @@ TEMPLATES = [
         "key": "tenancy.cancelled",
         "subject": "Tenancy information cancelled for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -432,7 +432,7 @@ TEMPLATES = [
         "key": "tenancy.still_living_check",
         "subject": "Tenancy information check for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -483,7 +483,7 @@ TEMPLATES = [
         "key": "tenancy.review_available",
         "subject": "You can now leave a review for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -527,7 +527,7 @@ TEMPLATES = [
         "key": "tenancy.extension.proposed",
         "subject": "Tenancy extension request received for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -567,7 +567,7 @@ TEMPLATES = [
         "key": "tenancy.extension.accepted",
         "subject": "Tenancy extension information confirmed for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -611,7 +611,7 @@ TEMPLATES = [
         "key": "tenancy.extension.rejected",
         "subject": "Tenancy extension request declined for {{ room_title }}",
         "body": """
-    {% extends "emails/base.html" %}
+        {% extends "emails/base.html" %}
 
     {% block content %}
 
@@ -647,6 +647,31 @@ TEMPLATES = [
     {% endblock %}
     """,
     },
+    
+    {
+    "key": "identity_verification.received",
+    "subject": "We've received your identity verification",
+    "body": """
+    {% include "emails/identity_verification/request_received.html" %}
+    """,
+    },
+    {
+        "key": "identity_verification.approved",
+        "subject": "Your identity has been verified",
+        "body": """
+        {% include "emails/identity_verification/approved.html" %}
+        """,
+    },
+    {
+        "key": "identity_verification.rejected",
+        "subject": "We couldn't complete your identity verification",
+        "body": """
+        {% include "emails/identity_verification/rejected.html" %}
+        """,
+    },
+    
+    
+    
 ]
 
 class Command(BaseCommand):
