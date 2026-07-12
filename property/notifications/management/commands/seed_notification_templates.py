@@ -136,6 +136,62 @@ TEMPLATES = [
     {% endblock %}
     """,
     },
+    
+    {
+        "key": "booking.updated",
+        "subject": "Your viewing time has been updated for {{ room.title }}",
+        "body": """
+        {% extends "emails/base.html" %}
+
+        {% block content %}
+
+        <h2 style="
+        font-family:Arial,sans-serif;
+        color:#333333;
+        ">
+        Your viewing time has been updated
+        </h2>
+
+        <p>
+        Hi {{ user.first_name }},
+        </p>
+
+        <p>
+        The landlord has updated the viewing time for:
+        </p>
+
+        <p>
+        <strong>{{ room.title }}</strong>
+        </p>
+
+        <p>
+        Your new viewing time is:
+        </p>
+
+        <p>
+        <strong>{{ new_start }}</strong>
+        <br>
+        to
+        <br>
+        <strong>{{ new_end }}</strong>
+        </p>
+
+        <p>
+        Please check the updated viewing details through RentCrib.
+        </p>
+
+        {% include "emails/components/button.html" with button_url=cta_url button_text="View updated booking" %}
+
+        <p>
+        Thanks for using RentCrib.
+        </p>
+
+        {% endblock %}
+        """,
+    },
+        
+    
+    
     {
         "key": "listing.expiring",
         "subject": "Your RentCrib listing is expiring soon",

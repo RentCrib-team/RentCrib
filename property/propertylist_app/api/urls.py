@@ -9,7 +9,7 @@ from drf_spectacular.utils import extend_schema
 #from rest_framework.routers import DefaultRouter
 
 
-
+from .views.identity_verification import MyIdentityVerificationView
 
 from propertylist_app.api import views
 
@@ -42,7 +42,7 @@ from propertylist_app.api.views import (
     MessageThreadStateView,MessageStatsView,InboxListView,
 
     # Bookings & Availability
-    create_booking, BookingListCreateView, BookingDetailView, BookingCancelView,
+    create_booking, BookingListCreateView, BookingDetailView, BookingCancelView,BookingRescheduleView,
     RoomAvailabilityView, RoomAvailabilitySlotListCreateView, RoomAvailabilitySlotDeleteView, RoomAvailabilityPublicView,  FindAddressView,BookingDeleteView,
     BookingSuspendView,
 
@@ -183,6 +183,7 @@ urlpatterns = [
     path("bookings/",                      BookingListCreateView.as_view(), name="bookings-list-create"),
     path("bookings/<int:pk>/",             BookingDetailView.as_view(),     name="booking-detail"),
     path("bookings/<int:pk>/cancel/",      BookingCancelView.as_view(),     name="booking-cancel"),
+    path("bookings/<int:pk>/reschedule/",  BookingRescheduleView.as_view(), name="booking-reschedule",),
     path("rooms/<int:pk>/availability/",   RoomAvailabilityView.as_view(),  name="room-availability"),
 
 
@@ -302,6 +303,8 @@ urlpatterns = [
     path("auth/resend-otp/", EmailOTPResendView.as_view(), name="auth-resend-otp"),
     path("auth/phone/start/", PhoneOTPStartView.as_view(), name="auth-phone-start"),
     path("auth/phone/verify/", PhoneOTPVerifyView.as_view(), name="auth-phone-verify"),
+    
+    path("users/me/identity-verification/", MyIdentityVerificationView.as_view(), name="my-identity-verification",),
 
 
     # Home page summary + city list

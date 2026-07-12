@@ -84,6 +84,7 @@ from .bookings import (
     BookingCancelView,
     BookingDeleteView,
     BookingSuspendView,
+    BookingRescheduleView,
 )
 
 from .payments import (

@@ -5110,23 +5110,70 @@ paths:
           description: ''
   /api/v1/users/me/identity-verification/:
     get:
-      operationId: users_me_identity_verification_retrieve
+      operationId: api_v1_users_me_identity_verification_retrieve
+      description: Return the authenticated user's latest identity verification request.
+        The data field is null when no request exists.
       tags:
       - users
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIdentityVerificationGetResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Authentication required.
     post:
-      operationId: users_me_identity_verification_create
+      operationId: api_v1_users_me_identity_verification_create
+      description: Submit an identity verification request for the authenticated user.
+        If a pending request already exists, that request is returned.
       tags:
       - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityVerificationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IdentityVerificationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IdentityVerificationRequest'
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIdentityVerificationPendingResponse'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIdentityVerificationCreateResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Invalid identity verification submission.
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Authentication required.
   /api/v1/users/me/landlord-verification/:
     get:
       operationId: users_me_landlord_verification_retrieve
@@ -7614,6 +7661,48 @@ components:
       - latest_rooms
       - popular_cities
       - stats
+    IdentityVerificationRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document:
+          type: string
+          format: uri
+          nullable: true
+        status:
+          enum:
+          - pending
+          - approved
+          - rejected
+          type: string
+          description: |-
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          x-spec-enum-id: de3702061fc1d433
+          readOnly: true
+        notes:
+          type: string
+        rejection_reason:
+          type: string
+          readOnly: true
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - rejection_reason
+      - reviewed_at
+      - status
     InboxItem:
       type: object
       properties:
@@ -8143,6 +8232,46 @@ components:
           type: string
       required:
       - action
+    MyIdentityVerificationCreateResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/IdentityVerificationRequest'
+      required:
+      - data
+      - message
+      - ok
+    MyIdentityVerificationGetResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          allOf:
+          - $ref: '#/components/schemas/IdentityVerificationRequest'
+          nullable: true
+      required:
+      - message
+      - ok
+    MyIdentityVerificationPendingResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/IdentityVerificationRequest'
+      required:
+      - data
+      - message
+      - ok
     MyProfilePageResponse:
       type: object
       properties:

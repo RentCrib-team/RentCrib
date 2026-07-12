@@ -31,6 +31,7 @@ from propertylist_app.api.serializers import (
     BookingSerializer,
     BookingPreflightRequestSerializer,
     BookingPreflightResponseSerializer,
+    BookingRescheduleSerializer,
 )
 from ..serializers import BookingCreateRequestSerializer, BookingResponseEnvelopeSerializer
 from .common import ok_response, _pagination_meta, _wrap_response_success, error_response
@@ -453,6 +454,123 @@ class BookingDetailView(generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         resp = super().retrieve(request, *args, **kwargs)
         return _wrap_response_success(resp)
+
+
+
+class BookingRescheduleView(APIView):
+    """
+    PATCH /api/v1/bookings/{id}/reschedule/
+
+    Landlord can change viewing date/time.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=BookingRescheduleSerializer,
+        responses={
+            200: standard_response_serializer(
+                "BookingRescheduleResponse",
+                BookingSerializer,
+            ),
+            400: OpenApiResponse(response=ErrorResponseSerializer),
+            403: OpenApiResponse(response=ErrorResponseSerializer),
+            404: OpenApiResponse(response=ErrorResponseSerializer),
+        },
+        description="Reschedule a viewing. Only the room owner can reschedule.",
+    )
+    def patch(self, request, pk):
+
+        booking = get_object_or_404(
+            Booking.objects.filter(is_deleted=False),
+            pk=pk,
+        )
+
+        if booking.room.property_owner != request.user:
+            return error_response(
+                message="Only the landlord can reschedule this viewing.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="not_booking_owner",
+            )
+
+        if booking.status != Booking.STATUS_ACTIVE:
+            return error_response(
+                message="Only active bookings can be rescheduled.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="booking_not_active",
+            )
+
+        if booking.start <= timezone.now():
+            return error_response(
+                message="Cannot reschedule a viewing that has already started.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="booking_started",
+            )
+
+        serializer = BookingRescheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_start = serializer.validated_data["start"]
+        new_end = serializer.validated_data["end"]
+
+        conflict = Booking.objects.filter(
+            room=booking.room,
+            is_deleted=False,
+            canceled_at__isnull=True,
+            start__lt=new_end,
+            end__gt=new_start,
+        ).exclude(id=booking.id).exists()
+
+        if conflict:
+            return error_response(
+                message="Selected time conflicts with another viewing.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="booking_conflict",
+            )
+
+        booking.start = new_start
+        booking.end = new_end
+        booking.save(update_fields=["start", "end"])
+
+
+        # Queue email notification to tenant after successful reschedule
+        from notifications.models import NotificationTemplate, OutboundNotification
+
+        template_exists = NotificationTemplate.objects.filter(
+            key="booking.updated",
+            channel=NotificationTemplate.CHANNEL_EMAIL,
+            is_active=True,
+        ).exists()
+
+        if template_exists:
+            OutboundNotification.objects.create(
+                user=booking.user,
+                channel=NotificationTemplate.CHANNEL_EMAIL,
+                template_key="booking.updated",
+                context={
+                    "user": {
+                        "first_name": booking.user.first_name,
+                    },
+                    "room": {
+                        "title": booking.room.title,
+                    },
+                    "booking_id": booking.id,
+                    "new_start": booking.start.isoformat(),
+                    "new_end": booking.end.isoformat(),
+                    "cta_url": f"/app/bookings/{booking.id}",
+                },
+            )
+
+
+        return ok_response(
+            BookingSerializer(
+                booking,
+                context={"request": request}
+            ).data,
+            message="Viewing rescheduled successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
 
 
 
