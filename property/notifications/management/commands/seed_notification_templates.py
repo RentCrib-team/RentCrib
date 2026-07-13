@@ -47,94 +47,658 @@ TEMPLATES = [
     {% endblock %}
     """,
     },
-    {
-        "key": "booking.new",
-        "subject": "New viewing request for {{ room.title }}",
-        "body": """
-    {% extends "emails/base.html" %}
+{
+    "key": "booking.new",
+    "subject": "New viewing request for {{ room.title }}",
+    "body": """
+{% extends "emails/base.html" %}
 
-    {% block content %}
+{% block content %}
 
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    New viewing request received
-    </h2>
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+>
+    <tr>
+        <td align="center" style="padding:0 0 18px;">
 
-    <p>
-    Hi {{ user.first_name }},
-    </p>
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:12px;
+                line-height:1.4;
+                font-weight:700;
+                letter-spacing:1.2px;
+                text-transform:uppercase;
+                color:#357af0;
+            ">
+                Viewing request
+            </p>
 
-    <p>
-    <strong>{{ booker.name }}</strong> has requested to view your room:
-    </p>
+        </td>
+    </tr>
 
-    <p>
-    <strong>{{ room.title }}</strong>
-    </p>
+    <tr>
+        <td align="center" style="padding:0 0 20px;">
 
-    <p>
-    A potential tenant is interested in your listing. You can review the request and continue the conversation through RentCrib.
-    </p>
+            <table
+                role="presentation"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+            >
+                <tr>
+                    <td
+                        align="center"
+                        valign="middle"
+                        style="
+                            width:62px;
+                            height:62px;
+                            background-color:#edf4ff;
+                            border:1px solid #d7e5fb;
+                            border-radius:5px;
+                            font-size:29px;
+                            line-height:62px;
+                        "
+                    >
+                        &#128197;
+                    </td>
+                </tr>
+            </table>
 
-    <p>
-    <strong>Booking reference:</strong><br>
-    {{ booking_id }}
-    </p>
+        </td>
+    </tr>
 
-    {% include "emails/components/button.html" with button_url=cta_url button_text="View request" %}
+    <tr>
+        <td align="center" style="padding:0 0 10px;">
 
-    <p>
-    Thanks for using RentCrib.
-    </p>
+            <h1 style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:28px;
+                line-height:1.25;
+                font-weight:700;
+                letter-spacing:-0.4px;
+                color:#172033;
+            ">
+                New viewing request received
+            </h1>
 
-    {% endblock %}
-    """,
-    },
-    {
+        </td>
+    </tr>
+
+    <tr>
+        <td align="center" style="padding:0 0 28px;">
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:15px;
+                line-height:1.65;
+                color:#6b7689;
+            ">
+                Someone is interested in viewing your room.
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td>
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:16px;
+                line-height:1.7;
+                color:#4f5b70;
+            ">
+                Hi {{ user.first_name|default:user.username|default:"there" }},
+            </p>
+
+            <p style="
+                margin:16px 0 0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:16px;
+                line-height:1.75;
+                color:#4f5b70;
+            ">
+                <strong style="color:#172033;">
+                    {{ booker.name }}
+                </strong>
+                has requested to view your room:
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:26px 0 0;">
+
+            <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="
+                    width:100%;
+                    background-color:#f7f9fc;
+                    border:1px solid #dfe6ef;
+                    border-radius:5px;
+                "
+            >
+                <tr>
+                    <td style="padding:21px 22px;">
+
+                        <p style="
+                            margin:0;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:12px;
+                            line-height:1.4;
+                            font-weight:700;
+                            letter-spacing:0.7px;
+                            text-transform:uppercase;
+                            color:#7a8497;
+                        ">
+                            Room
+                        </p>
+
+                        <p style="
+                            margin:7px 0 0;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:17px;
+                            line-height:1.5;
+                            font-weight:700;
+                            color:#172033;
+                        ">
+                            {{ room.title }}
+                        </p>
+
+                        <p style="
+                            margin:17px 0 0;
+                            padding-top:16px;
+                            border-top:1px solid #e4e9f0;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:13px;
+                            line-height:1.6;
+                            color:#657085;
+                        ">
+                            Viewing reference:
+                            <strong style="color:#3f4b5f;">
+                                {{ booking_id }}
+                            </strong>
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:24px 0 0;">
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:15px;
+                line-height:1.7;
+                color:#566176;
+            ">
+                Review the request and continue the conversation with the prospective tenant through RentCrib.
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td align="center" style="padding:30px 0 0;">
+
+            <table
+                role="presentation"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+            >
+                <tr>
+                    <td
+                        align="center"
+                        bgcolor="#357af0"
+                        style="
+                            background-color:#357af0;
+                            border-radius:4px;
+                        "
+                    >
+                        <a
+                            href="{{ cta_url }}"
+                            style="
+                                display:inline-block;
+                                min-width:190px;
+                                padding:15px 28px;
+                                font-family:Arial, Helvetica, sans-serif;
+                                font-size:15px;
+                                line-height:1.2;
+                                font-weight:700;
+                                color:#ffffff;
+                                text-decoration:none;
+                                text-align:center;
+                                border-radius:4px;
+                            "
+                        >
+                            View request
+                        </a>
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td align="center" style="padding:22px 0 0;">
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:13px;
+                line-height:1.65;
+                color:#8892a3;
+            ">
+                You can respond to the viewing request from your RentCrib account.
+            </p>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
+        {
         "key": "booking.confirmation",
         "subject": "Your viewing request has been sent for {{ room.title }}",
         "body": """
-        {% extends "emails/base.html" %}
+{% extends "emails/base.html" %}
 
-    {% block content %}
+{% block content %}
 
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Your viewing request has been sent
-    </h2>
+<table
+    role="presentation"
+    width="100%"
+    cellspacing="0"
+    cellpadding="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+    <tr>
+        <td align="center" style="padding:0 0 18px;">
 
-    <p>
-    Hi {{ user.first_name }},
-    </p>
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:12px;
+                font-weight:700;
+                line-height:1.4;
+                letter-spacing:1.8px;
+                text-transform:uppercase;
+                color:#357af0;
+            ">
+                Viewing request
+            </p>
 
-    <p>
-    Your request to view
-    <strong>{{ room.title }}</strong>
-    has been successfully sent to
-    <strong>{{ room.owner_name }}</strong>.
-    </p>
+        </td>
+    </tr>
 
-    <p>
-    The landlord will review your request and respond through RentCrib.
-    </p>
+    <tr>
+        <td align="center" style="padding:0 0 20px;">
 
-    <p>
-    <strong>Booking reference:</strong><br>
-    {{ booking_id }}
-    </p>
+            <table
+                role="presentation"
+                width="72"
+                height="72"
+                cellspacing="0"
+                cellpadding="0"
+                border="0"
+                style="
+                    width:72px;
+                    height:72px;
+                    border-collapse:separate;
+                    background-color:#eef4ff;
+                    border:1px solid #d8e5ff;
+                    border-radius:5px;
+                "
+            >
+                <tr>
+                    <td
+                        align="center"
+                        valign="middle"
+                        style="
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:34px;
+                            line-height:72px;
+                        "
+                    >
+                        ✓
+                    </td>
+                </tr>
+            </table>
 
-    {% include "emails/components/button.html" with button_url=cta_url button_text="View booking" %}
+        </td>
+    </tr>
 
-    <p>
-    Thank you for using RentCrib.
-    </p>
+    <tr>
+        <td align="center" style="padding:0 0 14px;">
 
-    {% endblock %}
-    """,
+            <h1 style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:30px;
+                font-weight:700;
+                line-height:1.25;
+                letter-spacing:-0.4px;
+                color:#172033;
+            ">
+                Your viewing request has been sent
+            </h1>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td align="center" style="padding:0 0 28px;">
+
+            <p style="
+                max-width:500px;
+                margin:0 auto;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:16px;
+                line-height:1.7;
+                color:#606b7d;
+            ">
+                The landlord has received your request and can now review the proposed viewing.
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:0 0 22px;">
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:16px;
+                line-height:1.7;
+                color:#354052;
+            ">
+                Hi {{ user.first_name }},
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:0 0 24px;">
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:16px;
+                line-height:1.7;
+                color:#354052;
+            ">
+                Your request to view
+                <strong style="color:#172033;">{{ room.title }}</strong>
+                has been successfully sent to
+                <strong style="color:#172033;">{{ room.owner_name }}</strong>.
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:0 0 26px;">
+
+            <table
+                role="presentation"
+                width="100%"
+                cellspacing="0"
+                cellpadding="0"
+                border="0"
+                style="
+                    width:100%;
+                    border-collapse:separate;
+                    background-color:#f7f9fc;
+                    border:1px solid #e4e9f1;
+                    border-radius:5px;
+                "
+            >
+                <tr>
+                    <td style="padding:22px 24px;">
+
+                        <p style="
+                            margin:0 0 7px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:12px;
+                            font-weight:700;
+                            line-height:1.4;
+                            letter-spacing:1.2px;
+                            text-transform:uppercase;
+                            color:#7b8798;
+                        ">
+                            Property
+                        </p>
+
+                        <p style="
+                            margin:0 0 20px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:17px;
+                            font-weight:700;
+                            line-height:1.5;
+                            color:#172033;
+                        ">
+                            {{ room.title }}
+                        </p>
+
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellspacing="0"
+                            cellpadding="0"
+                            border="0"
+                            style="
+                                width:100%;
+                                border-collapse:collapse;
+                            "
+                        >
+                            <tr>
+                                <td
+                                    valign="top"
+                                    style="
+                                        width:50%;
+                                        padding:0 12px 0 0;
+                                    "
+                                >
+                                    <p style="
+                                        margin:0 0 5px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        font-weight:700;
+                                        line-height:1.4;
+                                        letter-spacing:0.8px;
+                                        text-transform:uppercase;
+                                        color:#7b8798;
+                                    ">
+                                        Sent to
+                                    </p>
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:15px;
+                                        font-weight:600;
+                                        line-height:1.5;
+                                        color:#354052;
+                                    ">
+                                        {{ room.owner_name }}
+                                    </p>
+                                </td>
+
+                                <td
+                                    valign="top"
+                                    style="
+                                        width:50%;
+                                        padding:0 0 0 12px;
+                                        border-left:1px solid #e4e9f1;
+                                    "
+                                >
+                                    <p style="
+                                        margin:0 0 5px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        font-weight:700;
+                                        line-height:1.4;
+                                        letter-spacing:0.8px;
+                                        text-transform:uppercase;
+                                        color:#7b8798;
+                                    ">
+                                        Reference
+                                    </p>
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:15px;
+                                        font-weight:600;
+                                        line-height:1.5;
+                                        word-break:break-word;
+                                        color:#354052;
+                                    ">
+                                        {{ booking_id }}
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:0 0 28px;">
+
+            <table
+                role="presentation"
+                width="100%"
+                cellspacing="0"
+                cellpadding="0"
+                border="0"
+                style="
+                    width:100%;
+                    border-collapse:separate;
+                    background-color:#fffaf0;
+                    border-left:4px solid #f4b740;
+                    border-radius:4px;
+                "
+            >
+                <tr>
+                    <td style="padding:17px 20px;">
+
+                        <p style="
+                            margin:0;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:14px;
+                            line-height:1.65;
+                            color:#5f5136;
+                        ">
+                            <strong style="color:#473b26;">What happens next?</strong><br>
+                            The landlord will review your request and respond through RentCrib. You can also continue the conversation from your account.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td align="center" style="padding:0 0 18px;">
+
+            {% include "emails/components/button.html" with button_url=cta_url button_text="View viewing request" %}
+
+        </td>
+    </tr>
+
+    <tr>
+        <td align="center" style="padding:0 0 28px;">
+
+            <p style="
+                margin:0 0 6px;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:13px;
+                line-height:1.6;
+                color:#8892a3;
+            ">
+                Button not working? Copy and paste this link into your browser:
+            </p>
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:13px;
+                line-height:1.6;
+                word-break:break-all;
+            ">
+                <a
+                    href="{{ cta_url }}"
+                    style="
+                        color:#357af0;
+                        text-decoration:underline;
+                    "
+                >
+                    {{ cta_url }}
+                </a>
+            </p>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td
+            style="
+                padding-top:24px;
+                border-top:1px solid #edf0f5;
+            "
+        >
+
+            <p style="
+                margin:0;
+                font-family:Arial, Helvetica, sans-serif;
+                font-size:13px;
+                line-height:1.65;
+                color:#8892a3;
+            ">
+                This email confirms that your viewing request was submitted successfully. It does not mean the viewing has been accepted yet.
+            </p>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
     },
     
     {
@@ -692,3 +1256,4 @@ class Command(BaseCommand):
             if was_created:
                 created += 1
         self.stdout.write(self.style.SUCCESS(f"Seeded templates. New created: {created}"))
+
