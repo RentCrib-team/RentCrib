@@ -61,6 +61,10 @@ TEMPLATES = [
     cellpadding="0"
     cellspacing="0"
     border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
 >
     <tr>
         <td align="center" style="padding:0 0 18px;">
@@ -89,6 +93,9 @@ TEMPLATES = [
                 cellpadding="0"
                 cellspacing="0"
                 border="0"
+                style="
+                    border-collapse:separate;
+                "
             >
                 <tr>
                     <td
@@ -100,11 +107,12 @@ TEMPLATES = [
                             background-color:#edf4ff;
                             border:1px solid #d7e5fb;
                             border-radius:5px;
-                            font-size:29px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:28px;
                             line-height:62px;
                         "
                     >
-                        &#128197;
+                        &#128100;
                     </td>
                 </tr>
             </table>
@@ -131,7 +139,7 @@ TEMPLATES = [
     </tr>
 
     <tr>
-        <td align="center" style="padding:0 0 28px;">
+        <td align="center" style="padding:0 0 30px;">
 
             <p style="
                 margin:0;
@@ -147,7 +155,7 @@ TEMPLATES = [
     </tr>
 
     <tr>
-        <td>
+        <td style="padding:0 0 16px;">
 
             <p style="
                 margin:0;
@@ -159,8 +167,14 @@ TEMPLATES = [
                 Hi {{ user.first_name|default:user.username|default:"there" }},
             </p>
 
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:0 0 24px;">
+
             <p style="
-                margin:16px 0 0;
+                margin:0;
                 font-family:Arial, Helvetica, sans-serif;
                 font-size:16px;
                 line-height:1.75;
@@ -169,38 +183,39 @@ TEMPLATES = [
                 <strong style="color:#172033;">
                     {{ booker.name }}
                 </strong>
-                has requested to view your room:
+                has requested to view your room.
             </p>
 
         </td>
     </tr>
 
     <tr>
-        <td style="padding:26px 0 0;">
+        <td align="center" style="padding:0 0 24px;">
 
             <table
                 role="presentation"
-                width="100%"
+                width="82%"
                 cellpadding="0"
                 cellspacing="0"
                 border="0"
                 style="
-                    width:100%;
+                    width:82%;
+                    border-collapse:separate;
                     background-color:#f7f9fc;
                     border:1px solid #dfe6ef;
                     border-radius:5px;
                 "
             >
                 <tr>
-                    <td style="padding:21px 22px;">
+                    <td style="padding:20px 22px;">
 
                         <p style="
-                            margin:0;
+                            margin:0 0 6px;
                             font-family:Arial, Helvetica, sans-serif;
-                            font-size:12px;
+                            font-size:11px;
                             line-height:1.4;
                             font-weight:700;
-                            letter-spacing:0.7px;
+                            letter-spacing:0.8px;
                             text-transform:uppercase;
                             color:#7a8497;
                         ">
@@ -208,7 +223,7 @@ TEMPLATES = [
                         </p>
 
                         <p style="
-                            margin:7px 0 0;
+                            margin:0;
                             font-family:Arial, Helvetica, sans-serif;
                             font-size:17px;
                             line-height:1.5;
@@ -218,19 +233,93 @@ TEMPLATES = [
                             {{ room.title }}
                         </p>
 
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="
+                                width:100%;
+                                margin-top:16px;
+                                border-collapse:collapse;
+                            "
+                        >
+                            <tr>
+                                <td
+                                    style="
+                                        padding-top:14px;
+                                        border-top:1px solid #e4e9f0;
+                                    "
+                                >
+
+                                    <p style="
+                                        margin:0 0 4px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:11px;
+                                        line-height:1.4;
+                                        font-weight:700;
+                                        letter-spacing:0.7px;
+                                        text-transform:uppercase;
+                                        color:#7a8497;
+                                    ">
+                                        Viewing reference
+                                    </p>
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:14px;
+                                        line-height:1.5;
+                                        font-weight:600;
+                                        color:#3f4b5f;
+                                    ">
+                                        {{ booking_id }}
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:0 0 24px;">
+
+            <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="
+                    width:100%;
+                    border-collapse:separate;
+                    background-color:#f4f8ff;
+                    border-left:4px solid #357af0;
+                    border-radius:4px;
+                "
+            >
+                <tr>
+                    <td style="padding:16px 18px;">
+
                         <p style="
-                            margin:17px 0 0;
-                            padding-top:16px;
-                            border-top:1px solid #e4e9f0;
+                            margin:0;
                             font-family:Arial, Helvetica, sans-serif;
-                            font-size:13px;
-                            line-height:1.6;
-                            color:#657085;
+                            font-size:14px;
+                            line-height:1.65;
+                            color:#566176;
                         ">
-                            Viewing reference:
-                            <strong style="color:#3f4b5f;">
-                                {{ booking_id }}
+                            <strong style="color:#172033;">
+                                What happens next?
                             </strong>
+                            <br>
+                            Review the request and continue the conversation with the prospective tenant through RentCrib.
                         </p>
 
                     </td>
@@ -241,23 +330,7 @@ TEMPLATES = [
     </tr>
 
     <tr>
-        <td style="padding:24px 0 0;">
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:15px;
-                line-height:1.7;
-                color:#566176;
-            ">
-                Review the request and continue the conversation with the prospective tenant through RentCrib.
-            </p>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:30px 0 0;">
+        <td align="center" style="padding:0;">
 
             <table
                 role="presentation"
@@ -295,22 +368,6 @@ TEMPLATES = [
                     </td>
                 </tr>
             </table>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:22px 0 0;">
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:13px;
-                line-height:1.65;
-                color:#8892a3;
-            ">
-                You can respond to the viewing request from your RentCrib account.
-            </p>
 
         </td>
     </tr>
