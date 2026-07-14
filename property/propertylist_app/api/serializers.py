@@ -646,10 +646,21 @@ class TenancyRespondSerializer(serializers.Serializer):
             tenancy.tenant_confirmed_at = now
 
         # if both confirmed â†’ lock schedule + set status
+        # If both parties have confirmed, lock the tenancy schedule and
+        # remove the room from active availability.
         if tenancy.landlord_confirmed_at and tenancy.tenant_confirmed_at:
             today = timezone.localdate()
-            tenancy.status = STATUS_ACTIVE if tenancy.move_in_date <= today else STATUS_CONFIRMED
+            tenancy.status = (
+                STATUS_ACTIVE
+                if tenancy.move_in_date <= today
+                else STATUS_CONFIRMED
+            )
             _set_schedule_fields()
+
+            room = tenancy.room
+            if room.is_available:
+                room.is_available = False
+                room.save(update_fields=["is_available", "updated_at"])
         else:
             tenancy.status = STATUS_PROPOSED
 
@@ -661,11 +672,12 @@ class TenancyRespondSerializer(serializers.Serializer):
 class TenancyDetailSerializer(serializers.ModelSerializer):
     can_leave_review = serializers.SerializerMethodField()
     review_button_reason = serializers.SerializerMethodField()
+    tenant_avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenancy
         fields = [
-            "id", "room", "landlord", "tenant", "proposed_by",
+            "id", "room", "landlord", "tenant", "tenant_avatar", "proposed_by",
             "move_in_date", "duration_months",
             "landlord_confirmed_at", "tenant_confirmed_at",
             "status",
@@ -675,6 +687,29 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = fields
+        
+        
+        
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_tenant_avatar(self, obj):
+        tenant = getattr(obj, "tenant", None)
+        profile = getattr(tenant, "profile", None) if tenant else None
+        avatar = getattr(profile, "avatar", None) if profile else None
+
+        if not avatar:
+            return None
+
+        try:
+            url = avatar.url
+        except (ValueError, AttributeError):
+            return None
+
+        request = self.context.get("request")
+        if request is not None:
+            return request.build_absolute_uri(url)
+
+        return url    
+        
 
     def get_can_leave_review(self, obj):
         now = timezone.now()
@@ -1112,9 +1147,12 @@ class RoomSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
+        if not getattr(obj, "is_available", True):
+            return "rented"
+
         annotated = getattr(obj, "listing_state", None)
         if annotated:
-            return annotated
+            return str(annotated)
 
         paid_until = getattr(obj, "paid_until", None)
         status = getattr(obj, "status", None)
@@ -1618,14 +1656,17 @@ class RoomSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
         """
-        Returns one of: 'draft', 'active', 'expired', 'hidden'.
-        Used by the 'My Listings' page to group into tabs.
+        Returns one of: 'draft', 'active', 'expired', 'hidden', 'rented'.
+        Used by the 'My Listings' page to group listings into tabs.
         """
+        if not getattr(obj, "is_available", True):
+            return "rented"
+
         # If the queryset annotated a listing_state, reuse it.
         state = getattr(obj, "listing_state", None)
         if state:
             return str(state)
-
+        
         today = date.today()
 
         # 1) Explicit hidden + past paid_until = expired
@@ -2765,6 +2806,7 @@ class MessageThreadSerializer(serializers.ModelSerializer):
     )
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
+    other_user = serializers.SerializerMethodField(read_only=True)
 
     # NEW: per-user state fields
     label = serializers.SerializerMethodField()
@@ -2775,6 +2817,7 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "participants",
+            "other_user",
             "created_at",
             "last_message",
             "unread_count",
@@ -2782,6 +2825,52 @@ class MessageThreadSerializer(serializers.ModelSerializer):
             "in_bin",
         ]
 
+
+
+    @extend_schema_field(
+    serializers.DictField(
+        child=serializers.CharField(allow_null=True),
+        allow_null=True,
+    )
+)
+    def get_other_user(self, obj):
+        request = self.context.get("request")
+        current_user = getattr(request, "user", None)
+
+        if not current_user or not current_user.is_authenticated:
+            return None
+
+        participants = getattr(obj, "_prefetched_objects_cache", {}).get("participants")
+
+        if participants is not None:
+            other_user = next(
+                (user for user in participants if user.id != current_user.id),
+                None,
+            )
+        else:
+            other_user = obj.participants.exclude(id=current_user.id).first()
+
+        if not other_user:
+            return None
+
+        profile = getattr(other_user, "profile", None)
+        avatar = getattr(profile, "avatar", None) if profile else None
+
+        avatar_url = None
+        if avatar:
+            try:
+                avatar_url = avatar.url
+                if request is not None:
+                    avatar_url = request.build_absolute_uri(avatar_url)
+            except (ValueError, AttributeError):
+                avatar_url = None
+
+        return {
+            "id": other_user.id,
+            "username": other_user.username,
+            "avatar": avatar_url,
+        }
+        
 
     @extend_schema_field(MessageSerializer(allow_null=True))
     def get_last_message(self, obj):
@@ -2792,7 +2881,14 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         else:
             msg = obj.messages.order_by("-created").first()
 
-        return MessageSerializer(msg).data if msg else None
+        return (
+            MessageSerializer(
+                msg,
+                context={"request": self.context.get("request")},
+            ).data
+            if msg
+            else None
+        )
 
     @extend_schema_field(serializers.IntegerField())
     def get_unread_count(self, obj):

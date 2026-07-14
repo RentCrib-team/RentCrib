@@ -2,7 +2,7 @@
 
 
 
-from django.db.models import Count, Exists, Max, OuterRef, Q, Subquery
+from django.db.models import Count, Exists, Max, OuterRef, Q, Subquery, Prefetch
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -35,6 +35,7 @@ from propertylist_app.models import (
     Notification,
     Room,
     SavedRoom,
+    UserProfile,
 )
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.throttling import MessageUserThrottle, MessagingScopedThrottle
@@ -147,7 +148,10 @@ class InboxListView(APIView):
                     distinct=True,
                 ),
             )
-            .prefetch_related("participants", "messages")
+            .prefetch_related(
+                "participants__profile",
+                "messages",
+            )
             .order_by("-last_msg_at")
         )[:200]
 
@@ -455,7 +459,10 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                         distinct=True,
                     ),
                 )
-                .prefetch_related("participants", "messages")
+                .prefetch_related(
+                    "participants__profile",
+                    "messages",
+                )
             )
 
         folder = (params.get("folder") or "").strip().lower()
