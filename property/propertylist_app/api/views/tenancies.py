@@ -323,7 +323,10 @@ class TenancyProposeView(APIView):
         task_send_tenancy_notification.delay(tenancy.id, "proposed")
 
         return ok_response(
-            TenancyDetailSerializer(tenancy).data,
+            TenancyDetailSerializer(
+                tenancy,
+                context={"request": request},
+            ).data,
             message="Tenancy proposal created successfully.",
             status_code=status.HTTP_201_CREATED,
         )
@@ -354,7 +357,12 @@ class TenancyRespondView(APIView):
         Tenancy = apps.get_model("propertylist_app", "Tenancy")
 
         tenancy = (
-            Tenancy.objects.select_related("room", "landlord", "tenant")
+            Tenancy.objects.select_related(
+                "room",
+                "landlord",
+                "tenant",
+                "tenant__profile",
+            )
             .filter(id=tenancy_id)
             .first()
         )
@@ -397,7 +405,15 @@ class MyTenanciesView(ListAPIView):
         if getattr(self, "swagger_fake_view", False):
             return Tenancy.objects.none()
         user = self.request.user
-        return Tenancy.objects.filter(Q(tenant=user) | Q(landlord=user)).order_by("-created_at")
+        return (Tenancy.objects.select_related(
+                "room",
+                "landlord",
+                "tenant",
+                "tenant__profile",
+            )
+            .filter(Q(tenant=user) | Q(landlord=user))
+            .order_by("-created_at")
+        )
 
 
 
