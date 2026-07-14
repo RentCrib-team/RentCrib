@@ -1,4 +1,4 @@
-from .views.common import *
+﻿from .views.common import *
 from .views.auth import *
 from .views.rooms import *
 from .views.bookings import *
@@ -9,3 +9,5 @@ from .views.notifications import *
 from .views.profile import *
 from .views.privacy import *
 from .views.reviews import *
+from .views.public import *
+from .views.tenancies import *

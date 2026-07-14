@@ -17,10 +17,19 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
+import sys
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
-TESTING = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+def is_production():
+    return not DEBUG and not TESTING
+
+
+TESTING = (
+    "pytest" in sys.modules
+    or os.getenv("DJANGO_SETTINGS_MODULE") == "property.settings_test"
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,28 +47,28 @@ OTP_EXPIRY_MINUTES = 10
 # -----------------------------
 # Core security / environment
 # -----------------------------
+DJANGO_DEBUG_RAW = os.getenv("DJANGO_DEBUG", "false").lower()
+DEBUG = DJANGO_DEBUG_RAW in {"1", "true", "yes"}
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     # Safe behaviour:
     # - local/dev/testing: allow a temporary key so you can still run
     # - production: you MUST set DJANGO_SECRET_KEY
-    if os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes"} or TESTING:
+    if DEBUG or TESTING:
         SECRET_KEY = "dev-only-unsafe-secret-key-change-me"
     else:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY is required in production.")
 
-DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes"}
-
 # -----------------------------
 # Production-grade security (staging + production)
 # -----------------------------
-if not DEBUG:
+if not DEBUG and not TESTING:
     # Render terminates TLS and forwards requests to Django.
-    # This tells Django the original scheme was https.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
     # Force HTTPS
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False
 
     # Secure cookies over HTTPS only
     SESSION_COOKIE_SECURE = True
@@ -73,7 +82,7 @@ if not DEBUG:
     # HSTS (start low; increase later once confirmed stable)
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600"))  # 1 hour
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "false").lower() in {"1", "true", "yes"}
 
 
 
@@ -109,10 +118,54 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 
+TURNSTILE_SITE_KEY = " 0x4AAAAAADwEBB9wTWqh9QFI"
+TURNSTILE_SECRET_KEY = "0x4AAAAAADwEBHSlbSnV4Sa08u8UL3eWPuI"
+
+TURNSTILE_REQUIRED = False
+# TURNSTILE_REQUIRED = True
+
+missing_stripe = []
+
+if not STRIPE_SECRET_KEY:
+    missing_stripe.append("STRIPE_SECRET_KEY")
+
+if not STRIPE_PUBLISHABLE_KEY:
+    missing_stripe.append("STRIPE_PUBLISHABLE_KEY")
+
+if not STRIPE_WEBHOOK_SECRET:
+    missing_stripe.append("STRIPE_WEBHOOK_SECRET")
+
+if not SITE_URL:
+    missing_stripe.append("SITE_URL")
+
+
+# ONLY enforce in production + not testing
+if not DEBUG and not TESTING and len(missing_stripe) > 0:
+    import warnings
+    warnings.warn(
+        f"Missing Stripe env vars: {', '.join(missing_stripe)}",
+        RuntimeWarning
+    )
+
+
 # Frontend base URL used for links in emails
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://rentout.co.uk")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://rentcrib.co.uk")
 IDEAL_POSTCODES_API_KEY = os.getenv("IDEAL_POSTCODES_API_KEY", "").strip()
+
 GOOGLE_WEB_CLIENT_ID = os.getenv("GOOGLE_WEB_CLIENT_ID", "").strip()
+GOOGLE_IOS_CLIENT_ID = os.getenv("GOOGLE_IOS_CLIENT_ID", "").strip()
+CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "False").lower() == "true"
+CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "").strip()
+
+GOOGLE_ALLOWED_CLIENT_IDS = [
+    client_id
+    for client_id in [
+        GOOGLE_WEB_CLIENT_ID,
+        GOOGLE_IOS_CLIENT_ID,
+    ]
+    if client_id
+]
+
 APPLE_AUDIENCE = os.getenv("APPLE_AUDIENCE", "").strip()
 # -----------------------------
 # Application definition
@@ -135,8 +188,8 @@ INSTALLED_APPS = [
     "notifications.apps.NotificationsConfig",
     "django_celery_beat",
     "user_app",
-   
-   
+
+
 
 
 ]
@@ -189,9 +242,30 @@ DATABASES = {
 
 # Hard stop in production if missing DB env vars
 if not TESTING and not DEBUG:
-    missing = [k for k in ["DB_NAME", "DB_USER", "DB_PASSWORD"] if not os.getenv(k)]
+    missing = [k for k in ["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST"] if not os.getenv(k)]
     if missing:
         raise ImproperlyConfigured(f"Missing required DB env vars: {', '.join(missing)}")
+
+
+
+
+
+# -----------------------------
+# Password hashing
+# -----------------------------
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+]
+
+
+
+
+
+
 
 # -----------------------------
 # Password validation
@@ -249,18 +323,18 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.ScopedRateThrottle",
     ],
-    
+
     "DEFAULT_THROTTLE_RATES": {
-        
-        "user": "120/hour",
-        "anon": "30/hour",
+
+        "user": "1000/hour",
+        "anon": "100/hour",
 
         "login": "5/minute",
         "register": "5/hour",
         "register_anon": "3/hour",
 
-        "message_user": "12/hour",
-        "messaging": "24/hour",
+        "message_user": "60/hour",
+        "messaging": "120/hour",
 
         "review-create": "5/hour",
 
@@ -273,11 +347,11 @@ REST_FRAMEWORK = {
         "otp-verify": "5/minute",
         "otp-resend": "2/hour",
     },
-    
-        
-        
-        
-    
+
+
+
+
+
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.OrderingFilter",
@@ -327,7 +401,7 @@ SPECTACULAR_SETTINGS = {
             "description": "Staging",
         },
     ],
-    
+
     "ENUM_NAME_OVERRIDES": {
         "RoomStatusEnum": "propertylist_app.api.schema_enums.ROOM_STATUS_CHOICES",
         "BookingStatusEnum": "propertylist_app.api.schema_enums.BOOKING_STATUS_CHOICES",
@@ -358,8 +432,12 @@ ENABLE_CAPTCHA = os.getenv("ENABLE_CAPTCHA", "true" if not DEBUG else "false").l
 CAPTCHA_PROVIDER = os.getenv("CAPTCHA_PROVIDER", "recaptcha")
 CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "")
 
-if ENABLE_CAPTCHA and not CAPTCHA_SECRET:
-    raise ImproperlyConfigured("CAPTCHA_SECRET must be set when CAPTCHA is enabled")
+if not DEBUG and CAPTCHA_ENABLED and not CAPTCHA_SECRET:
+    import warnings
+    warnings.warn(
+        "CAPTCHA_SECRET missing (captcha disabled in non-production-safe mode)",
+        RuntimeWarning
+    )
 
 
 ACCOUNT_DELETION_GRACE_DAYS = 7
@@ -405,15 +483,17 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@rentout.local")
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
-if not DEBUG:
-    missing_email = [
-        k for k in ["EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"]
-        if not os.getenv(k)
-    ]
-    if missing_email:
-        raise ImproperlyConfigured(
-            f"Missing required email env vars in production: {', '.join(missing_email)}"
-        )
+missing_email = [
+    k for k in ["EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"]
+    if not os.getenv(k)
+]
+
+if not DEBUG and not TESTING and missing_email:
+    import warnings
+    warnings.warn(
+        f"Missing required email env vars in production: {', '.join(missing_email)}",
+        RuntimeWarning,
+    )
 
 # -----------------------------
 # Media policy knobs used by validators
@@ -423,20 +503,33 @@ ALLOWED_IMAGE_FORMATS = {"JPEG", "JPG", "PNG", "WEBP"}
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "40000000"))  # 40 MP safety fuse
 
 # -----------------------------
-# Optional S3 storage (toggle via env)
+# Optional S3-compatible media storage, including Cloudflare R2
 # -----------------------------
 USE_S3 = os.getenv("USE_S3", "false").lower() in {"1", "true", "yes"}
 
 if USE_S3:
     INSTALLED_APPS += ["storages"]  # requires django-storages
+
     DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+    
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
 
     AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
-    if not AWS_STORAGE_BUCKET_NAME:
-        raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set when USE_S3=True")
-    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "eu-west-2")
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+    AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL", "")
+    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "auto")
     AWS_S3_SIGNATURE_VERSION = "s3v4"
-    AWS_S3_ADDRESSING_STYLE = "virtual"
+    AWS_S3_ADDRESSING_STYLE = os.getenv("AWS_S3_ADDRESSING_STYLE", "path")
+
     AWS_S3_FILE_OVERWRITE = False
     AWS_DEFAULT_ACL = None
 
@@ -444,11 +537,19 @@ if USE_S3:
     AWS_QUERYSTRING_EXPIRE = int(os.getenv("AWS_QUERYSTRING_EXPIRE", "900"))
 
     AWS_S3_OBJECT_PARAMETERS = {
-        "ServerSideEncryption": "AES256",
         "CacheControl": "max-age=86400, s-maxage=86400",
     }
 
     AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN", "")
+
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        raise ImproperlyConfigured("AWS credentials must be set when USE_S3=True")
+
+    if not AWS_STORAGE_BUCKET_NAME:
+        raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set when USE_S3=True")
+
+    if not AWS_S3_ENDPOINT_URL:
+        raise ImproperlyConfigured("AWS_S3_ENDPOINT_URL must be set when USE_S3=True")
 
 # -----------------------------
 # Webhook secrets (read from environment)
@@ -467,8 +568,12 @@ WEBHOOK_SECRETS = {
 # -----------------------------
 REDIS_URL = os.getenv("REDIS_CACHE_URL")
 
-if not REDIS_URL and not DEBUG:
-    raise ImproperlyConfigured("REDIS_CACHE_URL must be set in production")
+if not REDIS_URL and not DEBUG and not TESTING:
+    import warnings
+    warnings.warn(
+        "REDIS_CACHE_URL must be set in production",
+        RuntimeWarning,
+    )
 
 CACHES = {
     "default": {
@@ -478,8 +583,27 @@ CACHES = {
     }
 }
 
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/1")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
+
+if not DEBUG and not TESTING:
+    import warnings
+
+    if not CELERY_BROKER_URL:
+        warnings.warn(
+            "CELERY_BROKER_URL must be set in production",
+            RuntimeWarning,
+        )
+
+    if not CELERY_RESULT_BACKEND:
+        warnings.warn(
+            "CELERY_RESULT_BACKEND must be set in production",
+            RuntimeWarning,
+        )
+
+# fallback for local dev only
+CELERY_BROKER_URL = CELERY_BROKER_URL or "redis://127.0.0.1:6379/0"
+CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND or "redis://127.0.0.1:6379/1"
 
 CACHE_DEFAULT_TTL = 60
 CACHE_SEARCH_TTL = 120
@@ -492,8 +616,12 @@ GDPR_RETENTION = {
 }
 GDPR_HASH_SALT = os.getenv("GDPR_HASH_SALT", "dev-insecure-salt")
 
-if not DEBUG and GDPR_HASH_SALT == "dev-insecure-salt":
-    raise ImproperlyConfigured("GDPR_HASH_SALT must be set in production")
+if not DEBUG and not TESTING and GDPR_HASH_SALT == "dev-insecure-salt":
+    import warnings
+    warnings.warn(
+        "GDPR_HASH_SALT must be set in production",
+        RuntimeWarning,
+    )
 
 # -----------------------------
 # Celery (single canonical configuration)

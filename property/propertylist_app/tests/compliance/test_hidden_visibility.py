@@ -3,6 +3,8 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
 from propertylist_app.models import Room, RoomCategorie
+from datetime import timedelta
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -39,15 +41,17 @@ def _extract_items(payload):
 def test_hidden_room_excluded_from_search_and_rooms_alt():
     owner = User.objects.create_user(username="o", password="pass123", email="o@example.com")
     cat = RoomCategorie.objects.create(name="Any", active=True)
+    paid_until = timezone.now().date() + timedelta(days=30)
 
     Room.objects.create(
-        title="Visible Room",
-        description="...",
-        price_per_month=900,
-        location="London SW1A 1AA",
-        category=cat,
-        property_owner=owner,
-        status="active",
+    title="Visible Room",
+    description="...",
+    price_per_month=900,
+    location="London SW1A 1AA",
+    category=cat,
+    property_owner=owner,
+    status="active",
+    paid_until=paid_until,
     )
     Room.objects.create(
         title="Hidden Room",
@@ -63,6 +67,7 @@ def test_hidden_room_excluded_from_search_and_rooms_alt():
 
     # /api/v1/rooms-alt/ (public list)
     url_list = reverse("v1:room-list-alt")
+    client.raise_request_exception = True
     r1 = client.get(url_list)
     assert r1.status_code == 200
     items1 = _extract_items(r1.json())

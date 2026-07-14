@@ -2,8 +2,8 @@ import pytest
 from datetime import timedelta
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.contrib.auth.models import User
-
 from rest_framework.test import APIClient
 
 from propertylist_app.models import Room, RoomCategorie, AvailabilitySlot, Booking
@@ -136,7 +136,209 @@ def test_slot_booking_capacity_and_past_slot():
     slot_val = err.get("field_errors", {}).get("slot")
     assert slot_val is not None, f"Expected slot error list, got {err}"
     assert any("past" in str(x).lower() for x in slot_val), f"Unexpected slot error: {slot_val}"
+    
+    
+    
+    
+@pytest.mark.django_db
+def test_slot_booking_response_returns_selected_slot_only():
+    """
+    When a tenant books one availability slot:
+    - backend must create booking for that exact slot
+    - response must return that selected slot start/end
+    - response must not return the landlord's full availability list
+    """
+    owner = User.objects.create_user(
+        username="slot_owner",
+        password="pass12345",
+        email="slot-owner@example.com",
+    )
+    guest = User.objects.create_user(
+        username="slot_guest",
+        password="pass12345",
+        email="slot-guest@example.com",
+    )
+
+    cat = RoomCategorie.objects.create(name="Slot Test", active=True)
+    room = Room.objects.create(
+        title="Room with selectable slots",
+        category=cat,
+        price_per_month=800,
+        property_owner=owner,
+    )
+
+    selected_start = (timezone.now() + timedelta(days=3)).replace(
+        hour=8,
+        minute=30,
+        second=0,
+        microsecond=0,
+    )
+    selected_end = selected_start + timedelta(minutes=30)
+
+    slot = AvailabilitySlot.objects.create(
+        room=room,
+        start=selected_start,
+        end=selected_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=guest)
+
+    url = reverse("v1:bookings-list-create")
+    response = client.post(url, {"slot": slot.id}, format="json")
+
+    assert response.status_code == 201, response.data
+    assert response.data.get("ok") is True
+
+    booking_data = response.data.get("data", {})
+
+    assert booking_data.get("slot") == slot.id
+    assert booking_data.get("room") == room.id
+
+    response_start = parse_datetime(booking_data.get("start"))
+    response_end = parse_datetime(booking_data.get("end"))
+
+    assert response_start == selected_start
+    assert response_end == selected_end
+
+    assert "results" not in booking_data
+    assert "count" not in booking_data    
+    
+    
+    
+    
+@pytest.mark.django_db
+def test_public_availability_slots_can_be_filtered_by_date():
+    """
+    Public availability endpoint should allow frontend/mobile to request
+    available viewing slots for one selected day only.
+    """
+    owner = User.objects.create_user(
+        username="date_filter_owner",
+        password="pass12345",
+        email="date-filter-owner@example.com",
+    )
+
+    cat = RoomCategorie.objects.create(name="Date Filter", active=True)
+    room = Room.objects.create(
+        title="Room with date filtered slots",
+        category=cat,
+        price_per_month=800,
+        property_owner=owner,
+    )
+
+    day_one_start = (timezone.now() + timedelta(days=3)).replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    day_one_end = day_one_start + timedelta(minutes=30)
+
+    day_two_start = (timezone.now() + timedelta(days=4)).replace(
+        hour=9,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    day_two_end = day_two_start + timedelta(minutes=30)
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_one_start,
+        end=day_one_end,
+        max_bookings=1,
+    )
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_two_start,
+        end=day_two_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse("v1:room-slots-public", args=[room.id])
+    response = client.get(
+        url,
+        {"date": day_one_start.date().isoformat(), "only_free": "true"},
+    )
+
+    assert response.status_code == 200, response.data
+    results = response.data.get("results", [])
+
+    assert len(results) == 1
+    assert results[0]["id"] == AvailabilitySlot.objects.get(start=day_one_start).id
+    assert results[0]["start"].startswith(day_one_start.date().isoformat())    
 
 
+@pytest.mark.django_db
+def test_public_availability_slots_can_return_available_dates_only():
+    """
+    Public availability endpoint should return available dates only
+    when mode=dates is supplied.
+    """
+    owner = User.objects.create_user(
+        username="dates_only_owner",
+        password="pass12345",
+        email="dates-only-owner@example.com",
+    )
 
+    cat = RoomCategorie.objects.create(name="Dates Only", active=True)
+    room = Room.objects.create(
+        title="Room with dates only slots",
+        category=cat,
+        price_per_month=800,
+        property_owner=owner,
+    )
+
+    day_one_start = (timezone.now() + timedelta(days=3)).replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    day_two_start = (timezone.now() + timedelta(days=4)).replace(
+        hour=9,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_one_start,
+        end=day_one_start + timedelta(minutes=30),
+        max_bookings=1,
+    )
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_one_start + timedelta(minutes=30),
+        end=day_one_start + timedelta(minutes=60),
+        max_bookings=1,
+    )
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=day_two_start,
+        end=day_two_start + timedelta(minutes=30),
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse("v1:room-slots-public", args=[room.id])
+    response = client.get(
+        url,
+        {"mode": "dates", "only_free": "true"},
+    )
+
+    assert response.status_code == 200, response.data
+
+    assert response.data == {
+        "available_dates": [
+            day_one_start.date().isoformat(),
+            day_two_start.date().isoformat(),
+        ]
+    }
 

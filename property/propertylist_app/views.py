@@ -1,8 +1,7 @@
-# from django.shortcuts import render
-# from propertylist_app.models import RoomList
-# from django.http import JsonResponse
+﻿"""
+Legacy Django views module.
 
-# # Create your views here.
-# def room_list(request):
-#   rooms = RoomList.objects.all()
-  
+All active API views live under:
+
+propertylist_app/api/views/
+"""

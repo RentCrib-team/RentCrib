@@ -1,4 +1,4 @@
-import json
+﻿import json
 
 
 
@@ -56,7 +56,7 @@ from propertylist_app.api.serializers import (
     MessageCreateSerializer,
     DetailResponseSerializer,
     RoomSerializer,
-    
+
 )
 from ..serializers import (
     ContactMessageSerializer,
@@ -133,13 +133,21 @@ class InboxListView(APIView):
 
         # 2) message threads (use latest message timestamp as created_at)
         #    assumes related name: thread.messages (your code shows thread.messages usage)
-      
+
 
         # 2) message threads (use latest message timestamp as created_at)
         threads = (
             MessageThread.objects
             .filter(participants=user)
-            .annotate(last_msg_at=Max("messages__created"))   # FIX: created not created_at
+            .annotate(
+                last_msg_at=Max("messages__created"),
+                unread_count=Count(
+                    "messages",
+                    filter=~Q(messages__sender=user) & ~Q(messages__reads__user=user),
+                    distinct=True,
+                ),
+            )
+            .prefetch_related("participants", "messages")
             .order_by("-last_msg_at")
         )[:200]
 
@@ -152,12 +160,7 @@ class InboxListView(APIView):
             if not last_msg:
                 continue
 
-            unread = (
-                t.messages
-                .exclude(sender=user)
-                .exclude(reads__user=user)
-                .count()
-            )
+            unread = getattr(t, "unread_count", 0)
 
             other_party = (
                 t.participants.exclude(id=user.id).first()
@@ -443,10 +446,17 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
         params = self.request.query_params
 
         qs = (
-            MessageThread.objects
-            .filter(participants=user)
-            .prefetch_related("participants")
-        )
+                MessageThread.objects
+                .filter(participants=user)
+                .annotate(
+                    unread_count=Count(
+                        "messages",
+                        filter=~Q(messages__sender=user) & ~Q(messages__reads__user=user),
+                        distinct=True,
+                    ),
+                )
+                .prefetch_related("participants", "messages")
+            )
 
         folder = (params.get("folder") or "").strip().lower()
 
@@ -726,19 +736,19 @@ class MessageThreadStateView(APIView):
             message="Thread state updated successfully.",
             status_code=status.HTTP_200_OK,
         )
-        
-        
-        
-        
+
+
+
+
 class MessageStatsView(APIView):
     """
     GET /api/messages/stats/
 
     Used by the home screen to power quick filters like
-    “Messages > Good Fit”.
+    â€œMessages > Good Fitâ€.
 
     Returns counts scoped to the current user:
-      - total_threads: all threads I’m in (excluding my Bin)
+      - total_threads: all threads Iâ€™m in (excluding my Bin)
       - total_unread: unread messages in those threads
       - good_fit.threads: threads labelled 'good_fit' for me
       - good_fit.unread: unread messages inside those threads
@@ -833,12 +843,11 @@ class MessageListCreateView(generics.ListCreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardLimitOffsetPagination
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "message_user"
+    throttle_classes = [MessageUserThrottle]
 
     def get_throttles(self):
         # Only throttle sending messages (POST), not reading (GET),
-        # so pagination/security tests don’t get random 429s.
+        # so pagination/security tests donâ€™t get random 429s.
         if self.request.method == "POST":
             return super().get_throttles()
         return []
@@ -971,15 +980,15 @@ class MessageListCreateView(generics.ListCreateAPIView):
             MessageSerializer(message, context=self.get_serializer_context()).data,
             message="Message created successfully.",
             status_code=status.HTTP_201_CREATED,
-        )     
-        
-        
-        
-        
-        
-        
+        )
+
+
+
+
+
+
 class ThreadMarkReadView(APIView):
-    """POST /api/messages/threads/<thread_id>/read/ — marks all inbound messages as read."""
+    """POST /api/messages/threads/<thread_id>/read/ â€” marks all inbound messages as read."""
     permission_classes = [IsAuthenticated]
     # Disable throttling here as well to avoid flakiness
     # throttle_classes = [UserRateThrottle]
@@ -1015,18 +1024,18 @@ class ThreadMarkReadView(APIView):
             ignore_conflicts=True,
         )
 
-        return ok_response({"marked": to_mark.count()}, status_code=status.HTTP_200_OK) 
-      
-      
-      
-      
-      
+        return ok_response({"marked": to_mark.count()}, status_code=status.HTTP_200_OK)
+
+
+
+
+
 class ThreadSetLabelView(APIView):
     """
     POST /api/messages/threads/<thread_id>/label/
     Body: {"label": "viewing_scheduled" | "viewing_done" | "good_fit" | "unsure" | "not_a_fit" | "paperwork_pending" | "none"}
 
-    Per-user label for a thread (used by the “Filter by label” dropdown).
+    Per-user label for a thread (used by the â€œFilter by labelâ€ dropdown).
     """
     permission_classes = [IsAuthenticated]
 
@@ -1100,10 +1109,10 @@ class ThreadSetLabelView(APIView):
             },
             status_code=status.HTTP_200_OK,
         )
-                     
-                     
-                     
-                     
+
+
+
+
 class ThreadMoveToBinView(APIView):
     """
     POST /api/messages/threads/<thread_id>/bin/
@@ -1149,12 +1158,12 @@ class ThreadMoveToBinView(APIView):
         return ok_response(
             {"detail": "Thread moved to bin."},
             status_code=status.HTTP_200_OK,
-        )                 
-        
-        
-        
-        
-        
+        )
+
+
+
+
+
 class ThreadRestoreFromBinView(APIView):
     """
     POST /api/messages/threads/<thread_id>/restore/
@@ -1249,13 +1258,19 @@ class StartThreadFromRoomView(APIView):
 
         existing = (
             MessageThread.objects
-            .filter(participants__in=users)
-            .annotate(num_participants=Count("participants", distinct=True))
-            .filter(num_participants=2)
+            .filter(Q(room=room) | Q(room__isnull=True))
+            .filter(participants=room.property_owner)
+            .filter(participants=request.user)
+            .distinct()
             .first()
         )
 
-        thread = existing or MessageThread.objects.create()
+        thread = existing or MessageThread.objects.create(room=room)
+
+        if existing and thread.room_id is None:
+            thread.room = room
+            thread.save(update_fields=["room"])
+
         if not existing:
             thread.participants.set(users)
 
@@ -1266,11 +1281,11 @@ class StartThreadFromRoomView(APIView):
         return ok_response(
             MessageThreadSerializer(thread, context={"request": request}).data,
             status_code=status.HTTP_200_OK,
-        )             
-        
-        
-        
-        
+        )
+
+
+
+
 class ContactMessageCreateView(generics.CreateAPIView):
     """
     Public Contact Us endpoint.
@@ -1315,7 +1330,7 @@ class ContactMessageCreateView(generics.CreateAPIView):
 
         return response
 
-        
+
 class ThreadMoveToBinRequestSerializer(serializers.Serializer):
     # Body is optional for this endpoint, but spectacular needs a serializer
     pass
@@ -1337,12 +1352,13 @@ class ThreadMarkReadRequestSerializer(serializers.Serializer):
     # If your endpoint marks the whole thread read, no body needed.
     # Keep as empty serializer for schema.
     pass
-        
-        
-        
-        
-        
-          
+
+
+
+
+
+
+
 
 
 

@@ -1,4 +1,4 @@
-from django.contrib.auth import get_user_model, password_validation,authenticate
+﻿from django.contrib.auth import get_user_model, password_validation,authenticate
 User = get_user_model()
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
@@ -6,9 +6,10 @@ import re
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
+
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-
+from django.conf import settings
 
 from typing import Optional, Any, Dict, List
 from drf_spectacular.types import OpenApiTypes
@@ -20,7 +21,8 @@ from propertylist_app.models import (
     Room, RoomCategorie, Review, UserProfile, RoomImage,
     SavedRoom, MessageThread, Message, Booking,
     AvailabilitySlot, Payment, Report, Notification, EmailOTP,
-    MessageThreadState, ContactMessage,PhoneOTP,Tenancy,
+    MessageThreadState, ContactMessage,PhoneOTP,Tenancy,LandlordVerificationRequest,
+    IdentityVerificationRequest,
 
 )
 from propertylist_app.validators import (
@@ -34,6 +36,7 @@ from propertylist_app.validators import (
     assert_not_duplicate_listing, assert_no_duplicate_files,
     enforce_user_caps,
 )
+from propertylist_app.services.geo import geocode_postcode_cached
 
 from django.utils import timezone
 from django.core import mail
@@ -41,7 +44,7 @@ from django.utils.crypto import get_random_string
 import re
 
 
-
+from notifications.services import send_security_code_email
 
 
 
@@ -90,9 +93,9 @@ class UserReviewListSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
         return url
-    
-      
-    
+
+
+
 class ReviewSerializer(serializers.ModelSerializer):
     review_mode = serializers.SerializerMethodField()
     display_summary = serializers.SerializerMethodField()
@@ -222,7 +225,7 @@ class ReviewSerializer(serializers.ModelSerializer):
 class ReviewCreateSerializer(serializers.Serializer):
     tenancy_id = serializers.IntegerField()
 
-    #  allow manual rating input (1–5) when flags are not provided
+    #  allow manual rating input (1â€“5) when flags are not provided
     overall_rating = serializers.IntegerField(min_value=1, max_value=5, required=False)
 
     review_flags = serializers.ListField(
@@ -257,8 +260,8 @@ class ReviewCreateSerializer(serializers.Serializer):
     "property_care_poor",
     "broke_rules",
     }
-    
-    
+
+
 
     def validate(self, attrs):
         request = self.context["request"]
@@ -345,7 +348,7 @@ class ReviewCreateSerializer(serializers.Serializer):
         attrs["reviewer"] = user
         attrs["reviewee"] = reviewee
         attrs["role"] = role
-        
+
 
         return attrs
 
@@ -417,7 +420,12 @@ class TenancyProposalSerializer(serializers.Serializer):
         request = self.context["request"]
         user = request.user
 
-        room = Room.objects.select_related("property_owner").filter(id=attrs["room_id"]).first()
+        room = (
+            Room.objects.select_related("property_owner")
+            .filter(id=attrs["room_id"], is_deleted=False)
+            .first()
+        )
+
         if not room:
             raise serializers.ValidationError({"room_id": "Room not found."})
 
@@ -457,7 +465,7 @@ class TenancyProposalSerializer(serializers.Serializer):
                     {"room_id": "You must have completed a viewing for this room before proposing a tenancy."}
                 )
 
-        
+
 
         attrs["room"] = room
         attrs["landlord"] = landlord
@@ -493,7 +501,7 @@ class TenancyProposalSerializer(serializers.Serializer):
         )
 
         if not created:
-            # “last write wins” update
+            # â€œlast write winsâ€ update
             tenancy.landlord = landlord  # keep consistent with room owner
             tenancy.proposed_by = user
             tenancy.move_in_date = validated_data["move_in_date"]
@@ -519,7 +527,7 @@ class TenancyProposalSerializer(serializers.Serializer):
 
         return tenancy
 
-    
+
 class TenancyRespondSerializer(serializers.Serializer):
     """
     Handles actions on an existing tenancy proposal:
@@ -549,6 +557,18 @@ class TenancyRespondSerializer(serializers.Serializer):
         action = attrs["action"]
 
         if action == "propose_changes":
+            if user.id != tenancy.tenant_id:
+                raise serializers.ValidationError(
+                    {"action": "Only the tenant can edit tenancy details at this stage."}
+                )
+
+            if tenancy.tenant_has_edited:
+                raise serializers.ValidationError(
+                    {"action": "You have already edited this tenancy once."}
+                )
+
+
+
             if "move_in_date" not in attrs or "duration_months" not in attrs:
                 raise serializers.ValidationError(
                     {"non_field_errors": "move_in_date and duration_months are required for propose_changes."}
@@ -614,6 +634,7 @@ class TenancyRespondSerializer(serializers.Serializer):
             tenancy.review_deadline_at = None
             tenancy.still_living_check_at = None
             tenancy.still_living_confirmed_at = None
+            tenancy.tenant_has_edited = True
 
             tenancy.save()
             return tenancy
@@ -624,7 +645,7 @@ class TenancyRespondSerializer(serializers.Serializer):
         if user.id == tenancy.tenant_id and tenancy.tenant_confirmed_at is None:
             tenancy.tenant_confirmed_at = now
 
-        # if both confirmed → lock schedule + set status
+        # if both confirmed â†’ lock schedule + set status
         if tenancy.landlord_confirmed_at and tenancy.tenant_confirmed_at:
             today = timezone.localdate()
             tenancy.status = STATUS_ACTIVE if tenancy.move_in_date <= today else STATUS_CONFIRMED
@@ -637,8 +658,10 @@ class TenancyRespondSerializer(serializers.Serializer):
 
 
 
-    
 class TenancyDetailSerializer(serializers.ModelSerializer):
+    can_leave_review = serializers.SerializerMethodField()
+    review_button_reason = serializers.SerializerMethodField()
+
     class Meta:
         model = Tenancy
         fields = [
@@ -647,10 +670,39 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
             "landlord_confirmed_at", "tenant_confirmed_at",
             "status",
             "review_open_at", "review_deadline_at",
+            "can_leave_review", "review_button_reason",
             "still_living_check_at", "still_living_confirmed_at",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+    def get_can_leave_review(self, obj):
+        now = timezone.now()
+
+        if not obj.review_open_at:
+            return False
+
+        if now < obj.review_open_at:
+            return False
+
+        if obj.review_deadline_at and now > obj.review_deadline_at:
+            return False
+
+        return True
+
+    def get_review_button_reason(self, obj):
+        now = timezone.now()
+
+        if not obj.review_open_at:
+            return "Review window is not open yet."
+
+        if now < obj.review_open_at:
+            return "Review will be available later."
+
+        if obj.review_deadline_at and now > obj.review_deadline_at:
+            return "Review window has closed."
+
+        return "Review is available."
 
 
 
@@ -666,8 +718,12 @@ class UserReviewSummarySerializer(serializers.Serializer):
     overall_rating_average = serializers.FloatField(allow_null=True)
 
 
-    
-    
+class CreateViewingBookingSerializer(serializers.Serializer):
+    slot_id = serializers.IntegerField(required=False)
+    room_id = serializers.IntegerField(required=False)
+    start = serializers.DateTimeField(required=False)
+
+
 
 # --------------------
 # Room Serializer
@@ -686,14 +742,19 @@ class RoomSerializer(serializers.ModelSerializer):
 
     # extra fields for Find a Room cards
     owner_name = serializers.SerializerMethodField(read_only=True)
+    owner_username = serializers.SerializerMethodField(read_only=True)
     owner_avatar = serializers.SerializerMethodField(read_only=True)
     main_photo = serializers.SerializerMethodField(read_only=True)
     photo_count = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
+    landlord_type = serializers.SerializerMethodField(read_only=True)
+    landlord_type_label = serializers.SerializerMethodField(read_only=True)
+    landlord_verified = serializers.SerializerMethodField(read_only=True)
+    
+    
 
     # Amenity keys matching the Step 2/5 chips
     AMENITY_CHOICES = {
-        # Home
         "in_unit_laundry",
         "broadband_inclusive",
         "en_suite",
@@ -706,7 +767,6 @@ class RoomSerializer(serializers.ModelSerializer):
         "pets_allowed",
         "large_closet",
         "private_bath",
-        # Property
         "exercise_equipment",
         "elevator",
         "doorman",
@@ -718,7 +778,6 @@ class RoomSerializer(serializers.ModelSerializer):
         "bbq_grill",
         "fire_pit",
         "pool_table",
-        # Safety
         "smoke_alarm",
         "first_aid_kit",
         "security_system",
@@ -728,29 +787,548 @@ class RoomSerializer(serializers.ModelSerializer):
         "must_climb_stairs",
     }
 
+
+
+
+
+    def validate_price_per_month(self, value):
+        try:
+            value = normalise_price(value)
+        except serializers.ValidationError as exc:
+            raise serializers.ValidationError(exc.detail)
+
+        if value < 0:
+            raise serializers.ValidationError("Monthly rent cannot be negative.")
+
+        return validate_price(value, min_val=50.0, max_val=20000.0)
+
+
+    def validate_security_deposit(self, value):
+        try:
+            value = normalise_price(value)
+        except serializers.ValidationError as exc:
+            raise serializers.ValidationError(exc.detail)
+
+        if value < 0:
+            raise serializers.ValidationError("Security deposit cannot be negative.")
+
+        return validate_price(value, min_val=0.0, max_val=50000.0)
+
+
+
+    def validate_view_available_custom_dates(self, value):
+        if value in (None, ""):
+            return []
+
+        if not isinstance(value, (list, tuple)):
+            raise serializers.ValidationError("Must be a list of dates.")
+
+        normalised = []
+
+        for item in value:
+            if isinstance(item, date):
+                normalised.append(item.isoformat())
+                continue
+
+            if isinstance(item, str):
+                try:
+                    parsed = datetime.strptime(item, "%Y-%m-%d")
+                except ValueError:
+                    raise serializers.ValidationError(
+                        "Invalid date format. Use YYYY-MM-DD."
+                    )
+
+                normalised.append(parsed.date().isoformat())
+                continue
+
+            raise serializers.ValidationError(
+                "Invalid date format. Use YYYY-MM-DD."
+            )
+
+        return normalised
+
+
+        
+    
+    
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        price = attrs.get("price_per_month")
+        bills_included = attrs.get("bills_included")
+        available_from = attrs.get("available_from")
+
+        if self.instance is not None:
+            if "price_per_month" not in attrs:
+                price = getattr(self.instance, "price_per_month", None)
+
+            if "bills_included" not in attrs:
+                bills_included = getattr(self.instance, "bills_included", None)
+
+            if "available_from" not in attrs:
+                available_from = getattr(self.instance, "available_from", None)
+
+        if price is not None:
+            attrs["price_per_month"] = self.validate_price_per_month(price)
+
+        if available_from is not None:
+            try:
+                validate_available_from(available_from)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError(
+                    {"available_from": exc.detail}
+                )
+
+        min_stay = attrs.get("min_stay_months")
+        max_stay = attrs.get("max_stay_months")
+
+        if self.instance is not None:
+            if "min_stay_months" not in attrs:
+                min_stay = getattr(self.instance, "min_stay_months", None)
+
+            if "max_stay_months" not in attrs:
+                max_stay = getattr(self.instance, "max_stay_months", None)
+
+        if (
+            min_stay is not None
+            and max_stay is not None
+            and min_stay > max_stay
+        ):
+            raise serializers.ValidationError(
+                {
+                    "min_stay_months":
+                    "Minimum stay cannot be greater than maximum stay."
+                }
+            )
+
+        min_age = attrs.get("preferred_flatmate_min_age")
+        max_age = attrs.get("preferred_flatmate_max_age")
+
+        if self.instance is not None:
+            if "preferred_flatmate_min_age" not in attrs:
+                min_age = getattr(self.instance, "preferred_flatmate_min_age", None)
+
+            if "preferred_flatmate_max_age" not in attrs:
+                max_age = getattr(self.instance, "preferred_flatmate_max_age", None)
+
+        if (
+            min_age is not None
+            and max_age is not None
+            and min_age > max_age
+        ):
+            raise serializers.ValidationError(
+                {
+                    "preferred_flatmate_min_age":
+                    "Minimum age cannot be greater than maximum age."
+                }
+            )
+
+        if bills_included and price is not None and float(price) < 100.0:
+            raise serializers.ValidationError(
+                {
+                    "bills_included":
+                    "Bills cannot be included for such a low price."
+                }
+            )
+
+        mode = attrs.get("view_available_days_mode")
+        custom_dates = attrs.get("view_available_custom_dates")
+
+        if self.instance is not None:
+            if "view_available_days_mode" not in attrs:
+                mode = getattr(self.instance, "view_available_days_mode", "everyday")
+
+            if "view_available_custom_dates" not in attrs:
+                custom_dates = getattr(self.instance, "view_available_custom_dates", [])
+
+        if mode == "custom":
+            if not custom_dates:
+                raise serializers.ValidationError(
+                    {
+                        "view_available_custom_dates":
+                        "Provide at least one date when using custom mode."
+                    }
+                )
+        else:
+            attrs["view_available_custom_dates"] = []
+
+        start_time = attrs.get("availability_from_time")
+        end_time = attrs.get("availability_to_time")
+
+        if self.instance is not None:
+            if "availability_from_time" not in attrs:
+                start_time = getattr(self.instance, "availability_from_time", None)
+
+            if "availability_to_time" not in attrs:
+                end_time = getattr(self.instance, "availability_to_time", None)
+
+        if start_time and not end_time:
+            raise serializers.ValidationError(
+                {"availability_to_time": "Please provide an end time as well."}
+            )
+
+        if end_time and not start_time:
+            raise serializers.ValidationError(
+                {"availability_from_time": "Please provide a start time as well."}
+            )
+
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError(
+                {"availability_to_time": "End time must be after start time."}
+            )
+
+        return attrs
+
+    preferred_flatmate_min_age = serializers.IntegerField(required=False, allow_null=True)
+    preferred_flatmate_max_age = serializers.IntegerField(required=False, allow_null=True)
+
+
+
     class Meta:
         model = Room
         fields = "__all__"
+        read_only_fields = (
+            "avg_rating",
+            "number_rating",
+            "paid_until",
+            "is_deleted",
+            "deleted_at",
+        )
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_saved(self, obj) -> bool:
+        annotated = getattr(obj, "_is_saved", None)
+        if annotated is not None:
+            return bool(annotated)
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request is not None else None
+
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+
+        return SavedRoom.objects.filter(user=user, room=obj).exists()
+
+    @extend_schema_field(OpenApiTypes.NUMBER)
+    def get_distance_miles(self, obj) -> float | None:
+        val = getattr(obj, "distance_miles", None)
+        if val is None:
+            return None
+
+        try:
+            return round(float(val), 2)
+        except (TypeError, ValueError):
+            return None
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_allow_search_indexing_effective(self, obj) -> bool:
+        val = getattr(obj, "allow_search_indexing_effective", None)
+        if val is not None:
+            return bool(val)
+
+        override = getattr(obj, "allow_search_indexing_override", None)
+        if override is not None:
+            return bool(override)
+
+        owner = getattr(obj, "property_owner", None)
+        profile = getattr(owner, "profile", None) if owner else None
+        default = getattr(profile, "allow_search_indexing_default", True)
+
+        return bool(default)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_name(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        if not user:
+            return ""
+
+        full_name = (user.get_full_name() or "").strip()
+        return full_name or user.username
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_username(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        if not user:
+            return ""
+
+        return user.username or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_owner_avatar(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        avatar = getattr(profile, "avatar", None)
+
+        if not avatar:
+            return ""
+
+        request = self.context.get("request")
+        url = avatar.url
+
+        if request is not None:
+            return request.build_absolute_uri(url)
+
+        return url
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_main_photo(self, obj) -> str:
+        request = self.context.get("request")
+
+        images_qs = obj.roomimage_set.filter(
+            status__in=["approved", "pending"]
+        ).order_by("id")
+
+        approved_photo = images_qs.first()
+
+        if approved_photo and approved_photo.image:
+            url = approved_photo.image.url
+            if request is not None:
+                return request.build_absolute_uri(url)
+            return url
+
+        legacy_image = getattr(obj, "image", None)
+
+        if legacy_image:
+            url = legacy_image.url
+            if request is not None:
+                return request.build_absolute_uri(url)
+            return url
+
+        return ""
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_photo_count(self, obj) -> int:
+        approved_count = obj.roomimage_set.filter(status="approved").count()
+        legacy_image = getattr(obj, "image", None)
+
+        if approved_count:
+            return approved_count
+
+        if legacy_image:
+            return 1
+
+        return 0
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_listing_state(self, obj) -> str:
+        annotated = getattr(obj, "listing_state", None)
+        if annotated:
+            return annotated
+
+        paid_until = getattr(obj, "paid_until", None)
+        status = getattr(obj, "status", None)
+
+        if status == "hidden":
+            return "hidden"
+
+        if paid_until is None:
+            return "draft"
+
+        if paid_until < timezone.now().date():
+            return "expired"
+
+        return "active"
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_type(self, obj) -> str:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        return getattr(profile, "role_detail", "") or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_type_label(self, obj) -> str:
+        value = self.get_landlord_type(obj)
+
+        labels = {
+            "live_in_landlord": "Live-in landlord",
+            "live_out_landlord": "Live-out landlord",
+            "agent_broker": "Agency",
+        }
+
+        return labels.get(value, "")
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_landlord_verified(self, obj) -> bool:
+        user = getattr(obj, "property_owner", None)
+        profile = getattr(user, "profile", None) if user else None
+        return bool(getattr(profile, "advertiser_verified", False))
+
+
+
+    def _apply_geocode(self, room):
+        """
+        Populate latitude/longitude from the room location postcode.
+
+        Safe behaviour:
+        - silently skips if postcode/geocoding fails
+        - never blocks room creation/update
+        """
+        location = (room.location or "").strip()
+
+        if not location:
+            return
+
+        try:
+            parts = location.split()
+
+            if len(parts) >= 2 and len(parts[-1]) <= 3:
+                postcode = f"{parts[-2]} {parts[-1]}"
+            else:
+                postcode = parts[-1]
+
+            lat, lon = geocode_postcode_cached(postcode)
+
+            room.latitude = lat
+            room.longitude = lon
+
+        except Exception:
+            # Do not block listing save if geocoder fails.
+            return
+
+
+    def _sync_availability_slots(self, room):
+            """
+            Convert landlord-selected viewing dates/times into real bookable slots.
+
+            Example:
+            dates: ["2026-06-18"]
+            from: 07:00
+            to: 17:00
+
+            Creates:
+            07:00-07:30
+            07:30-08:00
+            etc.
+
+            Already-booked slots are not deleted.
+            """
+            dates = room.view_available_custom_dates or []
+            start_time = room.availability_from_time
+            end_time = room.availability_to_time
+
+            if room.view_available_days_mode != "custom":
+                return
+
+            if not dates or not start_time or not end_time:
+                return
+
+            slot_minutes = 30
+            desired_slots = []
+
+            for d in dates:
+                if isinstance(d, str):
+                    day = datetime.fromisoformat(d).date()
+                else:
+                    day = d
+
+                current = datetime.combine(day, start_time)
+                finish = datetime.combine(day, end_time)
+
+                if timezone.is_naive(current):
+                    current = timezone.make_aware(current)
+
+                if timezone.is_naive(finish):
+                    finish = timezone.make_aware(finish)
+
+                while current + timedelta(minutes=slot_minutes) <= finish:
+                    slot_end = current + timedelta(minutes=slot_minutes)
+                    desired_slots.append((current, slot_end))
+                    current = slot_end
+
+            desired_set = set(desired_slots)
+
+            # Remove only future unbooked slots that are no longer part of landlord's selected availability.
+            future_slots = AvailabilitySlot.objects.filter(
+                room=room,
+                end__gt=timezone.now(),
+            )
+
+            for slot in future_slots:
+                has_booking = Booking.objects.filter(
+                    slot=slot,
+                    canceled_at__isnull=True,
+                    is_deleted=False,
+                ).exists()
+
+                if has_booking:
+                    continue
+
+                if (slot.start, slot.end) not in desired_set:
+                    slot.delete()
+
+            existing_set = set(
+                AvailabilitySlot.objects.filter(room=room).values_list("start", "end")
+            )
+
+            new_slots = [
+                AvailabilitySlot(
+                    room=room,
+                    start=start,
+                    end=end,
+                    max_bookings=1,
+                )
+                for start, end in desired_slots
+                if (start, end) not in existing_set
+            ]
+
+            AvailabilitySlot.objects.bulk_create(new_slots, ignore_conflicts=True)
+
+
+
+
+    def create(self, validated_data):
+        room = super().create(validated_data)
+
+        self._apply_geocode(room)
+
+        room.save(update_fields=["latitude", "longitude"])
+
+        self._sync_availability_slots(room)
+
+        return room
+
+
+    def update(self, instance, validated_data):
+        old_location = (instance.location or "").strip()
+
+        room = super().update(instance, validated_data)
+
+        new_location = (room.location or "").strip()
+
+        if old_location != new_location or not room.latitude or not room.longitude:
+            self._apply_geocode(room)
+
+            room.save(update_fields=["latitude", "longitude"])
+
+        self._sync_availability_slots(room)
+
+        return room
+
 
     def validate_title(self, value):
         return validate_listing_title(value)
 
     def validate_description(self, value):
         """
-        Clean the HTML and enforce a minimum description length.
-        User must write at least 25 words.
+        Draft listings can have incomplete descriptions.
+        Completed listings must have at least 25 words.
         """
         clean = sanitize_html_description(value or "")
 
+        # Allow incomplete wizard saves while listing is still a draft.
+        if self.initial_data.get("status") == "draft":
+            return clean
+
         words = [w for w in clean.split() if w.strip()]
         if len(words) < 25:
-            raise serializers.ValidationError("Description must be at least 25 words.")
+            raise serializers.ValidationError(
+                "Description must be at least 25 words."
+            )
 
         return clean
 
-    def validate_price_per_month(self, value):
-        value = normalise_price(value)
-        return validate_price(value, min_val=50.0, max_val=20000.0)
+
 
     def validate_amenities(self, value):
         """
@@ -787,11 +1365,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return cleaned
 
-    def validate_security_deposit(self, value):
-        # normalise_price handles strings like "£200" or "200.00"
-        value = normalise_price(value)
-        # allow zero, but cap it to something sensible
-        return validate_price(value, min_val=0.0, max_val=50000.0)
+
 
     def validate_location(self, value):
         text = str(value or "").strip()
@@ -818,6 +1392,8 @@ class RoomSerializer(serializers.ModelSerializer):
         validate_listing_photos([value])
         assert_no_duplicate_files([value])
         return value
+
+
 
     def validate(self, attrs):
         price = attrs.get("price_per_month")
@@ -846,7 +1422,7 @@ class RoomSerializer(serializers.ModelSerializer):
         if available_from is not None:
             validate_available_from(available_from)
 
-        # ----- Minimum / maximum rental period (months, 1–12) -----
+        # ----- Minimum / maximum rental period (months, 1â€“12) -----
         # Support PATCH: if a field is not in attrs, fall back to instance
         min_stay = attrs.get(
             "min_stay_months",
@@ -975,52 +1551,7 @@ class RoomSerializer(serializers.ModelSerializer):
     # SerializerMethodField getters (schema-typed)
     # ---------------------------
 
-    @extend_schema_field(OpenApiTypes.BOOL)
-    def get_is_saved(self, obj) -> bool:
-        annotated = getattr(obj, "_is_saved", None)
-        if annotated is not None:
-            return bool(annotated)
 
-        request = self.context.get("request")
-        user = getattr(request, "user", None) if request is not None else None
-        if not user or not user.is_authenticated:
-            return False
-
-        return SavedRoom.objects.filter(user=user, room=obj).exists()
-
-    @extend_schema_field(OpenApiTypes.NUMBER)
-    def get_distance_miles(self, obj) -> float | None:
-        val = getattr(obj, "distance_miles", None)
-        if val is None:
-            return None
-        try:
-            return round(float(val), 2)
-        except (TypeError, ValueError):
-            return None
-
-    @extend_schema_field(OpenApiTypes.BOOL)
-    def get_allow_search_indexing_effective(self, obj) -> bool:
-        val = getattr(obj, "allow_search_indexing_effective", None)
-        if val is not None:
-            return bool(val)
-
-        override = getattr(obj, "allow_search_indexing_override", None)
-        if override is not None:
-            return bool(override)
-
-        owner = getattr(obj, "property_owner", None)
-        profile = getattr(owner, "profile", None) if owner else None
-        default = getattr(profile, "allow_search_indexing_default", True)
-
-        return bool(default)
-
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_owner_name(self, obj) -> str:
-        user = getattr(obj, "property_owner", None)
-        if not user:
-            return ""
-        full_name = (user.get_full_name() or "").strip()
-        return full_name or user.username
 
     @extend_schema_field(OpenApiTypes.URI)
     def get_owner_avatar(self, obj) -> str | None:
@@ -1118,45 +1649,38 @@ class RoomSerializer(serializers.ModelSerializer):
 
     # --- New helpers for 'View Available Days' ---
 
-    def validate_view_available_days_mode(self, value):
-        # DRF already checks choices; this is just a safety normaliser.
-        return (value or "everyday").strip()
 
-    def validate_view_available_custom_dates(self, value):
-        """
-        Front-end sends an array of dates (strings) when mode='custom'.
-        We accept:
-          - ["2025-12-01", "2025-12-03"]
-          - [date(2025, 12, 1), ...]
-        and normalise everything to list of YYYY-MM-DD strings.
-        """
-        if value in (None, ""):
-            return []
 
-        if not isinstance(value, (list, tuple)):
-            raise serializers.ValidationError("Must be a list of dates.")
+class MyListingRoomSerializer(RoomSerializer):
+    viewing_summary = serializers.SerializerMethodField()
 
-        normalised = []
-        for item in value:
-            if isinstance(item, date):
-                normalised.append(item.isoformat())
-                continue
-            if isinstance(item, str):
-                try:
-                    d = date.fromisoformat(item)
-                except ValueError:
-                    raise serializers.ValidationError(
-                        "Dates must be in 'YYYY-MM-DD' format."
-                    )
-                normalised.append(d.isoformat())
-                continue
-            raise serializers.ValidationError(
-                "Each item must be a date or 'YYYY-MM-DD' string."
-            )
+    class Meta(RoomSerializer.Meta):
+                fields = "__all__"
 
-        return normalised
-    
-    
+    def get_viewing_summary(self, obj):
+        now = timezone.now()
+
+        qs = Booking.objects.filter(
+            room=obj,
+            is_deleted=False,
+            canceled_at__isnull=True,
+            start__gte=now,
+        ).order_by("start")
+
+        next_booking = qs.first()
+
+        return {
+            "upcoming_count": qs.count(),
+            "next_viewing_at": next_booking.start if next_booking else None,
+            "next_booking_id": next_booking.id if next_booking else None,
+        }
+
+
+
+
+
+
+
 # --------------------
 # Room Preview Serializer (Step 5/5)
 # --------------------
@@ -1174,7 +1698,7 @@ class RoomPreviewSerializer(serializers.Serializer):
         request = self.context.get("request")
         photos = []
 
-        qs = obj.roomimage_set.filter(status="approved").order_by("id")
+        qs = obj.roomimage_set.filter(status__in=["approved", "pending"]).order_by("id")
         for img in qs:
             if not img.image:
                 continue
@@ -1222,7 +1746,7 @@ class SearchFiltersSerializer(serializers.Serializer):
     page = serializers.IntegerField(required=False)
     offset = serializers.IntegerField(required=False)
     ordering = serializers.CharField(required=False)
-    
+
     def validate_q(self, value):
         return sanitize_search_text(value, max_len=200)
 
@@ -1245,24 +1769,24 @@ class SearchFiltersSerializer(serializers.Serializer):
     ALLOWED_ORDER_FIELDS = {"price_per_month", "available_from", "created_at"}
 
     # ========== Advanced search filters ==========
-    # “Rooms in existing shares”
+    # â€œRooms in existing sharesâ€
     include_shared = serializers.BooleanField(required=False)
 
-    # “Rooms suitable for ages”
+    # â€œRooms suitable for agesâ€
     min_age = serializers.IntegerField(required=False)
     max_age = serializers.IntegerField(required=False)
 
-    # “Length of stay”
+    # â€œLength of stayâ€
     min_stay_months = serializers.IntegerField(required=False)
     max_stay_months = serializers.IntegerField(required=False)
 
-    # “Rooms for”
+    # â€œRooms forâ€
     room_for = serializers.ChoiceField(
         choices=["any", "females", "males", "couples"],
         required=False,
     )
 
-    # “Room sizes”
+    # â€œRoom sizesâ€
     room_size = serializers.ChoiceField(
         choices=["dont_mind", "single", "double"],
         required=False,
@@ -1271,7 +1795,7 @@ class SearchFiltersSerializer(serializers.Serializer):
 
 
     ALLOWED_ORDER_FIELDS = {"price_per_month", "available_from", "created_at", "updated_at"}
-    
+
     # -----------------------------
     # Advanced Search II - Step 2/3
     # -----------------------------
@@ -1332,20 +1856,21 @@ class SearchFiltersSerializer(serializers.Serializer):
         choices=[
             "live_in_landlord",
             "live_out_landlord",
+            "agent_broker",
             "current_flatmate",
             "no_preference",
         ],
         required=False,
     )
     posted_within_days = serializers.IntegerField(required=False, min_value=1, max_value=365)
-    # make “false” meaningful (currently view only filters when true)
+    # make â€œfalseâ€ meaningful (currently view only filters when true)
     furnished = serializers.BooleanField(required=False)
     bills_included = serializers.BooleanField(required=False)
     parking_available = serializers.BooleanField(required=False)
 
-    
-    
-    
+
+
+
 
     def validate(self, attrs):
         # existing price / pagination rules
@@ -1366,7 +1891,7 @@ class SearchFiltersSerializer(serializers.Serializer):
         if attrs.get("min_stay_months") is not None or attrs.get("max_stay_months") is not None:
             validate_numeric_range(attrs.get("min_stay_months"), attrs.get("max_stay_months"))
 
-        # rating range sanity (1–5)
+        # rating range sanity (1â€“5)
         if attrs.get("min_rating") is not None or attrs.get("max_rating") is not None:
             validate_numeric_range(attrs.get("min_rating"), attrs.get("max_rating"))
 
@@ -1444,6 +1969,31 @@ class RegistrationSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {"password": {"write_only": True}}
 
+
+    def validate_email(self, value):
+                email = normalise_email(value)
+
+                if User.objects.filter(email__iexact=email).exists():
+                    raise serializers.ValidationError(
+                        "Unable to complete registration with the provided credentials."
+                    )
+
+                return email
+
+
+    def validate_username(self, value):
+        username = (value or "").strip()
+
+        if User.objects.filter(username=username).exists():
+            raise serializers.ValidationError(
+                "Unable to complete registration with the provided credentials."
+            )
+
+        return username
+
+
+
+
     def validate(self, attrs):
         # password match
         pw = attrs.get("password") or ""
@@ -1518,12 +2068,14 @@ class RegistrationSerializer(serializers.ModelSerializer):
         )
         EmailOTP.create_for(user, code, ttl_minutes=10)
 
-        mail.send_mail(
-            subject="Verify your email (RentOut)",
-            message=f"Your verification code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+        send_security_code_email(
+            to_email=user.email,
+            subject="Welcome to RentCrib – Verify your email",
+            first_name=user.first_name,
+            title="Verify your email",
+            intro="Welcome to RentCrib. Please use the verification code below to confirm your email address.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         return user
@@ -1532,7 +2084,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         # minimal payload; FE knows to show OTP step next
         masked = (
             instance.email[:2]
-            + "•••@"
+            + "â€¢â€¢â€¢@"
             + instance.email.split("@")[-1]
             if instance.email
             else ""
@@ -1544,14 +2096,14 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "email_masked": masked,
             "need_otp": True,
         }
-        
 
-    
+
+
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField()  # username OR email
     password = serializers.CharField(write_only=True)
- 
- 
+
+
 class LoginTokensSerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
@@ -1616,6 +2168,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "email_verified",
             "phone_verified",
             "phone_verified_at",
+            "advertiser_verified",
             "marketing_consent",
             "notify_rentout_updates",
             "notify_reminders",
@@ -1633,6 +2186,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "user",
             "avatar",
             "email_verified",
+            "advertiser_verified",
         )
 
     # ---------- address placeholders (until you implement structured address fields) ----------
@@ -1718,8 +2272,70 @@ class UserProfileSerializer(serializers.ModelSerializer):
             data["gender"] = ""
 
         return data
-    
-    
+
+
+
+class LandlordVerificationRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LandlordVerificationRequest
+        fields = (
+            "id",
+            "status",
+            "document",
+            "notes",
+            "reviewed_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "status",
+            "reviewed_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_document(self, value):
+        max_size_mb = 10
+        if value and value.size > max_size_mb * 1024 * 1024:
+            raise serializers.ValidationError("Verification document must not exceed 10MB.")
+        return value
+
+
+class IdentityVerificationRequestSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = IdentityVerificationRequest
+        fields = [
+            "id",
+            "document",
+            "status",
+            "notes",
+            "rejection_reason",
+            "reviewed_at",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "status",
+            "rejection_reason",
+            "reviewed_at",
+            "created_at",
+        ]
+
+    def validate_document(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "Verification document must not exceed 10MB."
+            )
+
+        return value
+
+
+
+
 
 class LoginSuccessDataSerializer(serializers.Serializer):
     tokens = LoginTokensSerializer()
@@ -1729,8 +2345,8 @@ class LoginSuccessDataSerializer(serializers.Serializer):
 
 class LoginResponseSerializer(serializers.Serializer):
     ok = serializers.BooleanField()
-    data = LoginSuccessDataSerializer()    
-    
+    data = LoginSuccessDataSerializer()
+
 class TokenPairWithExpirySerializer(serializers.Serializer):
     access = serializers.CharField()
     refresh = serializers.CharField()
@@ -1777,25 +2393,17 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 class AccountDeleteRequestSerializer(serializers.Serializer):
     confirm = serializers.BooleanField()
-    current_password = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    otp = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-
         if not attrs.get("confirm"):
             raise serializers.ValidationError({"confirm": "You must confirm account deletion."})
 
-        # if user has a password, require it (extra safety)
-        if user and user.has_usable_password():
-            pw = (attrs.get("current_password") or "").strip()
-            if not pw:
-                raise serializers.ValidationError({"current_password": "This field is required."})
+        otp = (attrs.get("otp") or "").strip()
+        if not otp:
+            raise serializers.ValidationError({"otp": "OTP is required."})
 
-            authed = authenticate(username=user.username, password=pw)
-            if not authed:
-                raise serializers.ValidationError({"current_password": "Password is incorrect."})
-
+        attrs["otp"] = otp
         return attrs
 
 
@@ -1808,9 +2416,9 @@ class AccountDeleteCancelSerializer(serializers.Serializer):
         return attrs
 
 
-        
 
-        
+
+
 
 
 
@@ -1846,7 +2454,7 @@ def _age_in_years(dob: date) -> int:
 
 
 
-    
+
 class ReviewCardSerializer(serializers.ModelSerializer):
     reviewer_name = serializers.CharField(source="reviewer.username", read_only=True)
     reviewer_avatar = serializers.SerializerMethodField()
@@ -1878,14 +2486,16 @@ class ReviewCardSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
         return url
-    
-    
+
+
 class ProfilePageSerializer(serializers.Serializer):
         # header/user
         id = serializers.IntegerField()
         email = serializers.EmailField()
         username = serializers.CharField()
         date_joined = serializers.DateTimeField()
+        
+        landlord_verified = serializers.BooleanField()
 
         # profile fields
         avatar = serializers.URLField(allow_blank=True, allow_null=True, required=False)
@@ -1912,8 +2522,8 @@ class ProfilePageSerializer(serializers.Serializer):
         tenant_rating_average = serializers.FloatField(allow_null=True)
 
         # preview list (2 cards like your screenshot)
-        reviews_preview = ReviewCardSerializer(many=True)    
-            
+        reviews_preview = ReviewCardSerializer(many=True)
+
 
 class MessageCreateSerializer(serializers.Serializer):
     body = serializers.CharField(allow_blank=False, trim_whitespace=True)
@@ -1927,7 +2537,7 @@ class MessageCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         return Message.objects.create(**validated_data)
 
-   
+
 
 class ContactMessageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -1966,32 +2576,57 @@ class ContactMessageSerializer(serializers.ModelSerializer):
 # Room Images / Messages / Bookings / Slots / Payments / Reports
 # --------------------
 class RoomImageSerializer(serializers.ModelSerializer):
-    # Use FileField so DRF/Pillow doesn't try to decode the image during tests
-    image = serializers.FileField()
+    # Keep upload handling safe, but return frontend-ready absolute image URL.
+    image = serializers.SerializerMethodField()
 
     class Meta:
         model = RoomImage
         fields = ["id", "room", "image", "status"]
         read_only_fields = ["room", "status"]
 
+    def get_image(self, obj):
+        if not obj.image:
+            return None
+
+        url = obj.image.url
+        request = self.context.get("request")
+
+        if request is not None:
+            return request.build_absolute_uri(url)
+
+        return url
+
     # generate thumbnails after upload
     def create(self, validated_data):
-        obj = super().create(validated_data)
-        f = validated_data.get("image")
-        if f:
-            from django.utils.crypto import get_random_string  # local import if needed
-            from propertylist_app.services.image import (
-                generate_thumbnails_and_return_paths,
-            )
+            request = self.context.get("request")
 
-            stem = get_random_string(12)  # unique-ish stem
-            base_dir = "room_images/thumbs"
-            try:
-                generate_thumbnails_and_return_paths(f, base_dir, stem)
-            except Exception:
-                # Do not fail the main upload if thumbnail generation fails
-                pass
-        return obj
+            #  ALWAYS get room from context (NOT payload)
+            room = self.context.get("room")
+
+            if not room:
+                raise ValidationError("Room is required for image upload")
+
+            validated_data["room"] = room
+            validated_data["property_owner"] = room.property_owner
+            validated_data["category"] = room.category
+
+            obj = super().create(validated_data)
+
+            f = validated_data.get("image")
+            if f:
+                from django.utils.crypto import get_random_string
+                from propertylist_app.services.image import generate_thumbnails_and_return_paths
+
+                stem = get_random_string(12)
+                base_dir = "room_images/thumbs"
+
+                try:
+                    generate_thumbnails_and_return_paths(f, base_dir, stem)
+                except Exception:
+                    pass
+
+            return obj
+
 
 
 class AvatarUploadResponseSerializer(serializers.Serializer):
@@ -2090,11 +2725,38 @@ class AvatarUploadRequestSerializer(serializers.Serializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.StringRelatedField(read_only=True)
+    is_read = serializers.SerializerMethodField()
+    read_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ["id", "thread", "sender", "body", "created"]
-        read_only_fields = ["thread", "sender", "created"]
+        fields = ["id", "thread", "sender", "body", "created", "is_read", "read_at"]
+        read_only_fields = ["thread", "sender", "created", "is_read", "read_at"]
+
+    def get_is_read(self, obj):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return False
+
+        # The sender has already "read" their own message.
+        if obj.sender_id == request.user.id:
+            return True
+
+        return obj.reads.filter(user=request.user).exists()
+
+    def get_read_at(self, obj):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return None
+
+        # For sender's own message, no receiver read timestamp is available here.
+        if obj.sender_id == request.user.id:
+            return None
+
+        read = obj.reads.filter(user=request.user).first()
+        return read.read_at if read else None
 
 
 class MessageThreadSerializer(serializers.ModelSerializer):
@@ -2123,7 +2785,13 @@ class MessageThreadSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(MessageSerializer(allow_null=True))
     def get_last_message(self, obj):
-        msg = obj.messages.order_by("-created").first()
+        prefetched_messages = getattr(obj, "_prefetched_objects_cache", {}).get("messages")
+
+        if prefetched_messages is not None:
+            msg = max(prefetched_messages, key=lambda m: m.created, default=None)
+        else:
+            msg = obj.messages.order_by("-created").first()
+
         return MessageSerializer(msg).data if msg else None
 
     @extend_schema_field(serializers.IntegerField())
@@ -2131,6 +2799,9 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return 0
+        if hasattr(obj, "unread_count"):
+            return obj.unread_count
+
         return obj.messages.exclude(sender=request.user).exclude(
             reads__user=request.user
         ).count()
@@ -2223,12 +2894,16 @@ class ThreadMarkReadRequestSerializer(serializers.Serializer):
 
 class BookingSerializer(serializers.ModelSerializer):
     room_title = serializers.CharField(source="room.title", read_only=True)
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    user_name = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
         model = Booking
         fields = [
             "id",
             "room",
+            "user_id",
+            "user_name",
             "slot",
             "room_title",
             "start",
@@ -2237,14 +2912,19 @@ class BookingSerializer(serializers.ModelSerializer):
             "created_at",
             "canceled_at",
         ]
-        read_only_fields = ["created_at", "canceled_at"]
+        read_only_fields = [
+            "user_id",
+            "user_name",
+            "created_at",
+            "canceled_at",
+        ]
         extra_kwargs = {
             "room": {"required": False},
             "slot": {"required": False},
             "start": {"required": False},
             "end": {"required": False},
         }
-
+        
 
 class BookingCreateRequestSerializer(serializers.Serializer):
     room = serializers.IntegerField(required=False)
@@ -2256,6 +2936,29 @@ class BookingCreateRequestSerializer(serializers.Serializer):
         return Booking.objects.create(**validated_data)
     
     
+    
+    
+class BookingRescheduleSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+
+    def validate(self, attrs):
+        start = attrs["start"]
+        end = attrs["end"]
+
+        if start >= end:
+            raise serializers.ValidationError(
+                {"end": "End time must be after start time."}
+            )
+
+        if start <= timezone.now():
+            raise serializers.ValidationError(
+                {"start": "Cannot reschedule a viewing into the past."}
+            )
+
+        return attrs   
+
+
 class BookingResponseEnvelopeSerializer(serializers.Serializer):
     ok = serializers.BooleanField()
     data = BookingSerializer()
@@ -2271,7 +2974,11 @@ class AvailabilitySlotSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_full(self, obj) -> bool:
-            return bool(obj.is_full)
+        active_bookings = obj.bookings.filter(
+            canceled_at__isnull=True,
+            is_deleted=False,
+        ).count()
+        return active_bookings >= obj.max_bookings
 
 
 
@@ -2332,8 +3039,8 @@ class PaymentTransactionListSerializer(serializers.ModelSerializer):
 class WebhookAckSerializer(serializers.Serializer):
     ok = serializers.BooleanField(required=False)
     detail = serializers.CharField(required=False)
-    
-    
+
+
 class StripeWebhookEventRequestSerializer(serializers.Serializer):
     id = serializers.CharField(required=False)
     type = serializers.CharField(required=False)
@@ -2356,8 +3063,8 @@ class StripeWebhookAckResponseSerializer(serializers.Serializer):
 
 
 class StripeWebhookErrorResponseSerializer(serializers.Serializer):
-    detail = serializers.CharField()    
-    
+    detail = serializers.CharField()
+
 
 class PaymentTransactionDetailSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source="room.title", read_only=True)
@@ -2488,7 +3195,7 @@ class ReportSerializer(serializers.ModelSerializer):
             if request and request.user and request.user.is_authenticated:
                 room = Room.objects.filter(pk=attrs["object_id"]).first()
 
-                # NEW: policy guard — you cannot file an appeal for a room that is already active
+                # NEW: policy guard â€” you cannot file an appeal for a room that is already active
                 # Reason: appeals are meant for hidden/removed listings; appealing an active listing is meaningless noise.
                 reason = (attrs.get("reason") or "").strip().lower()
                 if room and reason == "appeal" and getattr(room, "status", None) == "active":
@@ -2572,7 +3279,7 @@ class EmailOTPResendSerializer(serializers.Serializer):
     """
     user_id = serializers.IntegerField()
     confirm = serializers.BooleanField()
-    
+
 
 class OnboardingCompleteSerializer(serializers.Serializer):
     confirm = serializers.BooleanField()
@@ -2605,10 +3312,10 @@ class PhoneOTPVerifySerializer(serializers.Serializer):
         v = (value or "").strip()
         if len(v) != 6 or not v.isdigit():
             raise serializers.ValidationError("OTP must be 6 digits.")
-        return v   
-    
-    
-    
+        return v
+
+
+
 class NotificationPreferencesSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
@@ -2646,15 +3353,15 @@ class InboxItemSerializer(serializers.Serializer):
 
     # optional helper for routing in frontend
     deep_link = serializers.CharField(allow_blank=True, required=False)
-    
-    
+
+
 class ProviderWebhookRequestSerializer(serializers.Serializer):
     payload = serializers.JSONField()
 
 class ProviderWebhookResponseSerializer(serializers.Serializer):
-    detail = serializers.CharField()    
-    
-    
+    detail = serializers.CharField()
+
+
 class ChangePasswordRequestSerializer(serializers.Serializer):
     current_password = serializers.CharField()
     new_password = serializers.CharField()
@@ -2662,17 +3369,17 @@ class ChangePasswordRequestSerializer(serializers.Serializer):
 
 class CreatePasswordRequestSerializer(serializers.Serializer):
     new_password = serializers.CharField()
-    confirm_password = serializers.CharField()    
-    
-    
+    confirm_password = serializers.CharField()
+
+
 class ChangeEmailRequestSerializer(serializers.Serializer):
     current_password = serializers.CharField()
     new_email = serializers.EmailField()
 
     def validate_new_email(self, value):
         return normalise_email(value)
-    
-    
+
+
 class LogoutRequestSerializer(serializers.Serializer):
     refresh = serializers.CharField()
 
@@ -2683,4 +3390,6 @@ class LogoutDataSerializer(serializers.Serializer):
 
 class LogoutResponseSerializer(serializers.Serializer):
     ok = serializers.BooleanField()
-    data = LogoutDataSerializer()     
+    data = LogoutDataSerializer()
+
+

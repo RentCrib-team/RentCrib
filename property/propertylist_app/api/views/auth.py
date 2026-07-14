@@ -6,7 +6,7 @@ from jwt import PyJWKClient
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-
+from notifications.services import send_security_code_email
 
 #Django
 from django.conf import settings
@@ -38,9 +38,11 @@ from drf_spectacular.utils import (
     OpenApiParameter,
     OpenApiResponse,
     inline_serializer,
+    OpenApiExample,
 )
 
-
+from propertylist_app.services.turnstile import verify_turnstile
+from drf_spectacular.utils import extend_schema, OpenApiExample
 
 #Project helpers/services
 from propertylist_app.services.captcha import verify_captcha
@@ -49,7 +51,7 @@ from propertylist_app.services.security import (
     is_locked_out,
     register_login_failure,
 )
-from propertylist_app.validators import ensure_idempotency
+from propertylist_app.validators import ensure_idempotency, normalise_email
 from propertylist_app.api.throttling import (
     LoginScopedThrottle,
     PasswordResetScopedThrottle,
@@ -66,6 +68,7 @@ from propertylist_app.api.schema_helpers import (
 )
 from .common import ok_response, error_response
 
+from propertylist_app.services.turnstile import verify_turnstile
 
 #Project serializers/models
 from propertylist_app.models import EmailOTP, IdempotencyKey, UserProfile
@@ -94,6 +97,10 @@ logger = logger_auth
 
 #DRF throttling
 from rest_framework.throttling import ScopedRateThrottle
+
+from .common import error_response
+
+
 
 
 
@@ -286,6 +293,7 @@ def generate_unique_username_from_email(email: str) -> str:
 
 
 class RegistrationView(generics.CreateAPIView):
+    
     serializer_class = RegistrationSerializer
     permission_classes = [AllowAny]
     throttle_classes = [RegisterAnonThrottle]
@@ -327,10 +335,68 @@ class RegistrationView(generics.CreateAPIView):
                 },
             )
 
-        # 2) Duplicate email must give 400
-        email = (request.data.get("email") or "").strip()
-        if email and get_user_model().objects.filter(email__iexact=email).exists():
-           return error_response(
+        # 2) Existing unverified email should allow OTP resend instead of trapping the user.
+        raw_email = request.data.get("email") or ""
+
+        try:
+            email = normalise_email(raw_email)
+        except Exception:
+            email = ""
+        existing_user = (
+            get_user_model()
+            .objects.filter(email__iexact=email)
+            .first()
+            if email
+            else None
+        )
+
+        if existing_user:
+            profile, _ = UserProfile.objects.get_or_create(user=existing_user)
+
+            if not getattr(profile, "email_verified", False):
+                code = get_random_string(6, allowed_chars="0123456789")
+
+                EmailOTP.objects.filter(
+                    user=existing_user,
+                    purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
+                    used_at__isnull=True,
+                ).update(used_at=timezone.now())
+
+                EmailOTP.create_for(
+                    existing_user,
+                    code,
+                    ttl_minutes=settings.OTP_EXPIRY_MINUTES,
+                    purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
+                )
+
+                send_security_code_email(
+                    to_email=existing_user.email,
+                    subject="Verify your email (RentCrib)",
+                    first_name=existing_user.first_name,
+                    title="Verify your email",
+                    intro="Use the code below to verify your RentCrib email address.",
+                    code=code,
+                    expiry_minutes=settings.OTP_EXPIRY_MINUTES,
+                )
+
+                masked = (
+                    existing_user.email[:2]
+                    + "â€¢â€¢â€¢@"
+                    + existing_user.email.split("@")[-1]
+                )
+
+                return ok_response(
+                    {
+                        "id": existing_user.id,
+                        "email": existing_user.email,
+                        "email_masked": masked,
+                        "need_otp": True,
+                    },
+                    message="Account already exists but is not verified. A new verification code has been sent.",
+                    status_code=status.HTTP_200_OK,
+                )
+
+            return error_response(
                 message="Invalid input.",
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="validation_error",
@@ -351,8 +417,107 @@ class RegistrationView(generics.CreateAPIView):
             message="Registration successful.",
             status_code=status.HTTP_201_CREATED,
         )
+
+
+    # def perform_create(self, serializer):
+    #     request = self.request
+
+    #     turnstile_token = request.data.get("turnstile_token")
+
+    #     if not turnstile_token:
+    #         raise ValidationError("Missing security verification")
+
+    #     if not verify_turnstile(
+    #         turnstile_token,
+    #         request.META.get("REMOTE_ADDR")
+    #     ):
+    #         raise ValidationError("Security check failed")
+
+    #     serializer.save()
         
         
+        
+        
+    # TEMPORARY (STAGING ONLY)
+    # Turnstile enforcement is disabled while frontend/mobile complete integration.
+    # Re-enable before production launch.    
+    def perform_create(self, serializer):
+        request = self.request
+
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            turnstile_token = request.data.get("turnstile_token")
+
+            if not turnstile_token:
+                raise ValidationError("Missing security verification")
+
+            if not verify_turnstile(
+                turnstile_token,
+                request.META.get("REMOTE_ADDR")
+            ):
+                raise ValidationError("Security check failed")
+
+        serializer.save()
+        
+    
+    
+
+def build_login_payload(user):
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    refresh = RefreshToken.for_user(user)
+    access_token = refresh.access_token
+
+    access_exp = datetime.fromtimestamp(int(access_token["exp"]), tz=dt_timezone.utc)
+    refresh_exp = datetime.fromtimestamp(int(refresh["exp"]), tz=dt_timezone.utc)
+
+    return {
+        "tokens": {
+            "access": str(access_token),
+            "refresh": str(refresh),
+            "access_expires_at": access_exp,
+            "refresh_expires_at": refresh_exp,
+        },
+        "user": UserSerializer(user).data,
+        "profile": UserProfileSerializer(profile).data,
+    }
+
+def _mask_email(email):
+    email = (email or "").strip()
+    if "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    return f"{local[:2]}•••@{domain}"
+
+
+def _send_account_reactivation_otp(user):
+    code = get_random_string(6, allowed_chars="0123456789")
+
+    EmailOTP.objects.filter(
+        user=user,
+        purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
+        used_at__isnull=True,
+    ).update(used_at=timezone.now())
+
+    EmailOTP.create_for(
+        user,
+        code,
+        ttl_minutes=settings.OTP_EXPIRY_MINUTES,
+        purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
+    )
+
+    send_security_code_email(
+            to_email=user.email,
+            subject="Reactivate your RentCrib account",
+            first_name=user.first_name,
+            title="Reactivate your account",
+            intro="Use the code below to reactivate your RentCrib account.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
+        )
+
+    return code
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class GoogleRegisterView(APIView):
     permission_classes = [AllowAny]
@@ -363,6 +528,10 @@ class GoogleRegisterView(APIView):
             name="GoogleRegisterRequest",
             fields={
                 "token": serializers.CharField(),
+                "role": serializers.ChoiceField(
+                    choices=[("landlord", "Landlord"), ("seeker", "Seeker")],
+                    required=False,
+                ),
             },
         ),
         responses={
@@ -395,6 +564,14 @@ class GoogleRegisterView(APIView):
     )
     def post(self, request, *args, **kwargs):
         token = request.data.get("token")
+        role = (request.data.get("role") or "").strip().lower()
+
+        if role and role not in {"landlord", "seeker"}:
+            return error_response(
+                message="Invalid role",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="bad_request",
+            )
 
         if not token:
             return error_response(
@@ -404,10 +581,28 @@ class GoogleRegisterView(APIView):
             )
 
         try:
-            idinfo = views_mod.id_token.verify_oauth2_token(
-                token,
-                google_requests.Request(),
-                settings.GOOGLE_WEB_CLIENT_ID,
+            idinfo = None
+            last_error = None
+
+            for client_id in settings.GOOGLE_ALLOWED_CLIENT_IDS:
+                try:
+                    idinfo = views_mod.id_token.verify_oauth2_token(
+                        token,
+                        google_requests.Request(),
+                        client_id,
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+
+            if idinfo is None:
+                raise last_error
+
+        except Exception:
+            return error_response(
+                message="Invalid Google token",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
             )
         except Exception:
             return error_response(
@@ -433,25 +628,21 @@ class GoogleRegisterView(APIView):
             },
         )
 
-        # Keep social auth consistent with the main login flow,
-        # which checks user.profile.email_verified
-        mark_profile_email_verified(user)
+        profile = mark_profile_email_verified(user)
 
-        refresh = RefreshToken.for_user(user)
+        # Apply role only for newly created Google accounts.
+        # Existing users keep their current role.
+        if created and role:
+            profile.role = role
+            profile.save(update_fields=["role"])
 
-        return Response(
-            {
-                "ok": True,
-                "message": "Login successful",
-                "data": {
-                    "refresh": str(refresh),
-                    "access": str(refresh.access_token),
-                },
-            },
-            status=status.HTTP_200_OK,
+        return ok_response(
+            build_login_payload(user),
+            message="Login successful",
+            status_code=status.HTTP_200_OK,
         )
-                       
-                       
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AppleRegisterView(APIView):
     permission_classes = [AllowAny]
@@ -511,7 +702,7 @@ class AppleRegisterView(APIView):
             )
 
         email = payload.get("email", "").strip().lower()
-        
+
         User = get_user_model()
         user, created = User.objects.get_or_create(
             email=email,
@@ -524,23 +715,40 @@ class AppleRegisterView(APIView):
         # which checks user.profile.email_verified
         mark_profile_email_verified(user)
 
-        refresh = RefreshToken.for_user(user)
-
-        return Response(
-            {
-                "ok": True,
-                "message": "Login successful",
-                "data": {
-                    "refresh": str(refresh),
-                    "access": str(refresh.access_token),
-                },
-            },
-            status=status.HTTP_200_OK,
-        )   
+        return ok_response(
+            build_login_payload(user),
+            message="Login successful",
+            status_code=status.HTTP_200_OK,
+        )
 
 
 
-
+@extend_schema(
+    request={
+        "type": "object",
+        "properties": {
+            "identifier": {"type": "string"},
+            "password": {"type": "string"},
+            "turnstile_token": {"type": "string"},
+        },
+        "required": ["identifier", "password", "turnstile_token"],
+    },
+    responses={
+        200: "Login successful",
+        400: "Invalid credentials or missing security verification",
+        429: "Rate limited",
+    },
+    examples=[
+        OpenApiExample(
+            "Login Request",
+            value={
+                "identifier": "user@email.com",
+                "password": "password123",
+                "turnstile_token": "cf-turnstile-token-example"
+            }
+        )
+    ]
+)
 class LoginView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "login"
@@ -573,9 +781,88 @@ class LoginView(APIView):
                     ),
                 },
             ),
-            400: DetailResponseSerializer,
-            403: DetailResponseSerializer,
-            429: DetailResponseSerializer,
+            400: OpenApiResponse(
+                response=inline_serializer(
+                    name="LoginErrorResponse",
+                    fields={
+                        "ok": serializers.BooleanField(default=False),
+                        "message": serializers.CharField(),
+                        "detail": serializers.CharField(),
+                        "status": serializers.IntegerField(),
+                        "code": serializers.CharField(required=False),
+                        "field_errors": serializers.JSONField(required=False),
+                        "details": serializers.JSONField(required=False),
+                    },
+                ),
+                description="Invalid input or invalid credentials.",
+                examples=[
+                    OpenApiExample(
+                        "Invalid credentials",
+                        value={
+                            "ok": False,
+                            "message": "Invalid credentials.",
+                            "detail": "Invalid credentials.",
+                            "status": 400,
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            403: OpenApiResponse(
+                response=inline_serializer(
+                    name="LoginEmailNotVerifiedResponse",
+                    fields={
+                        "ok": serializers.BooleanField(default=False),
+                        "message": serializers.CharField(),
+                        "detail": serializers.CharField(),
+                        "status": serializers.IntegerField(),
+                        "code": serializers.CharField(required=False),
+                        "field_errors": serializers.JSONField(required=False),
+                        "details": serializers.JSONField(required=False),
+                    },
+                ),
+                description="Email not verified.",
+                examples=[
+                    OpenApiExample(
+                        "Email not verified",
+                        value={
+                            "ok": False,
+                            "message": "Please verify your email with the 6-digit code we sent.",
+                            "detail": "Please verify your email with the 6-digit code we sent.",
+                            "status": 403,
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            429: OpenApiResponse(
+                response=inline_serializer(
+                    name="LoginRateLimitedResponse",
+                    fields={
+                        "ok": serializers.BooleanField(default=False),
+                        "message": serializers.CharField(),
+                        "detail": serializers.CharField(),
+                        "status": serializers.IntegerField(),
+                        "code": serializers.CharField(required=False),
+                        "field_errors": serializers.JSONField(required=False),
+                        "details": serializers.JSONField(required=False),
+                    },
+                ),
+                description="Too many failed attempts.",
+                examples=[
+                    OpenApiExample(
+                        "Too many failed attempts",
+                        value={
+                            "ok": False,
+                            "message": "Too many failed attempts. Try again later.",
+                            "detail": "Too many failed attempts. Try again later.",
+                            "status": 429,
+                            "code": "lockout",
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
         },
         auth=[],
         description=(
@@ -583,8 +870,51 @@ class LoginView(APIView):
             "Returns JWT refresh/access tokens on success."
         ),
     )
+    
+    
     def post(self, request, *args, **kwargs):
         
+        
+        
+
+        # turnstile_token = request.data.get("turnstile_token")
+
+        # if not turnstile_token:
+        #     return Response(
+        #         {"detail": "Missing security verification"},
+        #         status=400
+        #     )
+
+        # if not verify_turnstile(turnstile_token, request.META.get("REMOTE_ADDR")):
+        #     return Response(
+        #         {"detail": "Security check failed"},
+        #         status=400
+        #     )
+
+
+        # TEMPORARY (STAGING ONLY)
+        # Turnstile enforcement is disabled while frontend/mobile complete integration.
+        # Re-enable before production launch.
+        
+        
+        
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            turnstile_token = request.data.get("turnstile_token")
+
+            if not turnstile_token:
+                return Response(
+                    {"detail": "Missing security verification"},
+                    status=400
+                )
+
+            if not verify_turnstile(
+                turnstile_token,
+                request.META.get("REMOTE_ADDR")
+            ):
+                return Response(
+                    {"detail": "Security check failed"},
+                    status=400
+                )
 
         try:
             data = request.data.copy()
@@ -602,18 +932,19 @@ class LoginView(APIView):
 
             if identifier_for_lock and is_locked_out(ip, identifier_for_lock):
                 logger.warning("login_lockout ip=%s identifier=%s", ip, identifier_for_lock)
-                return Response(
-                    {"detail": "Too many failed attempts. Try again later."},
-                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                return error_response(
+                    message="Too many failed attempts. Try again later.",
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    code="lockout",
                 )
 
             if getattr(settings, "ENABLE_CAPTCHA", False):
                 token = (data.get("captcha_token") or "").strip()
                 if not views_mod.verify_captcha(token, ip):
                     logger.warning("login_captcha_failed ip=%s identifier=%s", ip, (identifier_for_lock or "-"))
-                    return Response(
-                        {"detail": "CAPTCHA verification failed."},
-                        status=status.HTTP_400_BAD_REQUEST,
+                    return error_response(
+                        message="CAPTCHA verification failed.",
+                        status_code=status.HTTP_400_BAD_REQUEST,
                     )
 
             ser = LoginSerializer(data=data)
@@ -629,6 +960,43 @@ class LoginView(APIView):
                     lookup_username = u.username
                 except get_user_model().DoesNotExist:
                     pass
+                
+                
+                
+                
+            candidate_user = None
+            UserModel = get_user_model()
+
+            try:
+                if "@" in identifier:
+                    candidate_user = UserModel.objects.get(email__iexact=identifier)
+                else:
+                    candidate_user = UserModel.objects.get(username__iexact=lookup_username)
+            except UserModel.DoesNotExist:
+                candidate_user = None
+
+            if candidate_user and candidate_user.check_password(password) and not candidate_user.is_active:
+                profile, _ = UserProfile.objects.get_or_create(user=candidate_user)
+
+                if not getattr(profile, "email_verified", False):
+                    return error_response(
+                        message="Please verify your email with the 6-digit code we sent.",
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        code="email_not_verified",
+                    )
+
+                _send_account_reactivation_otp(candidate_user)
+
+                return error_response(
+                    message="Your account is deactivated. We have sent a verification code to your email.",
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="ACCOUNT_DEACTIVATED",
+                    details={
+                        "identifier": identifier,
+                        "email_masked": _mask_email(candidate_user.email),
+                        "requires_otp": True,
+                    },
+                )    
 
             user = authenticate(request, username=lookup_username, password=password)
             if user:
@@ -641,9 +1009,9 @@ class LoginView(APIView):
 
                 if not profile or not getattr(profile, "email_verified", False):
                     logger.warning("login_email_not_verified ip=%s user_id=%s", ip, user.id)
-                    return Response(
-                        {"detail": "Please verify your email with the 6-digit code we sent."},
-                        status=status.HTTP_403_FORBIDDEN,
+                    return error_response(
+                        message="Please verify your email with the 6-digit code we sent.",
+                        status_code=status.HTTP_403_FORBIDDEN,
                     )
 
                 clear_login_failures(ip, identifier_for_lock or identifier)
@@ -674,23 +1042,146 @@ class LoginView(APIView):
 
             if identifier_for_lock and is_locked_out(ip, identifier_for_lock):
                 logger.warning("login_lockout ip=%s identifier=%s", ip, identifier_for_lock)
-                return Response(
-                    {"detail": "Too many failed attempts. Try again later."},
-                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                return error_response(
+                    message="Too many failed attempts. Try again later.",
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    code="lockout",
                 )
 
             logger.warning("login_invalid_credentials ip=%s identifier=%s", ip, (identifier_for_lock or identifier))
-            return Response(
-                {"detail": "Invalid credentials."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                message="Invalid credentials.",
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
 
         except Exception:
             logger.exception("LoginView crashed")
             raise
-        
-        
-        
+
+
+class AccountReactivateView(APIView):
+    permission_classes = [AllowAny]
+    versioning_class = None
+    throttle_scope = "login"
+    throttle_classes = [ScopedRateThrottle]
+
+    @extend_schema(
+        request=inline_serializer(
+            name="AccountReactivateRequest",
+            fields={
+                "identifier": serializers.CharField(),
+                "otp": serializers.CharField(),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name="AccountReactivateOkResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(required=False, allow_null=True),
+                    "data": inline_serializer(
+                        name="AccountReactivateData",
+                        fields={
+                            "tokens": serializers.DictField(),
+                            "user": serializers.DictField(),
+                            "profile": serializers.DictField(),
+                        },
+                    ),
+                },
+            ),
+            400: OpenApiResponse(description="Invalid OTP."),
+            404: OpenApiResponse(description="User not found."),
+            429: OpenApiResponse(description="Too many OTP attempts."),
+        },
+        auth=[],
+        description="Reactivate a deactivated account using the OTP sent after login attempt.",
+    )
+    def post(self, request):
+        identifier = (request.data.get("identifier") or "").strip()
+        token = (request.data.get("otp") or request.data.get("token") or "").strip()
+
+        if not identifier or not token:
+            return error_response(
+                message="identifier and otp are required.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="missing_required_fields",
+            )
+
+        UserModel = get_user_model()
+
+        try:
+            if "@" in identifier:
+                user = UserModel.objects.get(email__iexact=identifier)
+            else:
+                user = UserModel.objects.get(username__iexact=identifier)
+        except UserModel.DoesNotExist:
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+        otp = (
+            EmailOTP.objects.filter(
+                user=user,
+                purpose=EmailOTP.PURPOSE_ACCOUNT_REACTIVATION,
+                used_at__isnull=True,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not otp:
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+        if otp.is_expired:
+            return error_response(
+                message="Token expired.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="token_expired",
+            )
+
+        if otp.attempts >= settings.OTP_MAX_ATTEMPTS:
+            return error_response(
+                message="Too many attempts. Request a new reactivation code.",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                code="rate_limited",
+            )
+
+        if not otp.matches(token):
+            otp.attempts = int(otp.attempts or 0) + 1
+            otp.save(update_fields=["attempts"])
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+        otp.mark_used()
+
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+
+        clear_login_failures(
+            request.META.get("REMOTE_ADDR"),
+            identifier,
+        )
+
+        return ok_response(
+            build_login_payload(user),
+            message="Account reactivated successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+
+
+
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     versioning_class = None
@@ -727,8 +1218,8 @@ class LogoutView(APIView):
 
         # Reason: A3/C1 consistent success envelope
         return ok_response({"detail": "Logged out."}, status_code=status.HTTP_200_OK)
-    
-    
+
+
 class TokenRefreshView(APIView):
     permission_classes = [AllowAny]
     versioning_class = None
@@ -768,6 +1259,13 @@ class TokenRefreshView(APIView):
 
         try:
             refresh = RefreshToken(refresh_str)
+
+            user_id = refresh.get("user_id")
+            User = get_user_model()
+
+            if not user_id or not User.objects.filter(id=user_id, is_active=True).exists():
+                raise ValidationError({"refresh": "Invalid or expired refresh token."})
+
             access_token = refresh.access_token
 
             access_exp = datetime.fromtimestamp(int(access_token["exp"]), tz=dt_timezone.utc)
@@ -817,9 +1315,9 @@ class PasswordResetRequestView(APIView):
         if settings.ENABLE_CAPTCHA:
             token = (request.data.get("captcha_token") or "").strip()
             if not views_mod.verify_captcha(token, request.META.get("REMOTE_ADDR")):
-                return Response(
-                    {"detail": "CAPTCHA verification failed."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                return error_response(
+                    message="CAPTCHA verification failed.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
         ser = PasswordResetRequestSerializer(data=request.data)
@@ -828,7 +1326,7 @@ class PasswordResetRequestView(APIView):
         email = ser.validated_data["email"].strip()
         UserModel = get_user_model()
 
-        # Always return a generic response (don’t reveal if email exists)
+        # Always return a generic response (donâ€™t reveal if email exists)
         generic_response = ok_response(
             {"detail": "If that email exists, a reset code has been sent."},
             status_code=status.HTTP_200_OK,
@@ -861,12 +1359,14 @@ class PasswordResetRequestView(APIView):
         )
 
         # Send email (locmem backend in tests will capture this)
-        mail.send_mail(
-            subject="Reset your password (RentOut)",
-            message=f"Your password reset code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+        send_security_code_email(
+            to_email=user.email,
+            subject="Reset your password (RentCrib)",
+            first_name=user.first_name,
+            title="Reset your password",
+            intro="Use the code below to reset your RentCrib password.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         # Important for tests/dev: return token so tests can use it easily.
@@ -916,9 +1416,13 @@ class PasswordResetConfirmView(APIView):
         try:
             user = UserModel.objects.get(email__iexact=email)
         except UserModel.DoesNotExist:
-            return Response({"detail": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
+
+
         otp = (
             EmailOTP.objects.filter(
                 user=user,
@@ -930,21 +1434,33 @@ class PasswordResetConfirmView(APIView):
         )
 
         if not otp:
-            return Response({"detail": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                    message="Invalid token.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    code="invalid_token",
+                )
 
         if otp.is_expired:
-            return Response({"detail": "Token expired."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if otp.attempts >= settings.OTP_MAX_ATTEMPTS:
-            return Response(
-                {"detail": "Too many attempts. Request a new reset code."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            return error_response(
+                message="Token expired.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="token_expired",
             )
 
+        if otp.attempts >= settings.OTP_MAX_ATTEMPTS:
+            return error_response(
+                message="Too many attempts. Request a new reset code.",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                code="rate_limited",
+            )
         if not otp.matches(token):
             otp.attempts = int(otp.attempts or 0) + 1
             otp.save(update_fields=["attempts"])
-            return Response({"detail": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message="Invalid token.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_token",
+            )
 
         # Token is valid: mark used + set new password
         otp.mark_used()
@@ -986,24 +1502,29 @@ class CreatePasswordView(APIView):
 
         # Social users may have no password yet
         if user.has_usable_password():
-            return Response(
-                {"detail": "Password already exists. Use change password instead."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                message="Password already exists. Use change password instead.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="password_exists",
             )
 
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
 
         if not new_password or not confirm_password:
-            return Response(
-                {"detail": "new_password and confirm_password are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response(
+                    message="new_password and confirm_password are required.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    code="missing_password_fields",
+                )
 
         if new_password != confirm_password:
-            return Response(
-                {"confirm_password": "Passwords do not match."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                message="Passwords do not match.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="validation_error",
+                field_errors={"confirm_password": ["Passwords do not match."]},
+                details={"confirm_password": ["Passwords do not match."]},
             )
 
         from django.contrib.auth.password_validation import validate_password
@@ -1012,9 +1533,12 @@ class CreatePasswordView(APIView):
         try:
             validate_password(new_password, user=user)
         except DjangoValidationError as e:
-            return Response(
-                {"new_password": list(e.messages)},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                message="Invalid password.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="validation_error",
+                field_errors={"new_password": list(e.messages)},
+                details={"new_password": list(e.messages)},
             )
 
         user.set_password(new_password)
@@ -1027,7 +1551,8 @@ class CreatePasswordView(APIView):
 
 
 
-                                            
-        
-        
-        
+
+
+
+
+

@@ -39,6 +39,7 @@ from propertylist_app.models import (
     # Auth / verification
     EmailOTP,
     PhoneOTP,
+    LandlordVerificationRequest,
 )
 
 
@@ -397,6 +398,65 @@ class UserProfileAdmin(admin.ModelAdmin):
             )
         }),
     )
+
+
+@admin.register(LandlordVerificationRequest)
+class LandlordVerificationRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "status",
+        "document",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+    )
+
+    list_filter = (
+        "status",
+        "created_at",
+        "reviewed_at",
+    )
+
+    search_fields = (
+        "user__username",
+        "user__email",
+        "notes",
+        "rejection_reason",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "reviewed_at",
+    )
+
+    fieldsets = (
+        ("Request", {
+            "fields": (
+                "user",
+                "status",
+                "document",
+                "notes",
+            )
+        }),
+        ("Review", {
+            "fields": (
+                "reviewed_by",
+                "reviewed_at",
+                "rejection_reason",
+            )
+        }),
+        ("Timestamps", {
+            "classes": ("collapse",),
+            "fields": (
+                "created_at",
+                "updated_at",
+            )
+        }),
+    )
+
+
 
 
 @admin.register(Booking)

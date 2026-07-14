@@ -4,6 +4,451 @@ info:
   version: v1
   description: Backend API for RentOut property platform.
 paths:
+  /api/v1/admin/admin-management/admins/:
+    get:
+      operationId: admin_admin_management_admins_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserTableResponse'
+          description: ''
+  /api/v1/admin/admin-management/admins/{admin_user_id}/delete/:
+    delete:
+      operationId: admin_admin_management_admins_delete_destroy
+      parameters:
+      - in: path
+        name: admin_user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/admin/admin-management/admins/create/:
+    post:
+      operationId: admin_admin_management_admins_create_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAdminResponse'
+          description: ''
+  /api/v1/admin/admin-management/permissions/:
+    get:
+      operationId: admin_admin_management_permissions_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRolePermissionsResponse'
+          description: ''
+  /api/v1/admin/analytics/booking-trends/:
+    get:
+      operationId: admin_analytics_booking_trends_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingTrendsResponse'
+          description: ''
+  /api/v1/admin/analytics/listing-growth/:
+    get:
+      operationId: admin_analytics_listing_growth_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingGrowthResponse'
+          description: ''
+  /api/v1/admin/analytics/moderation-backlog-trends/:
+    get:
+      operationId: admin_analytics_moderation_backlog_trends_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationBacklogTrendsResponse'
+          description: ''
+  /api/v1/admin/analytics/payment-status-mix/:
+    get:
+      operationId: admin_analytics_payment_status_mix_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatusMixResponse'
+          description: ''
+  /api/v1/admin/bookings/:
+    get:
+      operationId: admin_bookings_overview
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBookingOverviewResponse'
+          description: ''
+  /api/v1/admin/bookings/{booking_id}/:
+    get:
+      operationId: admin_booking_detail
+      parameters:
+      - in: path
+        name: booking_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBookingDetailResponse'
+          description: ''
+  /api/v1/admin/bookings/{booking_id}/action/:
+    post:
+      operationId: admin_bookings_action_create
+      parameters:
+      - in: path
+        name: booking_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminBookingActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminBookingActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminBookingActionRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBookingActionResponse'
+          description: ''
+  /api/v1/admin/common/notifications/dropdown/:
+    get:
+      operationId: admin_common_notifications_dropdown_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNotificationDropdownResponse'
+          description: ''
+  /api/v1/admin/common/profile/dropdown/:
+    get:
+      operationId: admin_common_profile_dropdown_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminProfileDropdownResponse'
+          description: ''
+  /api/v1/admin/dashboard/overview/:
+    get:
+      operationId: admin_dashboard_overview_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOverviewResponse'
+          description: ''
+  /api/v1/admin/listings/{listing_id}/:
+    get:
+      operationId: admin_listings_retrieve
+      parameters:
+      - in: path
+        name: listing_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminListingDetailResponse'
+          description: ''
+  /api/v1/admin/listings/{listing_id}/action/:
+    post:
+      operationId: admin_listings_action_create
+      parameters:
+      - in: path
+        name: listing_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListingActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ListingActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ListingActionRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingActionResponse'
+          description: ''
+  /api/v1/admin/listings/overview/:
+    get:
+      operationId: admin_listings_overview_retrieve
+      parameters:
+      - in: query
+        name: availability
+        schema:
+          type: string
+      - in: query
+        name: bills
+        schema:
+          type: string
+      - in: query
+        name: category
+        schema:
+          type: string
+      - in: query
+        name: furnished
+        schema:
+          type: string
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+      - in: query
+        name: parking
+        schema:
+          type: string
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: sort_by
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingOverviewResponse'
+          description: ''
+  /api/v1/admin/support/landlord-verification-requests/:
+    get:
+      operationId: admin_support_landlord_verification_requests_list
+      tags:
+      - Admin - Support
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminLandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
+  /api/v1/admin/support/landlord-verification-requests/{request_id}/review/:
+    post:
+      operationId: admin_support_landlord_verification_requests_review_create
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Admin - Support
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLandlordVerificationAction'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminLandlordVerificationAction'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminLandlordVerificationAction'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/AdminLandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
+  /api/v1/admin/tenancies/:
+    get:
+      operationId: admin_tenancies_overview
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTenancyOverviewResponse'
+          description: ''
+  /api/v1/admin/tenancies/{tenancy_id}/:
+    get:
+      operationId: admin_tenancy_detail
+      parameters:
+      - in: path
+        name: tenancy_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTenancyDetailResponse'
+          description: ''
   /api/v1/auth/login/:
     post:
       operationId: auth_login_create
@@ -16,6 +461,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/Login'
+            examples:
+              LoginRequest:
+                value:
+                  identifier: user@email.com
+                  password: password123
+                  turnstile_token: cf-turnstile-token-example
+                summary: Login Request
           application/x-www-form-urlencoded:
             schema:
               $ref: '#/components/schemas/Login'
@@ -29,25 +481,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoginOkResponse'
+              examples:
+                LoginRequest:
+                  value:
+                    identifier: user@email.com
+                    password: password123
+                    turnstile_token: cf-turnstile-token-example
+                  summary: Login Request
           description: ''
         '400':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DetailResponse'
-          description: ''
+                $ref: '#/components/schemas/LoginErrorResponse'
+              examples:
+                InvalidCredentials:
+                  value:
+                    ok: false
+                    message: Invalid credentials.
+                    detail: Invalid credentials.
+                    status: 400
+                  summary: Invalid credentials
+          description: Invalid input or invalid credentials.
         '403':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DetailResponse'
-          description: ''
+                $ref: '#/components/schemas/LoginEmailNotVerifiedResponse'
+              examples:
+                EmailNotVerified:
+                  value:
+                    ok: false
+                    message: Please verify your email with the 6-digit code we sent.
+                    detail: Please verify your email with the 6-digit code we sent.
+                    status: 403
+                  summary: Email not verified
+          description: Email not verified.
         '429':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DetailResponse'
-          description: ''
+                $ref: '#/components/schemas/LoginRateLimitedResponse'
+              examples:
+                TooManyFailedAttempts:
+                  value:
+                    ok: false
+                    message: Too many failed attempts. Try again later.
+                    detail: Too many failed attempts. Try again later.
+                    status: 429
+                    code: lockout
+                  summary: Too many failed attempts
+          description: Too many failed attempts.
   /api/v1/auth/logout/:
     post:
       operationId: auth_logout_create
@@ -483,7 +967,7 @@ paths:
   /api/v1/bookings/{id}/:
     get:
       operationId: bookings_retrieve
-      description: GET /api/bookings/<id>/ → see my booking
+      description: GET /api/bookings/<id>/ â†’ see my booking
       parameters:
       - in: path
         name: id
@@ -601,6 +1085,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: ''
+  /api/v1/bookings/{id}/reschedule/:
+    patch:
+      operationId: bookings_reschedule_partial_update
+      description: Reschedule a viewing. Only the room owner can reschedule.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBookingReschedule'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBookingReschedule'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBookingReschedule'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/BookingRescheduleResponse'
+                required:
+                - ok
+                - data
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
   /api/v1/bookings/{id}/suspend/:
     post:
       operationId: bookings_suspend_create
@@ -695,6 +1240,55 @@ paths:
           description: Missing/invalid fields or invalid datetime format.
         '401':
           description: Authentication required.
+  /api/v1/bookings/viewing/:
+    post:
+      operationId: bookings_viewing_create
+      tags:
+      - bookings
+      requestBody:
+        content:
+          type:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          properties:
+            schema:
+              slot_id:
+                type: integer
+              room_id:
+                type: integer
+              start:
+                type: string
+                format: date-time
+          required:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      room_id:
+                        type: integer
+                      start:
+                        type: string
+                      status:
+                        type: string
+          description: ''
   /api/v1/cities/:
     get:
       operationId: cities_retrieve
@@ -1222,7 +1816,7 @@ paths:
     get:
       operationId: moderation_reports_list
       description: GET /api/moderation/reports/?status=open|in_review|resolved|rejected
-        — staff only.
+        â€” staff only.
       parameters:
       - name: limit
         required: false
@@ -1359,7 +1953,7 @@ paths:
       operationId: moderation_rooms_status_partial_update
       description: |-
         PATCH /api/moderation/rooms/<id>/status/
-        Body: {"status": "active"|"hidden"} — staff only.
+        Body: {"status": "active"|"hidden"} â€” staff only.
       parameters:
       - in: path
         name: id
@@ -1921,7 +2515,7 @@ paths:
       description: |-
         POST /api/reports/
         Body:
-          {"target_type": "room"|"review"|"message"|"user", "object_id": 123, "reason": "abuse", "details": "…"}
+          {"target_type": "room"|"review"|"message"|"user", "object_id": 123, "reason": "abuse", "details": "â€¦"}
       tags:
       - reports
       requestBody:
@@ -3602,8 +4196,8 @@ paths:
         - property_types   : flat / house / studio (Advanced Search)
         - rooms_min/max    : minimum / maximum number_of_bedrooms (Advanced Search)
         - move_in_date     : earliest acceptable move-in date (Advanced Search)
-        - min_rating       : minimum average rating (1–5)
-        - max_rating       : maximum average rating (1–5)
+        - min_rating       : minimum average rating (1â€“5)
+        - max_rating       : maximum average rating (1â€“5)
       parameters:
       - name: limit
         required: false
@@ -4365,6 +4959,23 @@ paths:
           description: Validation error.
         '401':
           description: Authentication required.
+  /api/v1/users/me/delete-account/request-otp/:
+    post:
+      operationId: users_me_delete_account_request_otp_create
+      description: Send OTP to confirm account deletion.
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteAccountOtpRequestOkResponse'
+          description: ''
+        '401':
+          description: Authentication required.
   /api/v1/users/me/delete/confirm/:
     post:
       operationId: users_me_delete_confirm_create
@@ -4496,6 +5107,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DataExportLatestNotFoundResponse'
+          description: ''
+  /api/v1/users/me/identity-verification/:
+    get:
+      operationId: api_v1_users_me_identity_verification_retrieve
+      description: Return the authenticated user's latest identity verification request.
+        The data field is null when no request exists.
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIdentityVerificationGetResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Authentication required.
+    post:
+      operationId: api_v1_users_me_identity_verification_create
+      description: Submit an identity verification request for the authenticated user.
+        If a pending request already exists, that request is returned.
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityVerificationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IdentityVerificationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IdentityVerificationRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIdentityVerificationPendingResponse'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIdentityVerificationCreateResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Invalid identity verification submission.
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Authentication required.
+  /api/v1/users/me/landlord-verification/:
+    get:
+      operationId: users_me_landlord_verification_retrieve
+      tags:
+      - Verification
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/LandlordVerificationRequest'
+                required:
+                - ok
+                - data
+          description: ''
+    post:
+      operationId: users_me_landlord_verification_create
+      tags:
+      - Verification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LandlordVerificationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LandlordVerificationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LandlordVerificationRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/LandlordVerificationRequest'
+                required:
+                - ok
+                - data
           description: ''
   /api/v1/users/me/notification-preferences/:
     get:
@@ -5021,11 +5758,1004 @@ components:
       properties:
         confirm:
           type: boolean
-        current_password:
+        otp:
           type: string
           writeOnly: true
       required:
       - confirm
+      - otp
+    AdminAvailableActions:
+      type: object
+      properties:
+        can_approve:
+          type: boolean
+        can_hide:
+          type: boolean
+        can_restore:
+          type: boolean
+        can_soft_delete:
+          type: boolean
+      required:
+      - can_approve
+      - can_hide
+      - can_restore
+      - can_soft_delete
+    AdminBookingActionRequest:
+      type: object
+      properties:
+        action:
+          enum:
+          - suspend
+          - cancel
+          - restore
+          - soft_delete
+          type: string
+          description: |-
+            * `suspend` - Suspend
+            * `cancel` - Cancel
+            * `restore` - Restore
+            * `soft_delete` - Soft delete
+          x-spec-enum-id: 7ab207006a8337ac
+      required:
+      - action
+    AdminBookingActionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminBookingActionResponseData'
+      required:
+      - data
+      - message
+      - ok
+    AdminBookingActionResponseData:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        is_deleted:
+          type: boolean
+      required:
+      - id
+      - is_deleted
+      - status
+    AdminBookingDetailData:
+      type: object
+      properties:
+        id:
+          type: integer
+        booking_id:
+          type: string
+        booking_date:
+          type: string
+          format: date
+        booking_time:
+          type: string
+        booking_created:
+          type: string
+          format: date-time
+        status:
+          type: string
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
+        tenant:
+          type: object
+          additionalProperties: {}
+        listing:
+          type: object
+          additionalProperties: {}
+      required:
+      - booking_created
+      - booking_date
+      - booking_id
+      - booking_time
+      - canceled_at
+      - id
+      - listing
+      - status
+      - tenant
+    AdminBookingDetailResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminBookingDetailData'
+      required:
+      - data
+      - message
+      - ok
+    AdminBookingOverviewData:
+      type: object
+      properties:
+        stats:
+          $ref: '#/components/schemas/AdminBookingStats'
+        bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminBookingTableItem'
+      required:
+      - bookings
+      - stats
+    AdminBookingOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminBookingOverviewData'
+      required:
+      - data
+      - message
+      - ok
+    AdminBookingStats:
+      type: object
+      properties:
+        all_bookings:
+          type: integer
+        confirmed_bookings:
+          type: integer
+        suspended_bookings:
+          type: integer
+        cancelled_bookings:
+          type: integer
+        deleted_bookings:
+          type: integer
+      required:
+      - all_bookings
+      - cancelled_bookings
+      - confirmed_bookings
+      - deleted_bookings
+      - suspended_bookings
+    AdminBookingTableItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        booking_id:
+          type: string
+        user:
+          type: string
+        user_email:
+          type: string
+          format: email
+        property_type:
+          type: string
+          nullable: true
+        room_id:
+          type: integer
+        room_title:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        status:
+          type: string
+        is_deleted:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - booking_id
+      - created_at
+      - end
+      - id
+      - is_deleted
+      - property_type
+      - room_id
+      - room_title
+      - start
+      - status
+      - user
+      - user_email
+    AdminExistingFlatmate:
+      type: object
+      properties:
+        age:
+          type: integer
+          nullable: true
+        nationality:
+          type: string
+        language:
+          type: string
+        gender:
+          type: string
+        occupation:
+          type: string
+        smoking:
+          type: string
+        pets:
+          type: string
+        lgbtqia_household:
+          type: string
+      required:
+      - age
+      - gender
+      - language
+      - lgbtqia_household
+      - nationality
+      - occupation
+      - pets
+      - smoking
+    AdminFlatmatePreferences:
+      type: object
+      properties:
+        nationality:
+          type: string
+        language:
+          type: string
+        min_age:
+          type: integer
+          nullable: true
+        max_age:
+          type: integer
+          nullable: true
+        occupation:
+          type: string
+        pets:
+          type: string
+        gender:
+          type: string
+        smoking:
+          type: string
+        partners_allowed:
+          type: string
+        lgbtqia:
+          type: string
+        vegan_vegetarian:
+          type: string
+      required:
+      - gender
+      - language
+      - lgbtqia
+      - max_age
+      - min_age
+      - nationality
+      - occupation
+      - partners_allowed
+      - pets
+      - smoking
+      - vegan_vegetarian
+    AdminLandlordVerificationAction:
+      type: object
+      properties:
+        action:
+          enum:
+          - approve
+          - reject
+          type: string
+          description: |-
+            * `approve` - approve
+            * `reject` - reject
+          x-spec-enum-id: 55f4f79b5c0ebf21
+        rejection_reason:
+          type: string
+      required:
+      - action
+    AdminLandlordVerificationRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user_id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        status:
+          enum:
+          - pending
+          - approved
+          - rejected
+          type: string
+          description: |-
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          x-spec-enum-id: de3702061fc1d433
+        document:
+          type: string
+          format: uri
+          nullable: true
+        notes:
+          type: string
+        reviewed_by:
+          type: integer
+          nullable: true
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejection_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - email
+      - id
+      - updated_at
+      - user_id
+      - username
+    AdminListingAmenities:
+      type: object
+      properties:
+        home:
+          type: array
+          items:
+            type: string
+        property:
+          type: array
+          items:
+            type: string
+        safety:
+          type: array
+          items:
+            type: string
+      required:
+      - home
+      - property
+      - safety
+    AdminListingBasicDetails:
+      type: object
+      properties:
+        address:
+          type: string
+        deposit:
+          type: string
+          nullable: true
+        view_available_days:
+          type: string
+        available_from:
+          type: string
+          format: date
+        availability_start_time:
+          type: string
+          format: time
+          nullable: true
+        availability_end_time:
+          type: string
+          format: time
+          nullable: true
+        minimum_rental_period_months:
+          type: integer
+          nullable: true
+        maximum_rental_period_months:
+          type: integer
+          nullable: true
+        furnished:
+          type: boolean
+        bills_included:
+          type: boolean
+        parking_available:
+          type: boolean
+        is_available:
+          type: boolean
+      required:
+      - address
+      - availability_end_time
+      - availability_start_time
+      - available_from
+      - bills_included
+      - deposit
+      - furnished
+      - is_available
+      - maximum_rental_period_months
+      - minimum_rental_period_months
+      - parking_available
+      - view_available_days
+    AdminListingCoreInformation:
+      type: object
+      properties:
+        ad_title:
+          type: string
+        owner:
+          type: string
+        owner_email:
+          type: string
+          format: email
+        property_type:
+          type: string
+        category:
+          type: string
+          nullable: true
+        price:
+          type: string
+        description:
+          type: string
+        main_photo:
+          type: string
+          nullable: true
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminListingImage'
+      required:
+      - ad_title
+      - category
+      - description
+      - images
+      - owner
+      - owner_email
+      - price
+      - property_type
+    AdminListingDetailData:
+      type: object
+      properties:
+        id:
+          type: integer
+        listing_id:
+          type: string
+        status:
+          type: string
+        basic_information:
+          type: object
+          additionalProperties: {}
+        core_listing_information:
+          $ref: '#/components/schemas/AdminListingCoreInformation'
+        basic_details:
+          $ref: '#/components/schemas/AdminListingBasicDetails'
+        layout_information:
+          $ref: '#/components/schemas/AdminListingLayoutInformation'
+        flatmate_information:
+          $ref: '#/components/schemas/AdminListingFlatmateInformation'
+        metadata:
+          $ref: '#/components/schemas/AdminListingMetadata'
+        related_entities:
+          $ref: '#/components/schemas/AdminRelatedEntities'
+        available_actions:
+          $ref: '#/components/schemas/AdminAvailableActions'
+      required:
+      - available_actions
+      - basic_details
+      - basic_information
+      - core_listing_information
+      - flatmate_information
+      - id
+      - layout_information
+      - listing_id
+      - metadata
+      - related_entities
+      - status
+    AdminListingDetailResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminListingDetailData'
+      required:
+      - data
+      - message
+      - ok
+    AdminListingFlatmateInformation:
+      type: object
+      properties:
+        existing_flatmate:
+          $ref: '#/components/schemas/AdminExistingFlatmate'
+        flatmate_preferences:
+          $ref: '#/components/schemas/AdminFlatmatePreferences'
+      required:
+      - existing_flatmate
+      - flatmate_preferences
+    AdminListingImage:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          nullable: true
+        status:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+      required:
+      - id
+      - status
+      - uploaded_at
+      - url
+    AdminListingItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        owner:
+          type: string
+        owner_email:
+          type: string
+          format: email
+        category:
+          type: string
+          nullable: true
+        price:
+          type: string
+        status:
+          type: string
+        is_deleted:
+          type: boolean
+        furnished:
+          type: boolean
+        bills_included:
+          type: boolean
+        parking_available:
+          type: boolean
+        is_available:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - bills_included
+      - category
+      - created_at
+      - furnished
+      - id
+      - is_available
+      - is_deleted
+      - owner
+      - owner_email
+      - parking_available
+      - price
+      - status
+      - title
+      - updated_at
+    AdminListingLayoutInformation:
+      type: object
+      properties:
+        bedrooms:
+          type: integer
+          nullable: true
+        bathrooms:
+          type: integer
+          nullable: true
+        property_type:
+          type: string
+          nullable: true
+        room_size:
+          type: string
+          nullable: true
+        shared_living:
+          type: boolean
+        amenities:
+          $ref: '#/components/schemas/AdminListingAmenities'
+      required:
+      - amenities
+      - bathrooms
+      - bedrooms
+      - property_type
+      - room_size
+      - shared_living
+    AdminListingMetadata:
+      type: object
+      properties:
+        paid_until:
+          type: string
+          format: date-time
+          nullable: true
+        last_updated:
+          type: string
+          format: date-time
+        views_count:
+          type: integer
+        inquiries_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - inquiries_count
+      - last_updated
+      - paid_until
+      - views_count
+    AdminNotificationDropdownData:
+      type: object
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminNotificationDropdownItem'
+        unread_count:
+          type: integer
+      required:
+      - notifications
+      - unread_count
+    AdminNotificationDropdownItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        body:
+          type: string
+        type:
+          type: string
+        is_read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - body
+      - created_at
+      - id
+      - is_read
+      - title
+      - type
+    AdminNotificationDropdownResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminNotificationDropdownData'
+      required:
+      - data
+      - message
+      - ok
+    AdminOwnerProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+      required:
+      - email
+      - id
+      - name
+    AdminPaymentHistory:
+      type: object
+      properties:
+        id:
+          type: integer
+        amount:
+          type: string
+        currency:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - created_at
+      - currency
+      - id
+      - status
+    AdminProfileDropdownData:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        admin_role:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+        email_verified:
+          type: boolean
+        phone_verified:
+          type: boolean
+      required:
+      - admin_role
+      - avatar
+      - email
+      - email_verified
+      - first_name
+      - id
+      - last_name
+      - phone_verified
+    AdminProfileDropdownResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminProfileDropdownData'
+      required:
+      - data
+      - message
+      - ok
+    AdminRelatedBooking:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+      required:
+      - end
+      - id
+      - start
+      - status
+    AdminRelatedEntities:
+      type: object
+      properties:
+        owner_profile:
+          $ref: '#/components/schemas/AdminOwnerProfile'
+        related_bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminRelatedBooking'
+        payment_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminPaymentHistory'
+      required:
+      - owner_profile
+      - payment_history
+      - related_bookings
+    AdminRolePermissionsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - data
+      - message
+      - ok
+    AdminTenancyDetailData:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenancy_id:
+          type: string
+        status:
+          type: string
+        confirmation:
+          type: string
+        move_in_date:
+          type: string
+          format: date
+        duration_months:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        tenant:
+          type: object
+          additionalProperties: {}
+        landlord:
+          type: object
+          additionalProperties: {}
+        listing:
+          type: object
+          additionalProperties: {}
+      required:
+      - confirmation
+      - created_at
+      - duration_months
+      - id
+      - landlord
+      - listing
+      - move_in_date
+      - status
+      - tenancy_id
+      - tenant
+      - updated_at
+    AdminTenancyDetailResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminTenancyDetailData'
+      required:
+      - data
+      - message
+      - ok
+    AdminTenancyOverviewData:
+      type: object
+      properties:
+        stats:
+          $ref: '#/components/schemas/AdminTenancyStats'
+        tenancies:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminTenancyTableItem'
+      required:
+      - stats
+      - tenancies
+    AdminTenancyOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminTenancyOverviewData'
+      required:
+      - data
+      - message
+      - ok
+    AdminTenancyStats:
+      type: object
+      properties:
+        all_tenancies:
+          type: integer
+        proposed_tenancies:
+          type: integer
+        confirmed_tenancies:
+          type: integer
+        active_tenancies:
+          type: integer
+        ended_tenancies:
+          type: integer
+        cancelled_tenancies:
+          type: integer
+      required:
+      - active_tenancies
+      - all_tenancies
+      - cancelled_tenancies
+      - confirmed_tenancies
+      - ended_tenancies
+      - proposed_tenancies
+    AdminTenancyTableItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenancy_id:
+          type: string
+        tenant:
+          type: string
+        tenant_email:
+          type: string
+          format: email
+        landlord:
+          type: string
+        landlord_email:
+          type: string
+          format: email
+        room_id:
+          type: integer
+        room_title:
+          type: string
+        property_type:
+          type: string
+          nullable: true
+        move_in_date:
+          type: string
+          format: date
+        duration_months:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - duration_months
+      - id
+      - landlord
+      - landlord_email
+      - move_in_date
+      - property_type
+      - room_id
+      - room_title
+      - status
+      - tenancy_id
+      - tenant
+      - tenant_email
+    AdminUserTableItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        username:
+          type: string
+        admin_role:
+          type: string
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+      required:
+      - admin_role
+      - email
+      - first_name
+      - id
+      - is_active
+      - is_staff
+      - last_name
+      - username
+    AdminUserTableResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUserTableItem'
+      required:
+      - data
+      - message
+      - ok
     AppleRegisterData:
       type: object
       properties:
@@ -5122,6 +6852,12 @@ components:
           readOnly: true
         room:
           type: integer
+        user_id:
+          type: integer
+          readOnly: true
+        user_name:
+          type: string
+          readOnly: true
         slot:
           type: integer
           nullable: true
@@ -5159,6 +6895,8 @@ components:
       - created_at
       - id
       - room_title
+      - user_id
+      - user_name
     BookingCancelData:
       type: object
       properties:
@@ -5228,6 +6966,16 @@ components:
           type: string
       required:
       - detail
+    BookingRescheduleResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: true
+        message:
+          type: string
+      required:
+      - message
     BookingSuspendData:
       type: object
       properties:
@@ -5254,6 +7002,20 @@ components:
           $ref: '#/components/schemas/BookingSuspendData'
       required:
       - data
+      - ok
+    BookingTrendsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
       - ok
     ChangeEmailData:
       type: object
@@ -5371,6 +7133,81 @@ components:
       - message
       - name
       - subject
+    CreateAdminRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        password:
+          type: string
+          writeOnly: true
+        admin_role:
+          enum:
+          - super_admin
+          - ops_admin
+          - moderator
+          - finance_admin
+          - support_admin
+          type: string
+          description: |-
+            * `super_admin` - Super Admin
+            * `ops_admin` - Operations Admin
+            * `moderator` - Moderation Admin
+            * `finance_admin` - Finance Admin
+            * `support_admin` - Support Admin
+          x-spec-enum-id: 95548bdfe1ba1a8e
+      required:
+      - admin_role
+      - email
+      - first_name
+      - last_name
+      - password
+    CreateAdminResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/CreateAdminResponseData'
+      required:
+      - data
+      - message
+      - ok
+    CreateAdminResponseData:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        admin_role:
+          type: string
+        is_staff:
+          type: boolean
+        is_active:
+          type: boolean
+      required:
+      - admin_role
+      - email
+      - first_name
+      - id
+      - is_active
+      - is_staff
+      - last_name
     CreateListingCheckoutSessionResponse:
       type: object
       properties:
@@ -5423,6 +7260,41 @@ components:
           $ref: '#/components/schemas/SetupIntentResponse'
       required:
       - data
+      - ok
+    DashboardOverviewData:
+      type: object
+      properties:
+        total_users:
+          type: integer
+        active_listings:
+          type: integer
+        pending_reviews:
+          type: integer
+        open_reports:
+          type: integer
+        payment_exceptions:
+          type: integer
+        unresolved_contact_messages:
+          type: integer
+      required:
+      - active_listings
+      - open_reports
+      - payment_exceptions
+      - pending_reviews
+      - total_users
+      - unresolved_contact_messages
+    DashboardOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/DashboardOverviewData'
+      required:
+      - data
+      - message
       - ok
     DataExportLatestNotFoundResponse:
       type: object
@@ -5508,6 +7380,29 @@ components:
           nullable: true
         data:
           $ref: '#/components/schemas/DeleteAccountCancelData'
+      required:
+      - data
+      - ok
+    DeleteAccountOtpRequestData:
+      type: object
+      properties:
+        detail:
+          type: string
+        email_masked:
+          type: string
+      required:
+      - detail
+      - email_masked
+    DeleteAccountOtpRequestOkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+          nullable: true
+        data:
+          $ref: '#/components/schemas/DeleteAccountOtpRequestData'
       required:
       - data
       - ok
@@ -5694,6 +7589,15 @@ components:
       properties:
         token:
           type: string
+        role:
+          enum:
+          - landlord
+          - seeker
+          type: string
+          description: |-
+            * `landlord` - Landlord
+            * `seeker` - Seeker
+          x-spec-enum-id: 0ef412fbe3235c72
       required:
       - token
     GoogleRegisterResponse:
@@ -5757,6 +7661,48 @@ components:
       - latest_rooms
       - popular_cities
       - stats
+    IdentityVerificationRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document:
+          type: string
+          format: uri
+          nullable: true
+        status:
+          enum:
+          - pending
+          - approved
+          - rejected
+          type: string
+          description: |-
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          x-spec-enum-id: de3702061fc1d433
+          readOnly: true
+        notes:
+          type: string
+        rejection_reason:
+          type: string
+          readOnly: true
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - rejection_reason
+      - reviewed_at
+      - status
     InboxItem:
       type: object
       properties:
@@ -5803,6 +7749,195 @@ components:
       required:
       - data
       - ok
+    LandlordVerificationRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        status:
+          enum:
+          - pending
+          - approved
+          - rejected
+          type: string
+          description: |-
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          x-spec-enum-id: de3702061fc1d433
+          readOnly: true
+        document:
+          type: string
+          format: uri
+          nullable: true
+        notes:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - rejection_reason
+      - reviewed_at
+      - status
+      - updated_at
+    ListingActionData:
+      type: object
+      properties:
+        message:
+          type: string
+        listing:
+          $ref: '#/components/schemas/AdminListingItem'
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - listing
+      - message
+      - updated_at
+    ListingActionRequest:
+      type: object
+      properties:
+        action:
+          enum:
+          - approve
+          - hide
+          - restore
+          - publish
+          - soft_delete
+          type: string
+          description: |-
+            * `approve` - Approve
+            * `hide` - Hide
+            * `restore` - Restore
+            * `publish` - Publish
+            * `soft_delete` - Soft delete
+          x-spec-enum-id: 74b65f74595d873e
+      required:
+      - action
+    ListingActionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ListingActionData'
+      required:
+      - data
+      - message
+      - ok
+    ListingGrowthResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
+      - ok
+    ListingMetrics:
+      type: object
+      properties:
+        total_listing:
+          type: integer
+        active_listing:
+          type: integer
+        pending_listing:
+          type: integer
+        hidden_listing:
+          type: integer
+        drafts_listing:
+          type: integer
+        unpublished_listing:
+          type: integer
+        expired_listing:
+          type: integer
+        edited_listing:
+          type: integer
+        deleted_listing:
+          type: integer
+      required:
+      - active_listing
+      - deleted_listing
+      - drafts_listing
+      - edited_listing
+      - expired_listing
+      - hidden_listing
+      - pending_listing
+      - total_listing
+      - unpublished_listing
+    ListingOverviewData:
+      type: object
+      properties:
+        metrics:
+          $ref: '#/components/schemas/ListingMetrics'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminListingItem'
+        pagination:
+          $ref: '#/components/schemas/ListingPagination'
+      required:
+      - metrics
+      - pagination
+      - results
+    ListingOverviewResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ListingOverviewData'
+      required:
+      - data
+      - message
+      - ok
+    ListingPagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_pages:
+          type: integer
+        total_results:
+          type: integer
+        has_next:
+          type: boolean
+        has_previous:
+          type: boolean
+      required:
+      - has_next
+      - has_previous
+      - page
+      - page_size
+      - total_pages
+      - total_results
     Login:
       type: object
       properties:
@@ -5814,6 +7949,46 @@ components:
       required:
       - identifier
       - password
+    LoginEmailNotVerifiedResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: false
+        message:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        field_errors: {}
+        details: {}
+      required:
+      - detail
+      - message
+      - status
+    LoginErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: false
+        message:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        field_errors: {}
+        details: {}
+      required:
+      - detail
+      - message
+      - status
     LoginOkData:
       type: object
       properties:
@@ -5840,6 +8015,26 @@ components:
       required:
       - data
       - ok
+    LoginRateLimitedResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          default: false
+        message:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        field_errors: {}
+        details: {}
+      required:
+      - detail
+      - message
+      - status
     LoginTokenData:
       type: object
       properties:
@@ -5896,10 +8091,18 @@ components:
           type: string
           format: date-time
           readOnly: true
+        is_read:
+          type: string
+          readOnly: true
+        read_at:
+          type: string
+          readOnly: true
       required:
       - body
       - created
       - id
+      - is_read
+      - read_at
       - sender
       - thread
     MessageCreate:
@@ -5981,6 +8184,20 @@ components:
           type: string
       required:
       - message
+    ModerationBacklogTrendsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
+      - ok
     ModerationReportModerateActionData:
       type: object
       properties:
@@ -6015,6 +8232,46 @@ components:
           type: string
       required:
       - action
+    MyIdentityVerificationCreateResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/IdentityVerificationRequest'
+      required:
+      - data
+      - message
+      - ok
+    MyIdentityVerificationGetResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          allOf:
+          - $ref: '#/components/schemas/IdentityVerificationRequest'
+          nullable: true
+      required:
+      - message
+      - ok
+    MyIdentityVerificationPendingResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/IdentityVerificationRequest'
+      required:
+      - data
+      - message
+      - ok
     MyProfilePageResponse:
       type: object
       properties:
@@ -6514,6 +8771,15 @@ components:
       required:
       - data
       - ok
+    PatchedBookingReschedule:
+      type: object
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
     PatchedMessageThreadStateUpdate:
       type: object
       description: |-
@@ -6654,6 +8920,9 @@ components:
         owner_name:
           type: string
           readOnly: true
+        owner_username:
+          type: string
+          readOnly: true
         owner_avatar:
           type: string
           format: uri
@@ -6671,11 +8940,28 @@ components:
             Returns one of: 'draft', 'active', 'expired', 'hidden'.
             Used by the 'My Listings' page to group into tabs.
           readOnly: true
+        landlord_type:
+          type: string
+          readOnly: true
+        landlord_type_label:
+          type: string
+          readOnly: true
+        landlord_verified:
+          type: boolean
+          readOnly: true
+        preferred_flatmate_min_age:
+          type: integer
+          nullable: true
+        preferred_flatmate_max_age:
+          type: integer
+          nullable: true
         is_deleted:
           type: boolean
+          readOnly: true
         deleted_at:
           type: string
           format: date-time
+          readOnly: true
           nullable: true
         title:
           type: string
@@ -6872,10 +9158,10 @@ components:
         avg_rating:
           type: number
           format: double
+          readOnly: true
         number_rating:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          readOnly: true
         latitude:
           type: number
           format: double
@@ -6887,6 +9173,7 @@ components:
         paid_until:
           type: string
           format: date
+          readOnly: true
           nullable: true
         status:
           enum:
@@ -7034,16 +9321,6 @@ components:
           type: string
           description: Preferred language of future flatmate (free text from dropdown).
           maxLength: 100
-        preferred_flatmate_min_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
-        preferred_flatmate_max_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
         preferred_flatmate_occupation:
           enum:
           - students_only
@@ -7297,6 +9574,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        advertiser_verified:
+          type: boolean
+          readOnly: true
         marketing_consent:
           type: boolean
         notify_rentout_updates:
@@ -7321,6 +9601,20 @@ components:
         number_landlord_ratings:
           type: integer
           readOnly: true
+    PaymentStatusMixResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: {}
+      required:
+      - data
+      - message
+      - ok
     PaymentTransactionDetail:
       type: object
       properties:
@@ -7680,9 +9974,9 @@ components:
           - null
           type: string
           description: |-
-            * `tenant_to_landlord` - Tenant → Landlord
-            * `landlord_to_tenant` - Landlord → Tenant
-          x-spec-enum-id: a042d183b0d52418
+            * `tenant_to_landlord` - Tenant â†’ Landlord
+            * `landlord_to_tenant` - Landlord â†’ Tenant
+          x-spec-enum-id: 24b02ba2f4a75d8c
           readOnly: true
           nullable: true
         review_flags:
@@ -7784,6 +10078,9 @@ components:
         owner_name:
           type: string
           readOnly: true
+        owner_username:
+          type: string
+          readOnly: true
         owner_avatar:
           type: string
           format: uri
@@ -7801,11 +10098,28 @@ components:
             Returns one of: 'draft', 'active', 'expired', 'hidden'.
             Used by the 'My Listings' page to group into tabs.
           readOnly: true
+        landlord_type:
+          type: string
+          readOnly: true
+        landlord_type_label:
+          type: string
+          readOnly: true
+        landlord_verified:
+          type: boolean
+          readOnly: true
+        preferred_flatmate_min_age:
+          type: integer
+          nullable: true
+        preferred_flatmate_max_age:
+          type: integer
+          nullable: true
         is_deleted:
           type: boolean
+          readOnly: true
         deleted_at:
           type: string
           format: date-time
+          readOnly: true
           nullable: true
         title:
           type: string
@@ -8002,10 +10316,10 @@ components:
         avg_rating:
           type: number
           format: double
+          readOnly: true
         number_rating:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          readOnly: true
         latitude:
           type: number
           format: double
@@ -8017,6 +10331,7 @@ components:
         paid_until:
           type: string
           format: date
+          readOnly: true
           nullable: true
         status:
           enum:
@@ -8164,16 +10479,6 @@ components:
           type: string
           description: Preferred language of future flatmate (free text from dropdown).
           maxLength: 100
-        preferred_flatmate_min_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
-        preferred_flatmate_max_age:
-          type: integer
-          maximum: 32767
-          minimum: 0
-          nullable: true
         preferred_flatmate_occupation:
           enum:
           - students_only
@@ -8304,18 +10609,26 @@ components:
           type: integer
       required:
       - allow_search_indexing_effective
+      - avg_rating
       - category
       - category_id
       - created_at
-      - description
+      - deleted_at
       - distance_miles
       - id
+      - is_deleted
       - is_saved
+      - landlord_type
+      - landlord_type_label
+      - landlord_verified
       - listing_state
       - location
       - main_photo
+      - number_rating
       - owner_avatar
       - owner_name
+      - owner_username
+      - paid_until
       - photo_count
       - price_per_month
       - property_owner
@@ -8487,7 +10800,7 @@ components:
           readOnly: true
         image:
           type: string
-          format: uri
+          readOnly: true
         status:
           enum:
           - pending
@@ -8943,6 +11256,12 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        can_leave_review:
+          type: string
+          readOnly: true
+        review_button_reason:
+          type: string
+          readOnly: true
         still_living_check_at:
           type: string
           format: date-time
@@ -8962,6 +11281,7 @@ components:
           format: date-time
           readOnly: true
       required:
+      - can_leave_review
       - created_at
       - duration_months
       - id
@@ -8969,6 +11289,7 @@ components:
       - landlord_confirmed_at
       - move_in_date
       - proposed_by
+      - review_button_reason
       - review_deadline_at
       - review_open_at
       - room
@@ -9438,6 +11759,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        advertiser_verified:
+          type: boolean
+          readOnly: true
         marketing_consent:
           type: boolean
         notify_rentout_updates:
@@ -9465,6 +11789,7 @@ components:
       required:
       - address_line_1
       - address_line_2
+      - advertiser_verified
       - avatar
       - avg_landlord_rating
       - avg_tenant_rating
@@ -9490,9 +11815,9 @@ components:
           - null
           type: string
           description: |-
-            * `tenant_to_landlord` - Tenant → Landlord
-            * `landlord_to_tenant` - Landlord → Tenant
-          x-spec-enum-id: a042d183b0d52418
+            * `tenant_to_landlord` - Tenant â†’ Landlord
+            * `landlord_to_tenant` - Landlord â†’ Tenant
+          x-spec-enum-id: 24b02ba2f4a75d8c
           nullable: true
         overall_rating:
           type: integer

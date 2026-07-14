@@ -27,10 +27,10 @@ class RequestIDMiddleware:
         _request_local.request_id = request_id
 
         start = perf_counter()
-        try:
-            response = self.get_response(request)
-        finally:
-            duration_ms = int((perf_counter() - start) * 1000)
+
+        response = self.get_response(request)
+
+        duration_ms = int((perf_counter() - start) * 1000)
 
         response[self.HEADER_OUT] = request_id
         response["X-Response-Time-ms"] = str(duration_ms)

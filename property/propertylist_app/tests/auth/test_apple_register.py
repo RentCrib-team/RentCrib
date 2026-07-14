@@ -65,8 +65,13 @@ def test_apple_register_accepts_valid_token(monkeypatch):
     assert response.status_code == 200
     assert response.data["ok"] is True
     assert response.data["message"] == "Login successful"
-    assert "refresh" in response.data["data"]
-    assert "access" in response.data["data"]
+    assert "tokens" in response.data["data"]
+    assert "refresh" in response.data["data"]["tokens"]
+    assert "access" in response.data["data"]["tokens"]
+    assert "access_expires_at" in response.data["data"]["tokens"]
+    assert "refresh_expires_at" in response.data["data"]["tokens"]
+    assert "user" in response.data["data"]
+    assert "profile" in response.data["data"]
 
     user = get_user_model().objects.get(email="appleuser@example.com")
     assert user.username == "appleuser"

@@ -1,8 +1,9 @@
 import pytest
-from datetime import date, timedelta
+from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from propertylist_app.models import Room, RoomCategorie, UserProfile
@@ -14,8 +15,13 @@ def test_search_manual_address_filters_by_street_and_city():
     GET /api/search/rooms/?street=...&city=...
     Should filter against Room.location (icontains).
     """
-    owner = User.objects.create_user(username="addr_owner", password="pass123", email="addr_owner@example.com")
+    owner = User.objects.create_user(
+        username="addr_owner",
+        password="pass123",
+        email="addr_owner@example.com",
+    )
     cat = RoomCategorie.objects.create(name="Any", active=True)
+    paid_until = timezone.now().date() + timedelta(days=30)
 
     # Matches street+city
     Room.objects.create(
@@ -25,6 +31,7 @@ def test_search_manual_address_filters_by_street_and_city():
         property_owner=owner,
         status="active",
         location="10 Downing Street, London",
+        paid_until=paid_until,
     )
 
     # Does not match (different city)
@@ -35,6 +42,7 @@ def test_search_manual_address_filters_by_street_and_city():
         property_owner=owner,
         status="active",
         location="1 High Street, Manchester",
+        paid_until=paid_until,
     )
 
     url = reverse("v1:search-rooms")
@@ -55,9 +63,14 @@ def test_search_advert_by_household_filters_by_userprofile_role_detail():
     Should filter by property_owner__profile__role_detail.
     """
     cat = RoomCategorie.objects.create(name="Any", active=True)
+    paid_until = timezone.now().date() + timedelta(days=30)
 
     # Owner A: live_in_landlord
-    owner_a = User.objects.create_user(username="owner_a", password="pass123", email="owner_a@example.com")
+    owner_a = User.objects.create_user(
+        username="owner_a",
+        password="pass123",
+        email="owner_a@example.com",
+    )
     UserProfile.objects.get_or_create(user=owner_a)
     owner_a.profile.role_detail = "live_in_landlord"
     owner_a.profile.save()
@@ -69,10 +82,15 @@ def test_search_advert_by_household_filters_by_userprofile_role_detail():
         property_owner=owner_a,
         status="active",
         location="London",
+        paid_until=paid_until,
     )
 
     # Owner B: current_flatmate
-    owner_b = User.objects.create_user(username="owner_b", password="pass123", email="owner_b@example.com")
+    owner_b = User.objects.create_user(
+        username="owner_b",
+        password="pass123",
+        email="owner_b@example.com",
+    )
     UserProfile.objects.get_or_create(user=owner_b)
     owner_b.profile.role_detail = "current_flatmate"
     owner_b.profile.save()
@@ -84,6 +102,7 @@ def test_search_advert_by_household_filters_by_userprofile_role_detail():
         property_owner=owner_b,
         status="active",
         location="London",
+        paid_until=paid_until,
     )
 
     url = reverse("v1:search-rooms")

@@ -1,4 +1,4 @@
-
+﻿
 app_name = "api"
 
 from django.conf import settings
@@ -8,29 +8,29 @@ from drf_spectacular.utils import extend_schema
 
 #from rest_framework.routers import DefaultRouter
 
-from django.views.decorators.cache import cache_page
-from django.views.decorators.csrf import csrf_exempt
+
+from .views.identity_verification import MyIdentityVerificationView
 
 from propertylist_app.api import views
 
 from .views import EmailOTPVerifyView, EmailOTPResendView,PhoneOTPStartView, PhoneOTPVerifyView,RoomListAlt
-from .views.profile import DeleteAccountRequestView, DeleteAccountCancelView
+from .views.profile import DeleteAccountRequestView, DeleteAccountCancelView,DeleteAccountOtpRequestView
 
 from propertylist_app.api.views import (
     # Rooms & Categories
     RoomAV, RoomDetailAV, RoomListGV, ModerationReportModerateActionView,
-    RoomCategorieAV, RoomCategorieDetailAV, RoomPreviewView, 
+    RoomCategorieAV, RoomCategorieDetailAV, RoomPreviewView,  CreateViewingBookingView,
 
     # Reviews
     UserReviewsView,UserReviewSummaryView, ReviewCreateView, ReviewListView, ReviewDetailView,
-    
+
     # Tenancy (rental confirmation)
     TenancyRespondView,TenancyProposeView, MyTenanciesView,TenancyStillLivingConfirmView,TenancyExtensionCreateView,TenancyExtensionRespondView,
-    
+
    # Tenancy-based reviews
     TenancyReviewCreateView,
     TenancyReviewListView,
-    
+
     # Search & Nearby
     SearchRoomsView, NearbyRoomsView,
 
@@ -42,7 +42,7 @@ from propertylist_app.api.views import (
     MessageThreadStateView,MessageStatsView,InboxListView,
 
     # Bookings & Availability
-    create_booking, BookingListCreateView, BookingDetailView, BookingCancelView,
+    create_booking, BookingListCreateView, BookingDetailView, BookingCancelView,BookingRescheduleView,
     RoomAvailabilityView, RoomAvailabilitySlotListCreateView, RoomAvailabilitySlotDeleteView, RoomAvailabilityPublicView,  FindAddressView,BookingDeleteView,
     BookingSuspendView,
 
@@ -50,18 +50,20 @@ from propertylist_app.api.views import (
     RoomPhotoUploadView, RoomPhotoDeleteView,
 
     # Auth & Profile
-    RegistrationView, LoginView, LogoutView,
+    RegistrationView, LoginView, LogoutView,AccountReactivateView,
     PasswordResetRequestView, PasswordResetConfirmView,
     MeView, UserProfileView,
     UserAvatarUploadView, ChangeEmailView, ChangePasswordView, DeactivateAccountView, MyRoomsView,MyProfilePageView,
     CreatePasswordView,TokenRefreshView,GoogleRegisterView, AppleRegisterView,
-    
+
 
     # Soft delete
     RoomSoftDeleteView,RoomUnpublishView,
-    
+
     #Account deletion
     #DeleteAccountRequestView,DeleteAccountCancelView,
+    
+    
 
     # Payments
     CreateListingCheckoutSessionView, stripe_webhook, StripeSuccessView, StripeCancelView, SavedCardsListView, CreateSetupIntentView,DetachSavedCardView,
@@ -73,24 +75,26 @@ from propertylist_app.api.views import (
     # Reports / Moderation / Ops
     ReportCreateView, ModerationReportListView, ModerationReportUpdateView,
     RoomModerationStatusView, OpsStatsView,
-    
+
     # --- GDPR / Privacy ---
     DataExportStartView, DataExportLatestView, AccountDeletePreviewView, AccountDeleteConfirmView,MyPrivacyPreferencesView,
 
-    
+
     # Notifications
     NotificationListView, NotificationMarkReadView, NotificationMarkAllReadView,MyNotificationPreferencesView,
-    
-    
+
+
     HealthCheckView, OnboardingCompleteView,
 
     # Contact
     ContactMessageCreateView,
-    
-    MyListingsView,
 
-   
-   
+    MyListingsView,
+    
+    MyLandlordVerificationRequestView,
+
+
+
 )
 
 
@@ -99,29 +103,28 @@ from propertylist_app.api.views import (
 
 
 urlpatterns = [
-    
+
     # --- Rooms ---
     path("rooms/",                     RoomAV.as_view(),            name="room-list"),
     path("rooms/<int:pk>/",            RoomDetailAV.as_view(),      name="room-detail"),
-    path("rooms/<int:pk>/preview/",    RoomPreviewView.as_view(),   name="room-preview"), 
-    
+    path("rooms/<int:pk>/preview/",    RoomPreviewView.as_view(),   name="room-preview"),
+
     # Cached alt list
-    path("rooms-alt/", cache_page(60)(RoomListAlt.as_view()), name="room-list-alt"),
-    
+    path("rooms-alt/", RoomListAlt.as_view(), name="room-list-alt"),
+
 
     # Room categories
     path("room-categories/",           RoomCategorieAV.as_view(),         name="roomcategory-list"),
     path("room-categories/<int:pk>/",  RoomCategorieDetailAV.as_view(),   name="roomcategory-detail"),
 
-   
-   
-    #path("user-reviews/",                  UserReview.as_view(),       name="user-reviews"),
+  
+
     path("users/<int:user_id>/review-summary/", UserReviewSummaryView.as_view(), name="user-review-summary"),
     path("users/<int:user_id>/reviews/", UserReviewsView.as_view(), name="user-reviews"),
     path("reviews/", ReviewListView.as_view(), name="review-list"),
     path("reviews/create/", ReviewCreateView.as_view(), name="review-create"),
     path("reviews/<int:pk>/", ReviewDetailView.as_view(), name="review-detail"),
-    
+
     # Tenancy-based reviews
     path("tenancies/<int:tenancy_id>/reviews/", TenancyReviewListView.as_view(), name="tenancy-review-list"),
     path("tenancies/<int:tenancy_id>/reviews/create/", TenancyReviewCreateView.as_view(), name="tenancy-review-create"),
@@ -140,7 +143,7 @@ urlpatterns = [
 
 
     # --- Search & discovery ---
-    path("search/rooms/",  cache_page(60)(SearchRoomsView.as_view()),  name="search-rooms"),
+    path("search/rooms/",  SearchRoomsView.as_view(),  name="search-rooms"),
     path("rooms/nearby/",  NearbyRoomsView.as_view(),                  name="rooms-nearby"),
     path("search/find-address/", FindAddressView.as_view(),            name="search-find-address"),
 
@@ -167,7 +170,7 @@ urlpatterns = [
 
     #Message statistics (for homepage quick filters)
     path("messages/stats/",                                MessageStatsView.as_view(),             name="messages-stats"),
-    
+
     # Inbox (merged notifications + messages)
     path("inbox/", InboxListView.as_view(), name="inbox-list"),
 
@@ -180,17 +183,16 @@ urlpatterns = [
     path("bookings/",                      BookingListCreateView.as_view(), name="bookings-list-create"),
     path("bookings/<int:pk>/",             BookingDetailView.as_view(),     name="booking-detail"),
     path("bookings/<int:pk>/cancel/",      BookingCancelView.as_view(),     name="booking-cancel"),
+    path("bookings/<int:pk>/reschedule/",  BookingRescheduleView.as_view(), name="booking-reschedule",),
     path("rooms/<int:pk>/availability/",   RoomAvailabilityView.as_view(),  name="room-availability"),
-    
-    
-     
+
+
+
     # --- Bookings / suspend---
     path("bookings/<int:pk>/suspend/", BookingSuspendView.as_view(), name="booking-suspend"),
     path("bookings/<int:pk>/delete/", BookingDeleteView.as_view(), name="booking-delete"),
 
 
-    
-    
 
     # Landlord manage slots
     path("rooms/<int:pk>/availability/slots/",               RoomAvailabilitySlotListCreateView.as_view(), name="room-slots"),
@@ -215,15 +217,26 @@ urlpatterns = [
     path("users/me/notification-preferences/", MyNotificationPreferencesView.as_view(),name="my-notification-preferences",),
     path("users/me/create-password/", CreatePasswordView.as_view(), name="user-create-password"),
 
- 
+
     # --- Soft delete room ---
     path("rooms/<int:pk>/soft-delete/", RoomSoftDeleteView.as_view(), name="room-soft-delete"),
     path("rooms/<int:pk>/unpublish/", RoomUnpublishView.as_view(), name="room-unpublish"),
-    
+
     # --- Account deletion ---
+    # --- Account deletion: scheduled soft-deletion flow ---
+    # Used when the user requests account deletion with a grace/cancellation period.
+    # This disables the account immediately and stores pending deletion timestamps.
+    # Do not confuse with the GDPR erasure flow below.
+    path("users/me/delete-account/request-otp/", DeleteAccountOtpRequestView.as_view(), name="user-delete-account-request-otp"),
     path("users/me/delete-account/", DeleteAccountRequestView.as_view(), name="user-delete-account"),
     path("users/me/delete-account/cancel/", DeleteAccountCancelView.as_view(), name="user-delete-account-cancel"),
 
+
+
+
+    path("bookings/viewing/",CreateViewingBookingView.as_view(),name="create-viewing-booking"),
+
+    path("users/me/landlord-verification/",MyLandlordVerificationRequestView.as_view(),name="my-landlord-verification",),
 
 
         # --- Auth ---
@@ -235,9 +248,9 @@ urlpatterns = [
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="auth-token-refresh"),
 
 
-  
-    path("auth/register/google/",        csrf_exempt(GoogleRegisterView.as_view()),       name="auth-register-google"),
-    path("auth/register/apple/",         csrf_exempt(AppleRegisterView.as_view()),        name="auth-register-apple"),
+
+    path("auth/register/google/",        GoogleRegisterView.as_view(),       name="auth-register-google"),
+    path("auth/register/apple/",         AppleRegisterView.as_view(),        name="auth-register-apple"),
 
     # --- Payments (Stripe) ---
     path("payments/checkout/rooms/<int:pk>/", CreateListingCheckoutSessionView.as_view(), name="payments-checkout-room"),
@@ -267,6 +280,9 @@ urlpatterns = [
     path("ops/stats/",                       OpsStatsView.as_view(),               name="ops-stats"),
 
     # --- Privacy / GDPR ---
+    # --- GDPR / Privacy: immediate erasure/export flow ---
+    # Used for privacy rights: data export, delete preview, and confirmed erasure.
+    # This is separate from the scheduled account-deletion grace-period flow above.
     path("users/me/export/",         DataExportStartView.as_view(),     name="me-export-start"),
     path("users/me/export/latest/",  DataExportLatestView.as_view(),    name="me-export-latest"),
     path("users/me/delete/preview/", AccountDeletePreviewView.as_view(), name="me-delete-preview"),
@@ -278,39 +294,41 @@ urlpatterns = [
     path("notifications/",               NotificationListView.as_view(),        name="notifications-list"),
     path("notifications/<int:pk>/read/", NotificationMarkReadView.as_view(),    name="notification-mark-read"),
     path("notifications/read/all/",      NotificationMarkAllReadView.as_view(), name="notifications-mark-all-read"),
-    
-    
+
+
     path("health/", HealthCheckView.as_view(), name="health"),
-    
+
     #----Email & Phone OTP----
     path("auth/verify-otp/", EmailOTPVerifyView.as_view(), name="auth-verify-otp"),
     path("auth/resend-otp/", EmailOTPResendView.as_view(), name="auth-resend-otp"),
     path("auth/phone/start/", PhoneOTPStartView.as_view(), name="auth-phone-start"),
     path("auth/phone/verify/", PhoneOTPVerifyView.as_view(), name="auth-phone-verify"),
-
     
+    path("users/me/identity-verification/", MyIdentityVerificationView.as_view(), name="my-identity-verification",),
+
+
     # Home page summary + city list
     path("home/", views.HomePageView.as_view(), name="api-home"),
     path("cities/", views.CityListView.as_view(), name="api-city-list"),
     path("rooms/mine/", MyRoomsView.as_view(), name="rooms-mine"),
 
-    
+
     # Contact Us form
     path("contact/", ContactMessageCreateView.as_view(), name="contact-create"),
 
- 
-   
-    
+
+
+
     path("my-listings/", MyListingsView.as_view(), name="my-listings"),
 
 
-    
+
 
 
 ]
 
-    
-    
+
+
 
 # Serve media in development only
 if settings.DEBUG:

@@ -1,7 +1,10 @@
 import pytest
-from django.urls import reverse
-from django.contrib.auth import get_user_model
+from datetime import timedelta
 from uuid import uuid4
+
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -21,6 +24,10 @@ def unique_title(prefix="Test room"):
     return f"{prefix} {uuid4().hex[:8]}"
 
 
+def live_paid_until():
+    return timezone.now().date() + timedelta(days=30)
+
+
 def _extract_list(res):
     """
     Supports:
@@ -30,11 +37,9 @@ def _extract_list(res):
     """
     payload = res.data
 
-    # unwrap ok_response
     if isinstance(payload, dict) and "data" in payload:
         payload = payload["data"]
 
-    # unwrap pagination
     if isinstance(payload, dict) and "results" in payload:
         payload = payload["results"]
 
@@ -46,11 +51,13 @@ def test_min_rating_filters_rooms(api_client, room_factory):
         title=unique_title(),
         avg_rating=3.5,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
     r2 = room_factory(
         title=unique_title(),
         avg_rating=4.2,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
 
     url = reverse("v1:search-rooms")
@@ -69,11 +76,13 @@ def test_max_rating_filters_rooms(api_client, room_factory):
         title=unique_title(),
         avg_rating=2.0,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
     r2 = room_factory(
         title=unique_title(),
         avg_rating=4.5,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
 
     url = reverse("v1:search-rooms")
@@ -92,16 +101,19 @@ def test_rating_range_filters_rooms(api_client, room_factory):
         title=unique_title(),
         avg_rating=3.9,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
     r2 = room_factory(
         title=unique_title(),
         avg_rating=4.0,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
     r3 = room_factory(
         title=unique_title(),
         avg_rating=4.8,
         property_owner=make_user(),
+        paid_until=live_paid_until(),
     )
 
     url = reverse("v1:search-rooms")
@@ -131,7 +143,7 @@ def test_min_rating_greater_than_max_rating_returns_400(api_client):
 def test_invalid_rating_returns_400(api_client):
     url = reverse("v1:search-rooms")
     res = api_client.get(url, {"min_rating": "abc"})
-    
+
     assert res.status_code == 400
 
     err = res.data

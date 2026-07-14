@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-
+from notifications.services import send_security_code_email
 
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -8,7 +8,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 
-
+from django.core import mail
+from django.utils.crypto import get_random_string
 
 from django.contrib.auth import authenticate, get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -19,7 +20,7 @@ from django.utils import timezone
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 
-from propertylist_app.models import UserProfile,Review
+from propertylist_app.models import UserProfile,Review,EmailOTP
 from propertylist_app.api.serializers import (
     UserSerializer,
     UserProfileSerializer,
@@ -212,6 +213,7 @@ class MyProfilePageView(APIView):
             "tenant_reviews_count": tenant_count,
             "tenant_rating_average": tenant_avg,
             "reviews_preview": preview,
+            "landlord_verified": bool(getattr(profile, "advertiser_verified", False)),
         }
 
         ser = ProfilePageSerializer(payload, context={"request": request})
@@ -425,6 +427,75 @@ class DeactivateAccountView(APIView):
 
 
 
+class DeleteAccountOtpRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: inline_serializer(
+                name="DeleteAccountOtpRequestOkResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(required=False, allow_null=True),
+                    "data": inline_serializer(
+                        name="DeleteAccountOtpRequestData",
+                        fields={
+                            "detail": serializers.CharField(),
+                            "email_masked": serializers.CharField(),
+                        },
+                    ),
+                },
+            ),
+            401: OpenApiResponse(description="Authentication required."),
+        },
+        description="Send OTP to confirm account deletion.",
+    )
+    def post(self, request):
+        user = request.user
+
+        code = get_random_string(6, allowed_chars="0123456789")
+
+        EmailOTP.objects.filter(
+            user=user,
+            purpose=EmailOTP.PURPOSE_ACCOUNT_DELETE,
+            used_at__isnull=True,
+        ).update(used_at=timezone.now())
+
+        EmailOTP.create_for(
+            user,
+            code,
+            ttl_minutes=settings.OTP_EXPIRY_MINUTES,
+            purpose=EmailOTP.PURPOSE_ACCOUNT_DELETE,
+        )
+
+        send_security_code_email(
+            to_email=user.email,
+            subject="Confirm your RentCrib account deletion",
+            first_name=user.first_name,
+            title="Confirm account deletion",
+            intro="Use the code below to confirm your RentCrib account deletion request.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
+        )
+
+        email = user.email or ""
+        if "@" in email:
+            local, domain = email.split("@", 1)
+            email_masked = f"{local[:2]}•••@{domain}"
+        else:
+            email_masked = ""
+
+        return ok_response(
+            {
+                "detail": "Account deletion verification code sent.",
+                "email_masked": email_masked,
+            },
+            status_code=status.HTTP_200_OK,
+        )
+
+
+
 class DeleteAccountRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -456,6 +527,46 @@ class DeleteAccountRequestView(APIView):
 
         ser = AccountDeleteRequestSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
+
+        otp_code = ser.validated_data["otp"]
+
+        otp = (
+            EmailOTP.objects.filter(
+                user=request.user,
+                purpose=EmailOTP.PURPOSE_ACCOUNT_DELETE,
+                used_at__isnull=True,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not otp:
+            return Response(
+                {"otp": "Invalid OTP."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp.is_expired:
+            return Response(
+                {"otp": "OTP has expired."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp.attempts >= settings.OTP_MAX_ATTEMPTS:
+            return Response(
+                {"otp": "Too many attempts. Request a new code."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        if not otp.matches(otp_code):
+            otp.attempts = int(otp.attempts or 0) + 1
+            otp.save(update_fields=["attempts"])
+            return Response(
+                {"otp": "Invalid OTP."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        otp.mark_used()
 
         grace_days = getattr(settings, "ACCOUNT_DELETION_GRACE_DAYS", 7)
         now = timezone.now()

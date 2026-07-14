@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
 
-from propertylist_app.models import UserProfile
+from propertylist_app.models import EmailOTP, UserProfile
 
 pytestmark = pytest.mark.django_db
 
@@ -18,6 +18,15 @@ def make_user():
     )
     UserProfile.objects.get_or_create(user=user)
     return user
+
+
+def create_delete_otp(user, code="123456"):
+    return EmailOTP.create_for(
+        user,
+        code,
+        ttl_minutes=10,
+        purpose=EmailOTP.PURPOSE_ACCOUNT_DELETE,
+    )
 
 
 def test_deactivate_account_sets_user_inactive(api_client):
@@ -36,6 +45,8 @@ def test_deactivate_account_sets_user_inactive(api_client):
 @override_settings(ACCOUNT_DELETION_GRACE_DAYS=7)
 def test_delete_account_request_sets_pending_fields_and_deactivates(api_client):
     user = make_user()
+    create_delete_otp(user)
+
     url = reverse("api:user-delete-account")
 
     api_client.force_authenticate(user=user)
@@ -43,7 +54,7 @@ def test_delete_account_request_sets_pending_fields_and_deactivates(api_client):
         url,
         {
             "confirm": True,
-            "current_password": "StrongPass1!",
+            "otp": "123456",
         },
         format="json",
     )
@@ -63,8 +74,10 @@ def test_delete_account_request_sets_pending_fields_and_deactivates(api_client):
     assert profile.pending_deletion_scheduled_for is not None
 
 
-def test_delete_account_request_rejects_wrong_password(api_client):
+def test_delete_account_request_rejects_wrong_otp(api_client):
     user = make_user()
+    create_delete_otp(user, code="123456")
+
     url = reverse("api:user-delete-account")
 
     api_client.force_authenticate(user=user)
@@ -72,7 +85,7 @@ def test_delete_account_request_rejects_wrong_password(api_client):
         url,
         {
             "confirm": True,
-            "current_password": "WrongPass1!",
+            "otp": "000000",
         },
         format="json",
     )
@@ -83,6 +96,7 @@ def test_delete_account_request_rejects_wrong_password(api_client):
 def test_delete_account_cancel_reactivates_and_clears_pending_fields(api_client):
     user = make_user()
     profile = UserProfile.objects.get(user=user)
+    create_delete_otp(user)
 
     delete_url = reverse("api:user-delete-account")
     cancel_url = reverse("api:user-delete-account-cancel")
@@ -93,7 +107,7 @@ def test_delete_account_cancel_reactivates_and_clears_pending_fields(api_client)
         delete_url,
         {
             "confirm": True,
-            "current_password": "StrongPass1!",
+            "otp": "123456",
         },
         format="json",
     )

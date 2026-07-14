@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="format-detection" content="telephone=no,address=no,email=no,date=no">
+    <title>Identity verification needs attention</title>
+</head>
+
+<body style="
+    margin:0;
+    padding:0;
+    width:100%;
+    background-color:#f8f1ee;
+    font-family:Arial, Helvetica, sans-serif;
+    color:#172033;
+">
+
+<table
+    role="presentation"
+    width="100%"
+    cellspacing="0"
+    cellpadding="0"
+    border="0"
+    style="
+        width:100%;
+        background-color:#f8f1ee;
+    "
+>
+    <tr>
+        <td align="center" style="padding:36px 14px;">
+
+            <table
+                role="presentation"
+                width="100%"
+                cellspacing="0"
+                cellpadding="0"
+                border="0"
+                style="
+                    width:100%;
+                    max-width:620px;
+                    background-color:#ffffff;
+                    border:1px solid #eadfd9;
+                    border-radius:5px;
+                    overflow:hidden;
+                    box-shadow:0 10px 28px rgba(23,32,51,0.08);
+                "
+            >
+
+                <!-- Orange-red top border -->
+                <tr>
+                    <td style="
+                        height:5px;
+                        line-height:5px;
+                        font-size:0;
+                        background-color:#d85b3f;
+                    ">
+                        &nbsp;
+                    </td>
+                </tr>
+
+                <!-- RentCrib logo -->
+                <tr>
+                    <td align="center" style="padding:30px 32px 20px;">
+                        <img
+                            src="https://media.rentcrib.co.uk/branding/rentcrib-wordmark.png"
+                            width="180"
+                            alt="RentCrib"
+                            style="
+                                display:block;
+                                width:180px;
+                                max-width:100%;
+                                height:auto;
+                                margin:0 auto;
+                                border:0;
+                                outline:none;
+                                text-decoration:none;
+                            "
+                        >
+                    </td>
+                </tr>
+
+                <!-- Email category -->
+                <tr>
+                    <td align="center" style="padding:0 40px 18px;">
+                        <p style="
+                            margin:0;
+                            font-size:12px;
+                            line-height:1.4;
+                            font-weight:700;
+                            letter-spacing:1.2px;
+                            text-transform:uppercase;
+                            color:#c74a31;
+                        ">
+                            Identity verification
+                        </p>
+                    </td>
+                </tr>
+
+                <!-- Attention icon -->
+                <tr>
+                    <td align="center" style="padding:0 40px 20px;">
+                        <table
+                            role="presentation"
+                            cellspacing="0"
+                            cellpadding="0"
+                            border="0"
+                        >
+                            <tr>
+                                <td
+                                    align="center"
+                                    valign="middle"
+                                    style="
+                                        width:64px;
+                                        height:64px;
+                                        background-color:#fff0eb;
+                                        border:1px solid #f0d4ca;
+                                        border-radius:5px;
+                                        color:#c74a31;
+                                        font-size:32px;
+                                        font-weight:700;
+                                        line-height:64px;
+                                    "
+                                >
+                                    !
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Main heading -->
+                <tr>
+                    <td align="center" style="padding:0 42px 10px;">
+                        <h1 style="
+                            margin:0;
+                            font-size:27px;
+                            line-height:1.3;
+                            font-weight:700;
+                            letter-spacing:-0.4px;
+                            color:#172033;
+                        ">
+                            We couldn’t complete your verification
+                        </h1>
+                    </td>
+                </tr>
+
+                <!-- Introductory text -->
+                <tr>
+                    <td align="center" style="padding:0 48px 28px;">
+                        <p style="
+                            margin:0;
+                            font-size:15px;
+                            line-height:1.65;
+                            color:#6b7689;
+                        ">
+                            Your account is still active, and you can submit a new verification request.
+                        </p>
+                    </td>
+                </tr>
+
+                <!-- Message body -->
+                <tr>
+                    <td style="padding:0 48px;">
+                        <p style="
+                            margin:0;
+                            font-size:16px;
+                            line-height:1.7;
+                            color:#4f5b70;
+                        ">
+                            Hi {{ user_name|default:"there" }},
+                        </p>
+
+                        <p style="
+                            margin:16px 0 0;
+                            font-size:16px;
+                            line-height:1.75;
+                            color:#4f5b70;
+                        ">
+                            We were unable to approve the identity verification you submitted.
+                            This does not affect your RentCrib account, and you can try again
+                            using a clearer or more suitable document.
+                        </p>
+                    </td>
+                </tr>
+
+                <!-- Rejection reason panel -->
+                <tr>
+                    <td style="padding:28px 48px 0;">
+
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellspacing="0"
+                            cellpadding="0"
+                            border="0"
+                            style="
+                                width:100%;
+                                background-color:#fff7f4;
+                                border:1px solid #f0d6cc;
+                                border-radius:5px;
+                            "
+                        >
+                            <tr>
+                                <td style="padding:21px 22px;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-size:12px;
+                                        line-height:1.4;
+                                        font-weight:700;
+                                        letter-spacing:0.7px;
+                                        text-transform:uppercase;
+                                        color:#9a4b3a;
+                                    ">
+                                        Reason
+                                    </p>
+
+                                    <p style="
+                                        margin:9px 0 0;
+                                        font-size:15px;
+                                        line-height:1.7;
+                                        color:#6f5048;
+                                    ">
+                                        {{ rejection_reason|default:"We could not clearly confirm the information shown in the submitted document." }}
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+
+                <!-- Retry guidance -->
+                <tr>
+                    <td style="padding:28px 48px 0;">
+
+                        <p style="
+                            margin:0;
+                            font-size:15px;
+                            line-height:1.7;
+                            font-weight:700;
+                            color:#3f4b5f;
+                        ">
+                            Before trying again, please make sure:
+                        </p>
+
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellspacing="0"
+                            cellpadding="0"
+                            border="0"
+                            style="margin-top:14px;"
+                        >
+                            <tr>
+                                <td
+                                    width="28"
+                                    valign="top"
+                                    style="
+                                        width:28px;
+                                        padding-top:1px;
+                                        font-size:15px;
+                                        line-height:1.5;
+                                        color:#068a29;
+                                        font-weight:700;
+                                    "
+                                >
+                                    &#10003;
+                                </td>
+
+                                <td style="
+                                    padding-bottom:10px;
+                                    font-size:14px;
+                                    line-height:1.65;
+                                    color:#657085;
+                                ">
+                                    The entire document is visible, including all four edges.
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td
+                                    width="28"
+                                    valign="top"
+                                    style="
+                                        width:28px;
+                                        padding-top:1px;
+                                        font-size:15px;
+                                        line-height:1.5;
+                                        color:#068a29;
+                                        font-weight:700;
+                                    "
+                                >
+                                    &#10003;
+                                </td>
+
+                                <td style="
+                                    padding-bottom:10px;
+                                    font-size:14px;
+                                    line-height:1.65;
+                                    color:#657085;
+                                ">
+                                    The image is clear, well lit and not blurred.
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td
+                                    width="28"
+                                    valign="top"
+                                    style="
+                                        width:28px;
+                                        padding-top:1px;
+                                        font-size:15px;
+                                        line-height:1.5;
+                                        color:#068a29;
+                                        font-weight:700;
+                                    "
+                                >
+                                    &#10003;
+                                </td>
+
+                                <td style="
+                                    font-size:14px;
+                                    line-height:1.65;
+                                    color:#657085;
+                                ">
+                                    The document is current and all details are readable.
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+
+                <!-- Main button -->
+                <tr>
+                    <td align="center" style="padding:30px 48px 0;">
+
+                        <table
+                            role="presentation"
+                            cellspacing="0"
+                            cellpadding="0"
+                            border="0"
+                        >
+                            <tr>
+                                <td
+                                    align="center"
+                                    bgcolor="#357af0"
+                                    style="
+                                        background-color:#357af0;
+                                        border-radius:4px;
+                                    "
+                                >
+                                    <a
+                                        href="{{ resubmit_url }}"
+                                        style="
+                                            display:inline-block;
+                                            min-width:210px;
+                                            padding:15px 28px;
+                                            color:#ffffff;
+                                            text-decoration:none;
+                                            font-size:15px;
+                                            line-height:1.2;
+                                            font-weight:700;
+                                            text-align:center;
+                                            border-radius:4px;
+                                        "
+                                    >
+                                        Try verification again
+                                    </a>
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+
+                <!-- Support prompt -->
+                <tr>
+                    <td align="center" style="padding:22px 48px 34px;">
+                        <p style="
+                            margin:0;
+                            font-size:13px;
+                            line-height:1.65;
+                            color:#8892a3;
+                        ">
+                            Still having trouble?
+                            <a
+                                href="{{ support_url }}"
+                                style="
+                                    color:#357af0;
+                                    text-decoration:none;
+                                    font-weight:600;
+                                "
+                            >
+                                Our support team can help.
+                            </a>
+                        </p>
+                    </td>
+                </tr>
+
+                <!-- Fallback link -->
+                <tr>
+                    <td style="
+                        padding:20px 36px;
+                        background-color:#faf8f7;
+                        border-top:1px solid #ece5e1;
+                        border-bottom:1px solid #ece5e1;
+                    ">
+                        <p style="
+                            margin:0;
+                            font-size:12px;
+                            line-height:1.65;
+                            color:#8b95a6;
+                            text-align:center;
+                        ">
+                            If the button does not work, copy and paste this link into your browser:
+                        </p>
+
+                        <p style="
+                            margin:7px 0 0;
+                            font-size:12px;
+                            line-height:1.65;
+                            text-align:center;
+                            word-break:break-all;
+                        ">
+                            <a
+                                href="{{ resubmit_url }}"
+                                style="
+                                    color:#357af0;
+                                    text-decoration:underline;
+                                "
+                            >
+                                {{ resubmit_url }}
+                            </a>
+                        </p>
+                    </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                    <td style="padding:25px 32px 28px;">
+
+                        <p style="
+                            margin:0;
+                            font-size:12px;
+                            line-height:1.65;
+                            color:#8c96a8;
+                            text-align:center;
+                        ">
+                            RentCrib will never ask you to email your identity
+                            document directly to another user.
+                        </p>
+
+                        <p style="
+                            margin:12px 0 0;
+                            font-size:11px;
+                            line-height:1.6;
+                            color:#a0a8b7;
+                            text-align:center;
+                        ">
+                            © {{ current_year }} RentCrib. All rights reserved.
+                        </p>
+
+                        <p style="
+                            margin:5px 0 0;
+                            font-size:11px;
+                            line-height:1.6;
+                            color:#a0a8b7;
+                            text-align:center;
+                        ">
+                            This is an automated account notification from RentCrib.
+                        </p>
+
+                    </td>
+                </tr>
+
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+</body>
+</html>

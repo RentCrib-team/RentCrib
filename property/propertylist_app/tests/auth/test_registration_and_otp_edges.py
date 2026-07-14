@@ -72,13 +72,17 @@ def test_register_password_policy_edges_400(api, pwd):
 # ---------- Duplicates (case-insensitive email, exact username) ----------
 
 @pytest.mark.django_db
-def test_register_duplicate_email_case_insensitive_400(api):
+def test_register_duplicate_unverified_email_case_insensitive_resends_otp(api):
     res1 = api.post(register_url(), base_payload(), format="json")
     assert res1.status_code == 201, getattr(res1, "data", res1.content)
 
     dup = base_payload(username="edgeuser2", email="EDGEUSER@EXAMPLE.COM")
     res2 = api.post(register_url(), dup, format="json")
-    assert res2.status_code == 400, getattr(res2, "data", res2.content)
+
+    assert res2.status_code == 200, getattr(res2, "data", res2.content)
+    assert res2.data["ok"] is True
+    assert res2.data["data"]["need_otp"] is True
+    assert "not verified" in res2.data["message"].lower()
 
 
 @pytest.mark.django_db

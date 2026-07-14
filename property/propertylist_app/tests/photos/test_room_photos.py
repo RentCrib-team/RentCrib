@@ -5,6 +5,7 @@ from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
+from unittest.mock import patch
 
 from propertylist_app.models import RoomCategorie, Room, RoomImage
 
@@ -53,7 +54,11 @@ def test_owner_can_upload_and_delete_room_photo():
     url_up = reverse("v1:room-photo-upload", kwargs={"pk": room.pk})
     upload = SimpleUploadedFile("pic.png", make_valid_png_bytes(), content_type="image/png")
 
-    r1 = client.post(url_up, {"image": upload}, format="multipart")
+    with patch(
+        "propertylist_app.api.views.rooms.should_auto_approve_upload",
+        return_value=True,
+    ):
+        r1 = client.post(url_up, {"image": upload}, format="multipart")
     assert r1.status_code == 201, r1.data
     assert RoomImage.objects.filter(room=room).count() == 1
     photo = RoomImage.objects.filter(room=room).first()

@@ -21,8 +21,10 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 
 
 #DRF
-from rest_framework import generics, permissions, serializers, status, viewsets
+from rest_framework import generics, permissions, serializers, status, viewsets,status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+
 from rest_framework.views import APIView
 from rest_framework.permissions import (
     AllowAny,
@@ -65,6 +67,7 @@ from propertylist_app.api.serializers import (
     AvatarUploadRequestSerializer,
     AvatarUploadResponseSerializer,
     DetailResponseSerializer,
+    MyListingRoomSerializer,
 )
 from .common import ok_response, _listing_state_for_room, _pagination_meta, _wrap_response_success
 
@@ -199,7 +202,7 @@ class RoomCategorieDetailAV(APIView):
         
 class RoomListGV(CachedAnonymousGETMixin, generics.ListAPIView):
     queryset = Room.objects.alive()
-    serializer_class = RoomSerializer
+    serializer_class = MyListingRoomSerializer
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["avg_rating", "category__name"]
     pagination_class = StandardLimitOffsetPagination
@@ -266,81 +269,99 @@ class RoomAV(APIView):
     },
     description="Create a room owned by the logged-in user.",
     )
+    
+    
     def post(self, request, *args, **kwargs):
-
         """
         POST /api/v1/rooms/
 
-        Used by the 'List a Room – Step 1' screen.
-
-        - Creates a Room owned by the logged-in user.
-        - `action` can be "next" or "save_close" – backend treats them the same;
-          the frontend decides what to do next.
+        Step 1 Room creation endpoint.
         """
+
+
+      
         data = request.data.copy()
 
-        # Ignore wizard action flag ("next" / "save_close")
+        # Remove wizard control flag
         data.pop("action", None)
+        
+        # Server-controlled fields must not be accepted from client payloads.
+        # Ratings come from reviews; payment/expiry comes from Stripe; deletion/search overrides are backend/admin controlled.
+        data.pop("avg_rating", None)
+        data.pop("number_rating", None)
+        data.pop("paid_until", None)
+        data.pop("status", None)
+        data.pop("is_deleted", None)
+        data.pop("deleted_at", None)
+        data.pop("allow_search_indexing_override", None)
+        
+        
+        
+        
+        
 
-        # ---- Basic price validation for the tests ----
-        price = data.get("price_per_month")
-        if price in (None, "", []):
-            return Response(
-                {
-                    "ok": False,
-                    "message": "Validation error.",
-                    "errors": {"price_per_month": ["This field is required."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            price_value = float(price)
-        except (TypeError, ValueError):
-            return Response(
-                {
-                    "ok": False,
-                    "message": "Validation error.",
-                    "errors": {"price_per_month": ["A valid number is required."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-)
-        if price_value <= 0:
-            return Response(
-                {
-                    "ok": False,
-                    "message": "Validation error.",
-                    "errors": {"price_per_month": ["Must be greater than 0."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # -----------------------------
+        # Step 1 defaults (safe only)
+        # -----------------------------
+        from django.utils import timezone
+        now_token = timezone.now().strftime("%Y%m%d%H%M%S%f")
 
-        # ---- Ensure we always have a category_id for the serializer ----
+        data.setdefault("title", f"Draft listing {request.user.id}-{now_token}")
+        data.setdefault(
+            "description",
+            "Draft listing created via Step 1 wizard."
+        )
+        data.setdefault("property_type", "flat")
+        # New listings must always start as draft.
+        # Only successful Stripe payment/webhook can make them active.
+        data["status"] = "draft"
+
+        # -----------------------------
+        # REQUIRED FIELD: price validation MUST go through serializer
+        # (REMOVE manual float validation — it was bypassing rules)
+        # -----------------------------
+
+        # -----------------------------
+        # Ensure category exists
+        # -----------------------------
         if not data.get("category_id"):
             category = (
                 RoomCategorie.objects.filter(active=True).order_by("id").first()
                 or RoomCategorie.objects.order_by("id").first()
             )
+
             if not category:
                 category, _ = RoomCategorie.objects.get_or_create(
-                    name="General", defaults={"active": True}
+                    name="General",
+                    defaults={"active": True},
                 )
+
             data["category_id"] = category.id
 
-        # ---- Force the logged-in user as owner ----
+        # -----------------------------
+        # Force owner
+        # -----------------------------
         data["property_owner"] = request.user.id
 
-        serializer = RoomSerializer(data=data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        serializer.save(property_owner=request.user)
+        # -----------------------------
+        # SERIALIZER VALIDATION (IMPORTANT FIX)
+        # -----------------------------
+        serializer = RoomSerializer(
+            data=data,
+            context={"request": request},
+        )
 
-        # Return plain DRF object so tests can access response.data["id"]
+        #serializer.is_valid(raise_exception=True)  # 🔥 THIS FIXES YOUR 400 vs 201 BUG
+        serializer.is_valid(raise_exception=True)
+
+        room = serializer.save(property_owner=request.user)
+
         return ok_response(
-            serializer.data,
+            RoomSerializer(room, context={"request": request}).data,
             message="Room created successfully.",
             status_code=status.HTTP_201_CREATED,
         )
-            
-
+        
 class RoomDetailAV(APIView):
     permission_classes = [IsOwnerOrReadOnly]
     http_method_names = ["get", "put", "patch", "delete"]
@@ -600,8 +621,9 @@ class RoomUnpublishView(APIView):
             )
 
         # Set hidden (unpublished)
-        room.status = "hidden"
-        room.save(update_fields=["status", "updated_at"])
+        if room.status != "hidden":
+            room.status = "hidden"
+            room.save(update_fields=["status", "updated_at"])
 
         return ok_response(
             {
@@ -638,7 +660,11 @@ class RoomPhotoUploadView(APIView):
         """Return only approved images for a room (for grids on Step 4/5, room cards, etc.)."""
         room = get_object_or_404(Room, pk=pk)
         photos = RoomImage.objects.approved().filter(room=room)
-        data = RoomImageSerializer(photos, many=True).data
+        data = RoomImageSerializer(
+                    photos,
+                    many=True,
+                    context={"request": request},
+                    ).data
 
         return ok_response(data, status_code=status.HTTP_200_OK)
 
@@ -658,12 +684,9 @@ class RoomPhotoUploadView(APIView):
         },
         description="Upload a room image. Returns ok_response envelope.",
     )
+    
+    
     def post(self, request, pk):
-        """
-        Upload a single image for this room.
-
-        Front-end can call this multiple times (one per image) to build the gallery.
-        """
         room = get_object_or_404(Room, pk=pk)
 
         # Owner check
@@ -687,26 +710,29 @@ class RoomPhotoUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 1) Quick extension check – JPG / JPEG / PNG only
+        # Extension validation
         allowed_exts = {"jpg", "jpeg", "png", "webp"}
         name_lower = (file_obj.name or "").lower()
         ext = name_lower.rsplit(".", 1)[-1] if "." in name_lower else ""
+
         if ext not in allowed_exts:
             return Response(
                 {
                     "ok": False,
                     "message": "Validation error.",
-                    "errors": {"image": ["Only JPG, JPEG, PNG, or WEBP files are allowed."]},
+                    "errors": {
+                        "image": ["Only JPG, JPEG, PNG, or WEBP files are allowed."]
+                    },
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 2) Size/type/duplicate validation (5MB max, uses your existing validator)
+        # Size + duplicate validation
         try:
             validate_listing_photos([file_obj], max_mb=5)
             assert_no_duplicate_files([file_obj])
         except DjangoValidationError as e:
-            msg = e.message if hasattr(e, "message") else str(e)
+            msg = getattr(e, "message", str(e))
             return Response(
                 {
                     "ok": False,
@@ -716,28 +742,41 @@ class RoomPhotoUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 3) Autopilot moderation: approve instantly unless flagged
-        auto_ok = should_auto_approve_upload(file_obj)
-        photo_status = "approved" if auto_ok else "pending"
-
-        # IMPORTANT: ensure file pointer is reset before saving/thumbnail generation
+        # IMPORTANT: reset file pointer before any downstream processing
         try:
             file_obj.seek(0)
         except Exception:
             pass
 
-        photo = RoomImage.objects.create(
+        #  SINGLE SOURCE OF TRUTH: create ONCE
+        image = RoomImage.objects.create(
             room=room,
             image=file_obj,
-            status=photo_status,
+            status="pending",
         )
 
+        #  AI moderation (non-blocking, safe)
+        try:
+            file_obj.seek(0)
+            if should_auto_approve_upload(file_obj):
+                image.status = "approved"
+                image.save(update_fields=["status"])
+        except Exception:
+            pass
+
+        # Response (serializer safe context)
         return ok_response(
-            RoomImageSerializer(photo).data,
+            RoomImageSerializer(
+                image,
+                context={
+                    "request": request,
+                    "room": room,   # safe for downstream logic if needed
+                },
+            ).data,
             message="Room photo uploaded successfully.",
             status_code=status.HTTP_201_CREATED,
-        )               
-        
+        )
+            
         
         
 class RoomPhotoDeleteView(APIView):
@@ -938,11 +977,22 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return AvailabilitySlot.objects.none()
+
         room = get_object_or_404(Room.objects.alive(), pk=self.kwargs["pk"])
         qs = room.availability_slots.order_by("start")
+
+        date_value = self.request.query_params.get("date")
         f = self.request.query_params.get("from")
         t = self.request.query_params.get("to")
         only_free = self.request.query_params.get("only_free") in {"1", "true", "True"}
+
+        if date_value:
+            try:
+                selected_date = datetime.fromisoformat(date_value).date()
+            except Exception:
+                raise ValidationError({"date": "date must use YYYY-MM-DD format."})
+
+            qs = qs.filter(start__date=selected_date)
 
         if f and t:
             try:
@@ -950,26 +1000,56 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
                 end = datetime.fromisoformat(t)
             except Exception:
                 raise ValidationError({"detail": "from/to must be ISO 8601"})
+
             qs = qs.filter(start__lt=end, end__gt=start)
 
         if only_free:
             available_ids = [
-                s.id for s in qs if Booking.objects.filter(slot=s, canceled_at__isnull=True).count() < s.max_bookings
+                s.id
+                for s in qs
+                if Booking.objects.filter(
+                    slot=s,
+                    canceled_at__isnull=True,
+                ).count() < s.max_bookings
             ]
             qs = qs.filter(id__in=available_ids)
 
         return qs
-           
-      
+
+    def list(self, request, *args, **kwargs):
+        mode = request.query_params.get("mode")
+
+        if mode == "dates":
+            qs = self.get_queryset()
+
+            available_dates = sorted(
+                {
+                    slot.start.date().isoformat()
+                    for slot in qs
+                }
+            )
+
+            return Response(
+                {
+                    "available_dates": available_dates,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return super().list(request, *args, **kwargs)
       
       
 
 
 class RoomListAlt(CachedAnonymousGETMixin, generics.ListAPIView):
-    queryset = Room.objects.alive().order_by("-avg_rating")
+    queryset = (
+        Room.objects.alive()
+        .filter(status="active")
+        .order_by("-avg_rating")
+    )
     serializer_class = RoomSerializer
     permission_classes = [AllowAny]
-    cache_timeout = 120  # cache this endpoint for 2 minutes
+    cache_timeout = 120
 
     @extend_schema(
         request=RoomSerializer,

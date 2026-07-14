@@ -132,7 +132,9 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "number_of_bedrooms",
         "number_rating",
         "owner_avatar",
+        "owner_username",
         "owner_name",
+        "owner_username",
         "paid_until",
         "parking_available",
         "pets_allowed",
@@ -162,6 +164,9 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "updated_at",
         "view_available_custom_dates",
         "view_available_days_mode",
+        "landlord_type",
+        "landlord_type_label",
+        "landlord_verified",
     }
 
     assert_exact_keys(first, expected_item_keys)

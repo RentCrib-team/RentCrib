@@ -1,4 +1,4 @@
-from datetime import timedelta
+﻿from datetime import timedelta
 
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 
-
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 
@@ -30,8 +30,7 @@ from propertylist_app.api.serializers import (
 )
 
 
-from .common import ok_response
-
+from .common import ok_response, error_response
 
 class RoomModerationStatusUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=["active", "hidden"])
@@ -56,7 +55,7 @@ class ReportCreateView(generics.CreateAPIView):
     """
     POST /api/reports/
     Body:
-      {"target_type": "room"|"review"|"message"|"user", "object_id": 123, "reason": "abuse", "details": "…"}
+      {"target_type": "room"|"review"|"message"|"user", "object_id": 123, "reason": "abuse", "details": "â€¦"}
     """
     serializer_class = ReportSerializer
     permission_classes = [IsAuthenticated]
@@ -88,7 +87,7 @@ class ReportCreateView(generics.CreateAPIView):
 
 
 class ModerationReportListView(generics.ListAPIView):
-    """GET /api/moderation/reports/?status=open|in_review|resolved|rejected — staff only."""
+    """GET /api/moderation/reports/?status=open|in_review|resolved|rejected â€” staff only."""
     serializer_class = ReportSerializer
     permission_classes = [IsModerationAdmin]
     pagination_class = StandardLimitOffsetPagination
@@ -151,23 +150,26 @@ class ModerationReportUpdateView(generics.UpdateAPIView):
         hide_room = bool(request.data.get("hide_room"))
 
         if status_new in {"in_review", "resolved", "rejected"}:
-            if not _can_transition_report_status(report.status, status_new):
+            try:
+                report.transition_to(
+                    status_new,
+                    handled_by=request.user,
+                    resolution_notes=notes,
+                )
+            except DjangoValidationError as exc:
                 return Response(
                     {
                         "ok": False,
                         "message": "Validation error.",
-                        "errors": {
-                            "status": [f"Invalid transition from '{report.status}' to '{status_new}'."]
-                        },
+                        "errors": {"status": [str(exc)]},
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            report.status = status_new
-
-        if notes:
-            report.resolution_notes = notes
-        report.handled_by = request.user
-        report.save(update_fields=["status", "resolution_notes", "handled_by", "updated_at"])
+        else:
+            if notes:
+                report.resolution_notes = notes
+            report.handled_by = request.user
+            report.save(update_fields=["resolution_notes", "handled_by", "updated_at"])
 
         if hide_room and report.target_type == "room" and isinstance(report.target, Room):
             if report.target.status != "hidden":
@@ -247,7 +249,7 @@ class ModerationReportModerateActionView(APIView):
         notes = (request.data.get("resolution_notes") or "").strip()
         hide_room = bool(request.data.get("hide_room"))
 
-        # map action → status
+        # map action â†’ status
         mapping = {
             "resolve": "resolved",
             "resolved": "resolved",
@@ -258,20 +260,23 @@ class ModerationReportModerateActionView(APIView):
         }
         new_status = mapping.get(action)
         if not new_status:
-            return Response({"detail": "invalid action"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not _can_transition_report_status(report.status, new_status):
-            return Response(
-                {"status": f"Invalid transition from '{report.status}' to '{new_status}'."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                message="invalid action",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="invalid_action",
             )
 
-        # update report
-        if notes:
-            report.resolution_notes = notes
-        report.status = new_status
-        report.handled_by = request.user
-        report.save(update_fields=["status", "resolution_notes", "handled_by", "updated_at"])
+        try:
+            report.transition_to(
+                new_status,
+                handled_by=request.user,
+                resolution_notes=notes,
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"status": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # optional: hide the room if requested and target is a room
         if hide_room and report.target_type == "room" and isinstance(report.target, Room):
@@ -302,14 +307,14 @@ class ModerationReportModerateActionView(APIView):
             {"id": report.pk, "status": report.status},
             status_code=status.HTTP_200_OK,
         )
-        
+
 
 
 
 class RoomModerationStatusView(APIView):
     """
     PATCH /api/moderation/rooms/<id>/status/
-    Body: {"status": "active"|"hidden"} — staff only.
+    Body: {"status": "active"|"hidden"} â€” staff only.
     """
     permission_classes = [IsModerationAdmin]
 
@@ -355,7 +360,7 @@ class RoomModerationStatusView(APIView):
 
 class OpsStatsView(APIView):
     """
-    GET /api/ops/stats/ — admin-only operational snapshot.
+    GET /api/ops/stats/ â€” admin-only operational snapshot.
     Amounts reported in **GBP** (Payment.amount is stored in GBP).
     """
     permission_classes = [IsOpsAdmin]
@@ -464,10 +469,10 @@ class OpsStatsView(APIView):
             data,
             message="Operational statistics retrieved successfully.",
             status_code=status.HTTP_200_OK,
-        )       
-        
-        
-        
+        )
+
+
+
 def _can_transition_report_status(current: str, new: str) -> bool:
     """
     Allowed transitions:
@@ -486,6 +491,7 @@ def _can_transition_report_status(current: str, new: str) -> bool:
         "open": {"in_review", "resolved", "rejected"},
         "in_review": {"resolved", "rejected"},
         "resolved": set(),
+        
         "rejected": set(),
     }
     return new in allowed.get(current, set())
@@ -493,4 +499,5 @@ def _can_transition_report_status(current: str, new: str) -> bool:
 
 
 
-        
+
+

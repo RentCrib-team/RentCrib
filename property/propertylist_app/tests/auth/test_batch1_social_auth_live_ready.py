@@ -1,21 +1,3 @@
-
-
-# They prove:
-
-# Google auth works
-# Apple auth works
-# profile verification is written correctly
-# username collision logic works
-# invalid provider tokens fail cleanly
-
-
-
-
-
-
-
-
-
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -23,6 +5,15 @@ from django.urls import reverse
 from propertylist_app.models import UserProfile
 
 pytestmark = pytest.mark.django_db
+
+
+def assert_social_login_payload(body):
+    assert body["ok"] is True
+    assert "tokens" in body["data"]
+    assert "access" in body["data"]["tokens"]
+    assert "refresh" in body["data"]["tokens"]
+    assert "user" in body["data"]
+    assert "profile" in body["data"]
 
 
 def test_google_register_creates_user_and_marks_profile_verified(api_client, monkeypatch):
@@ -44,10 +35,7 @@ def test_google_register_creates_user_and_marks_profile_verified(api_client, mon
     assert profile.email_verified is True
     assert profile.email_verified_at is not None
 
-    body = response.json()
-    assert body["ok"] is True
-    assert "access" in body["data"]
-    assert "refresh" in body["data"]
+    assert_social_login_payload(response.json())
 
 
 def test_google_register_uses_unique_username_when_local_part_collides(api_client, monkeypatch):
@@ -93,10 +81,7 @@ def test_apple_register_creates_user_and_marks_profile_verified(api_client, monk
     assert profile.email_verified is True
     assert profile.email_verified_at is not None
 
-    body = response.json()
-    assert body["ok"] is True
-    assert "access" in body["data"]
-    assert "refresh" in body["data"]
+    assert_social_login_payload(response.json())
 
 
 def test_google_register_invalid_token_returns_400(api_client, monkeypatch):

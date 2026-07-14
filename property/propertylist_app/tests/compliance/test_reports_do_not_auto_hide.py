@@ -3,6 +3,8 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
 from propertylist_app.models import Room, RoomCategorie
+from datetime import timedelta
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -11,14 +13,17 @@ def test_report_does_not_auto_hide_room():
     owner = User.objects.create_user(username="owner", password="pass123", email="o@example.com")
     reporter = User.objects.create_user(username="reporter", password="pass123", email="r@example.com")
     cat = RoomCategorie.objects.create(name="Any", active=True)
+    paid_until = timezone.now().date() + timedelta(days=30)
+    
     room = Room.objects.create(
-        title="Reported Room",
-        description="...",
-        price_per_month=1000,
-        location="Manchester M1 1AA",
-        category=cat,
-        property_owner=owner,
-        status="active",
+    title="Reported Room",
+    description="...",
+    price_per_month=1000,
+    location="Manchester M1 1AA",
+    category=cat,
+    property_owner=owner,
+    status="active",
+    paid_until=paid_until,
     )
 
     # Reporter files a report

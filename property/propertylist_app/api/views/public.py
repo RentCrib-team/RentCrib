@@ -1,4 +1,4 @@
-import random
+﻿import random
 
 import json
 
@@ -13,6 +13,8 @@ from django.utils import timezone
 
 from datetime import timedelta
 
+
+from notifications.services import send_security_code_email
 
 from rest_framework import generics
 from rest_framework import permissions, serializers, status
@@ -35,12 +37,13 @@ from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
 from django.utils.crypto import get_random_string
-from django.db.models import Q, Exists, OuterRef, Prefetch, Count
- 
- 
-from propertylist_app.validators import validate_radius_miles, haversine_miles 
+from django.db.models import Q, Exists, OuterRef, Prefetch, Count, Case, When
+
+
+from propertylist_app.validators import validate_radius_miles, haversine_miles
 from propertylist_app.services.captcha import verify_captcha
 from propertylist_app.services.geo import geocode_postcode_cached
+from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
@@ -106,13 +109,13 @@ class HomePageView(APIView):
             .select_related("category", "property_owner")
         )
 
-        # 1) Featured rooms – highest rating first
+        # 1) Featured rooms â€“ highest rating first
         featured_rooms_qs = base_rooms.order_by("-avg_rating", "-number_rating", "-created_at")[:6]
 
-        # 2) Latest rooms – newest first
+        # 2) Latest rooms â€“ newest first
         latest_rooms_qs = base_rooms.order_by("-created_at")[:6]
 
-        # 3) Popular cities for the “Explore the Most Popular Shared Homes” strip
+        # 3) Popular cities for the â€œExplore the Most Popular Shared Homesâ€ strip
         city_rows = (
             base_rooms
             .exclude(location__isnull=True)
@@ -133,7 +136,7 @@ class HomePageView(APIView):
             "total_seekers": UserProfile.objects.filter(role="seeker").count(),
         }
 
-        # 5) Mobile app links – pulled from settings if you configure them
+        # 5) Mobile app links â€“ pulled from settings if you configure them
         app_links = {
             "ios": getattr(settings, "MOBILE_APP_IOS_URL", ""),
             "android": getattr(settings, "MOBILE_APP_ANDROID_URL", ""),
@@ -219,7 +222,7 @@ class CityListView(APIView):
             paginator.get_paginated_response(ser.data)
         )
 
-    
+
 
 
 class FindAddressResponseDataSerializer(serializers.Serializer):
@@ -234,9 +237,9 @@ class FindAddressResponseDataSerializer(serializers.Serializer):
     )
 
 
-  
-    
-    
+
+
+
 class FindAddressView(APIView):
     permission_classes = [permissions.AllowAny]
     versioning_class = None
@@ -342,7 +345,7 @@ class FindAddressView(APIView):
 
 
 
-class SearchRoomsView(generics.ListAPIView):
+class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
 
     """
     GET /api/search/rooms/
@@ -357,13 +360,15 @@ class SearchRoomsView(generics.ListAPIView):
     - property_types   : flat / house / studio (Advanced Search)
     - rooms_min/max    : minimum / maximum number_of_bedrooms (Advanced Search)
     - move_in_date     : earliest acceptable move-in date (Advanced Search)
-    - min_rating       : minimum average rating (1–5)
-    - max_rating       : maximum average rating (1–5)
+    - min_rating       : minimum average rating (1â€“5)
+    - max_rating       : maximum average rating (1â€“5)
 
     """
     serializer_class = RoomSerializer
     permission_classes = [permissions.AllowAny]
     pagination_class = StandardLimitOffsetPagination
+    cache_prefix = "search_rooms"
+    cache_timeout = 60
 
     _ordered_ids = None
     _distance_by_id = None
@@ -382,22 +387,22 @@ class SearchRoomsView(generics.ListAPIView):
         raw_radius = params.get("radius_miles", 10)
 
         # ===== Advanced filters from query =====
-        # “Rooms in existing shares”
+        # â€œRooms in existing sharesâ€
         include_shared = params.get("include_shared")
 
-        # “Rooms suitable for ages”
+        # â€œRooms suitable for agesâ€
         min_age = params.get("min_age")
         max_age = params.get("max_age")
 
-        # “Length of stay”
+        # â€œLength of stayâ€
         min_stay = params.get("min_stay_months")
         max_stay = params.get("max_stay_months")
 
-        # “Rooms for” and “Room sizes”
+        # â€œRooms forâ€ and â€œRoom sizesâ€
         room_for = (params.get("room_for") or "").strip()
         room_size = (params.get("room_size") or "").strip()
 
-       
+
 
         qs = (
             Room.objects.alive()
@@ -405,16 +410,16 @@ class SearchRoomsView(generics.ListAPIView):
             .prefetch_related(
                 Prefetch(
                     "roomimage_set",
-                    queryset=RoomImage.objects.filter(status="approved").order_by("id"),
+                    queryset=RoomImage.objects.filter(status__in=["approved", "pending"]).order_by("id"),
                     to_attr="prefetched_approved_images",
                 )
             )
         )
 
+
         today = timezone.now().date()
-        qs = qs.filter(status="active").filter(
-            Q(paid_until__isnull=True) | Q(paid_until__gte=today)
-        )
+        
+        qs = qs.filter(status="active", paid_until__gte=today)
 
         # ----- keyword search -----
         if q_text:
@@ -424,7 +429,7 @@ class SearchRoomsView(generics.ListAPIView):
                 | Q(location__icontains=q_text)
             )
 
-        
+
         # ----- manual address filters (street / city) -----
         street = (params.get("street") or "").strip()
         if street:
@@ -478,9 +483,9 @@ class SearchRoomsView(generics.ListAPIView):
 
         if rooms_max_val is not None:
             qs = qs.filter(number_of_bedrooms__lte=rooms_max_val)
-        
-        
-        
+
+
+
 
         # ----- rating filters -----
         min_rating = params.get("min_rating")
@@ -509,7 +514,7 @@ class SearchRoomsView(generics.ListAPIView):
         if max_rating_val is not None:
             qs = qs.filter(avg_rating__lte=max_rating_val)
 
-        
+
         user = getattr(self.request, "user", None)
         if user and user.is_authenticated:
             qs = qs.annotate(
@@ -518,11 +523,11 @@ class SearchRoomsView(generics.ListAPIView):
                 )
             )
 
-        
 
 
 
-        # Property preferences – boolean filters (support true and false)
+
+        # Property preferences â€“ boolean filters (support true and false)
         def parse_bool(v):
             if v is None:
                 return None
@@ -625,7 +630,7 @@ class SearchRoomsView(generics.ListAPIView):
         free_to_contact = parse_bool(params.get("free_to_contact"))
         if free_to_contact is not None:
             qs = qs.filter(free_to_contact=free_to_contact)
-        
+
 
         photos_only = parse_bool(params.get("photos_only"))
         if photos_only:
@@ -643,13 +648,13 @@ class SearchRoomsView(generics.ListAPIView):
         verified_only = parse_bool(params.get("verified_advertisers_only"))
         if verified_only is not None:
             qs = qs.filter(property_owner__profile__advertiser_verified=verified_only)
-            
-            
+
+
         # Advert by household (UserProfile.role_detail)
         advert_by_household = (params.get("advert_by_household") or "").strip()
         if advert_by_household and advert_by_household != "no_preference":
             qs = qs.filter(property_owner__profile__role_detail__iexact=advert_by_household)
-            
+
 
         posted_within_days = params.get("posted_within_days")
         if posted_within_days:
@@ -660,14 +665,14 @@ class SearchRoomsView(generics.ListAPIView):
             cutoff = timezone.now() - timedelta(days=days_int)
             qs = qs.filter(created_at__gte=cutoff)
 
-            
 
 
-        # ----- “Rooms in existing shares” -----
+
+        # ----- â€œRooms in existing sharesâ€ -----
         if include_shared in {"1", "true", "True", "yes"}:
             qs = qs.filter(is_shared_room=True)
 
-        # ----- “Rooms suitable for ages” -----
+        # ----- â€œRooms suitable for agesâ€ -----
         # If user sends min_age, keep rooms whose max_age is blank OR >= min_age
         if min_age is not None and str(min_age).strip() != "":
             try:
@@ -684,7 +689,7 @@ class SearchRoomsView(generics.ListAPIView):
                 raise ValidationError({"max_age": "Must be an integer."})
             qs = qs.filter(Q(min_age__isnull=True) | Q(min_age__lte=max_age_val))
 
-        # ----- “Length of stay” (months) -----
+        # ----- â€œLength of stayâ€ (months) -----
         if min_stay is not None and str(min_stay).strip() != "":
             try:
                 min_stay_val = int(min_stay)
@@ -699,12 +704,12 @@ class SearchRoomsView(generics.ListAPIView):
                 raise ValidationError({"max_stay_months": "Must be an integer."})
             qs = qs.filter(Q(min_stay_months__isnull=True) | Q(min_stay_months__lte=max_stay_val))
 
-        # ----- “Rooms for” -----
+        # ----- â€œRooms forâ€ -----
         # Only filter when user picks a specific option (not 'any')
         if room_for and room_for != "any":
             qs = qs.filter(room_for=room_for)
 
-        # ----- “Room sizes” -----
+        # ----- â€œRoom sizesâ€ -----
         if room_size and room_size != "dont_mind":
             qs = qs.filter(room_size=room_size)
 
@@ -735,7 +740,8 @@ class SearchRoomsView(generics.ListAPIView):
             self._distance_by_id = {rid: d for rid, d in distances}
             qs = qs.filter(id__in=ids_in_radius)
 
-        ordering_param = (params.get("ordering") or "").strip()
+        raw_ordering_param = params.get("ordering")
+        ordering_param = (raw_ordering_param or "").strip()
 
         # Map friendly front-end sort keys to real fields
         # Frontend options:
@@ -745,7 +751,7 @@ class SearchRoomsView(generics.ListAPIView):
         #   price_asc     -> price_per_month
         #   price_desc    -> -price_per_month
         ui_sort_map = {
-            # Frontend "Default viewing order" → newest first
+            # Frontend "Default viewing order" â†’ newest first
             "default": "-created_at",
             "newest": "-created_at",
             "last_updated": "-updated_at",
@@ -765,9 +771,12 @@ class SearchRoomsView(generics.ListAPIView):
 
 
         # Defer distance ordering to list() when we have computed distances
-        if ordering_param in {"distance_miles", "-distance_miles"} and self._ordered_ids is not None:
-            pass
-        else:
+        distance_ordering_active = (
+            ordering_param in {"distance_miles", "-distance_miles"}
+            and self._ordered_ids is not None
+        )
+
+        if not distance_ordering_active:
             allowed = {
                 "price_per_month": "price_per_month",
                 "-price_per_month": "-price_per_month",
@@ -778,12 +787,41 @@ class SearchRoomsView(generics.ListAPIView):
                 "updated_at": "updated_at",
                 "-updated_at": "-updated_at",
             }
+
             mapped = allowed.get(ordering_param)
             if mapped:
                 qs = qs.order_by(mapped)
 
+            # Fair rotation applies only to normal default browsing.
+            # It must not run for postcode/radius distance ordering.
+            apply_fair_rotation = (
+                not postcode
+                and self._ordered_ids is None
+                and raw_ordering_param in (None, "", "default")
+            )
+
+            if apply_fair_rotation:
+                room_ids = list(qs.values_list("id", flat=True)[:40])
+
+                if len(room_ids) > 1:
+                    random.shuffle(room_ids)
+
+                    remaining_ids = list(
+                        qs.exclude(id__in=room_ids).values_list("id", flat=True)
+                    )
+
+                    final_ids = room_ids + remaining_ids
+
+                    preserved_full = Case(
+                        *[When(id=pk, then=pos) for pos, pk in enumerate(final_ids)]
+                    )
+
+                    qs = qs.order_by(preserved_full)
+
         return qs
-    
+
+        
+
     @extend_schema(
         parameters=[
             OpenApiParameter(
@@ -1172,7 +1210,14 @@ class NearbyRoomsView(generics.ListAPIView):
 
         lat, lon = geocode_postcode_cached(postcode_raw)
 
-        base_qs = Room.objects.alive().exclude(latitude__isnull=True).exclude(longitude__isnull=True)
+        today = timezone.now().date()
+
+        base_qs = (
+            Room.objects.alive()
+            .filter(status="active", paid_until__gte=today)
+            .exclude(latitude__isnull=True)
+            .exclude(longitude__isnull=True)
+        )
 
         distances = []
         for r in base_qs.only("id", "latitude", "longitude"):
@@ -1184,11 +1229,11 @@ class NearbyRoomsView(generics.ListAPIView):
         self._ordered_ids = [rid for rid, _ in distances]
         self._distance_by_id = {rid: d for rid, d in distances}
 
-        return Room.objects.alive().filter(id__in=self._ordered_ids or [])
-    
-    
-    
-    
+        return base_qs.filter(id__in=self._ordered_ids or [])
+
+
+
+
     @extend_schema(
             parameters=[
                 OpenApiParameter(
@@ -1294,7 +1339,16 @@ class HealthCheckView(APIView):
             db_ok = True
         except Exception:
             db_ok = False
-        return Response({"status": "ok", "db": db_ok}, status=status.HTTP_200_OK)
+        overall_status = "ok" if db_ok else "degraded"
+        http_status = status.HTTP_200_OK if db_ok else status.HTTP_503_SERVICE_UNAVAILABLE
+
+        return Response(
+            {
+                "status": overall_status,
+                "db": db_ok,
+            },
+            status=http_status,
+        )
 
 
 
@@ -1368,7 +1422,7 @@ class EmailOTPVerifyView(APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        # 6) Wrong code → increment attempts and return 400
+        # 6) Wrong code â†’ increment attempts and return 400
         if not otp.matches(code):
             otp.attempts = (otp.attempts or 0) + 1
             otp.save(update_fields=["attempts"])
@@ -1377,7 +1431,7 @@ class EmailOTPVerifyView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 7) Correct code → mark used + mark profile email_verified
+        # 7) Correct code â†’ mark used + mark profile email_verified
         otp.mark_used()
 
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -1464,23 +1518,26 @@ class EmailOTPResendView(APIView):
             purpose=EmailOTP.PURPOSE_EMAIL_VERIFY,
         )
 
-        mail.send_mail(
-            subject="Your new verification code",
-            message=f"Your verification code is: {code}",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=True,
+        send_security_code_email(
+            to_email=user.email,
+            subject="Your new RentCrib verification code",
+            first_name=user.first_name,
+            title="Your new verification code",
+            intro="Use the code below to verify your RentCrib email address.",
+            code=code,
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         return ok_response(
             {"detail": "If the account exists, a new verification code has been sent."},
             status_code=status.HTTP_200_OK,
         )
-        
-        
-        
+
+
+
 class PhoneOTPStartView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
     versioning_class = None
     throttle_scope = "otp-resend"
 
@@ -1554,6 +1611,7 @@ class PhoneOTPStartView(APIView):
 
 class PhoneOTPVerifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
     versioning_class = None
     throttle_scope = "otp-verify"
 
@@ -1595,8 +1653,8 @@ class PhoneOTPVerifyView(APIView):
 
         if otp.is_expired:
             return Response({"detail": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        
+
+
 
         if otp.attempts >= settings.OTP_MAX_ATTEMPTS:
             return Response(
@@ -1625,10 +1683,10 @@ class PhoneOTPVerifyView(APIView):
             {"detail": "Phone number verification complete."},
             status_code=status.HTTP_200_OK,
         )
-        
-        
-                
 
 
 
-    
+
+
+
+

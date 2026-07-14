@@ -1,10 +1,8 @@
-from datetime import date, timedelta
+﻿from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
-
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import User
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
@@ -17,6 +15,21 @@ from django.utils.text import slugify
 from django.contrib.auth.hashers import check_password, make_password
 
 
+User = get_user_model()
+
+
+class SoftDeleteManager(models.Manager):
+    def get_queryset(self):
+        return SoftDeleteQuerySet(self.model, using=self._db)
+
+    def alive(self):
+        return self.get_queryset().alive()
+
+    def dead(self):
+        return self.get_queryset().dead()
+
+
+
 # ---------------------------
 # Soft-delete base + queryset
 # ---------------------------
@@ -27,7 +40,7 @@ class SoftDeleteQuerySet(models.QuerySet):
         try:
             field_names = {f.name for f in self.model._meta.fields}
             if "status" in field_names:
-                qs = qs.filter(status="active")
+                qs = qs.exclude(status=Room.Lifecycle.HIDDEN)
         except Exception:
             pass
         return qs
@@ -39,7 +52,8 @@ class SoftDeleteQuerySet(models.QuerySet):
 class SoftDeleteModel(models.Model):
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
-    objects = SoftDeleteQuerySet.as_manager()
+    objects = SoftDeleteManager()
+    all_objects = models.Manager()
 
     class Meta:
         abstract = True
@@ -99,7 +113,7 @@ class RoomCategorie(models.Model):
 # ----
 class Room(SoftDeleteModel):
     title = models.CharField(max_length=200)
-    description = models.TextField()
+    description = models.TextField(blank=True, default="")
     price_per_month = models.DecimalField(max_digits=8, decimal_places=2)
     security_deposit = models.DecimalField(
         max_digits=8,
@@ -261,6 +275,17 @@ class Room(SoftDeleteModel):
         ("active", "Active"),
         ("hidden", "Hidden"),
     )
+    class Lifecycle:
+        DRAFT = "draft"
+        ACTIVE = "active"
+        HIDDEN = "hidden"
+
+        ALL = {DRAFT, ACTIVE, HIDDEN}
+
+        PUBLIC = {ACTIVE}
+        EDITABLE = {DRAFT, ACTIVE}
+    
+    
     status = models.CharField(
         max_length=16,
         choices=STATUS_CHOICES,
@@ -444,7 +469,7 @@ class Room(SoftDeleteModel):
 
     availability_from_time = models.TimeField(null=True, blank=True)
     availability_to_time = models.TimeField(null=True, blank=True)
-    
+
     #  search engine indexing override per listing:
     # None = follow user's default, True = force allow, False = force noindex
     allow_search_indexing_override = models.BooleanField(null=True, blank=True, default=None)
@@ -540,6 +565,30 @@ class Room(SoftDeleteModel):
         return self.title
 
 
+
+
+
+    def set_status(self, new_status: str):
+        """
+        Controlled lifecycle transition gate.
+        """
+
+        allowed = {
+            self.Lifecycle.DRAFT: {self.Lifecycle.DRAFT, self.Lifecycle.ACTIVE, self.Lifecycle.HIDDEN},
+            self.Lifecycle.ACTIVE: {self.Lifecycle.ACTIVE, self.Lifecycle.HIDDEN},
+            self.Lifecycle.HIDDEN: set(),
+        }
+
+        if new_status not in self.Lifecycle.ALL:
+            raise ValidationError("Invalid status value")
+
+        if self.status not in allowed or new_status not in allowed[self.status]:
+            raise ValidationError(
+                f"Invalid transition: {self.status} → {new_status}"
+            )
+
+        self.status = new_status
+
 # -----------
 # UserProfile
 # -----------
@@ -616,6 +665,16 @@ class UserProfile(models.Model):
     phone_verified_at = models.DateTimeField(null=True, blank=True)
     advertiser_verified = models.BooleanField(default=False, db_index=True)
 
+    identity_verified = models.BooleanField(
+        default=False,
+        db_index=True
+    )
+
+    identity_verified_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
     terms_version = models.CharField(max_length=20, blank=True, default="")
     marketing_consent = models.BooleanField(default=False)
@@ -642,6 +701,111 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} profile"
+    
+    
+    
+class LandlordVerificationRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="landlord_verification_requests",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    document = models.FileField(
+        upload_to="landlord_verification_documents/",
+        blank=True,
+        null=True,
+    )
+    notes = models.TextField(blank=True, default="")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_landlord_verification_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.status}"    
+
+
+
+class IdentityVerificationRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="identity_verification_requests",
+    )
+
+    document = models.FileField(
+        upload_to="identity_verification_documents/",
+        blank=True,
+        null=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+
+    notes = models.TextField(blank=True, default="")
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_identity_verifications",
+    )
+
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    rejection_reason = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+
+    
 
 # --------
 # AuditLog
@@ -711,40 +875,39 @@ class RoomImage(models.Model):
     )
 
     objects = RoomImageQuerySet.as_manager()
-    
-    
-    def save(self, *args, **kwargs):
-        """
-        Reason:
-        Images created via Django Admin bypass RoomPhotoUploadView,
-        so they can stay with default status='pending'.
 
-        This applies auto-approval consistently on CREATE (Admin/API/shell),
-        but does not override manual moderation (approved/rejected).
-        """
-        is_new = self.pk is None
+
+    def save(self, *args, **kwargs):
+            """
+            Reason:
+            Always call Django's real save so RoomImage rows are written to the database.
+
+            Auto-approval is handled by RoomPhotoUploadView during API upload.
+            Admin/shell-created images can remain pending unless manually approved.
+            """
+            super().save(*args, **kwargs)
 
         # Only auto-approve on create, and only when still pending.
-        if is_new and self.status == "pending" and self.image:
-            try:
-                from propertylist_app.services.image import should_auto_approve_upload
+        # if is_new and self.status == "pending" and self.image:
+        #     try:
+        #         from propertylist_app.services.image import should_auto_approve_upload
 
-                file_obj = getattr(self.image, "file", None)
-                if file_obj and should_auto_approve_upload(file_obj):
-                    self.status = "approved"
+        #         file_obj = getattr(self.image, "file", None)
+        #         if file_obj and should_auto_approve_upload(file_obj):
+        #             self.status = "approved"
 
-                # Important: reset pointer for Django storage save
-                if file_obj:
-                    try:
-                        file_obj.seek(0)
-                    except Exception:
-                        pass
+        #         # Important: reset pointer for Django storage save
+        #         if file_obj:
+        #             try:
+        #                 file_obj.seek(0)
+        #             except Exception:
+        #                 pass
 
-            except Exception:
-                # if anything goes wrong, leave as pending for manual moderation
-                pass
+        #     except Exception:
+        #         # if anything goes wrong, leave as pending for manual moderation
+        #         pass
 
-        super().save(*args, **kwargs)
+        # super().save(*args, **kwargs)
 
 
 # -----------------
@@ -766,13 +929,13 @@ class AvailabilitySlot(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.room} | {self.start:%Y-%m-%d %H:%M} → {self.end:%Y-%m-%d %H:%M} (cap {self.max_bookings})"
+        return f"{self.room} | {self.start:%Y-%m-%d %H:%M} â†’ {self.end:%Y-%m-%d %H:%M} (cap {self.max_bookings})"
 
 
 # -------
 # Booking
 # -------
-class Booking(models.Model):
+class Booking(SoftDeleteModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="bookings")
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name="bookings")
     slot = models.ForeignKey(
@@ -798,13 +961,12 @@ class Booking(models.Model):
     )
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
-    is_deleted = models.BooleanField(default=False)
-    deleted_at = models.DateTimeField(null=True, blank=True)
+
 
     def __str__(self):
         return f"Booking #{self.id} for {self.room} by {self.user}"
 
-    
+
     def can_transition_to(self, new_status: str) -> bool:
         """
         Enforce booking state machine.
@@ -890,9 +1052,14 @@ class Tenancy(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(12)]
     )
 
-    # confirmations (who confirmed + when)
+        # confirmations (who confirmed + when)
     landlord_confirmed_at = models.DateTimeField(null=True, blank=True)
     tenant_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # tenant is allowed to edit tenancy details only once before final confirmation
+    tenant_has_edited = models.BooleanField(default=False)
+
+    
 
     # if the other party proposes changes, we overwrite move_in_date/duration_months
     # and reset confirmations (controlled in serializer logic)
@@ -980,8 +1147,8 @@ class Review(models.Model):
     ROLE_LANDLORD_TO_TENANT = "landlord_to_tenant"
 
     ROLE_CHOICES = (
-        (ROLE_TENANT_TO_LANDLORD, "Tenant → Landlord"),
-        (ROLE_LANDLORD_TO_TENANT, "Landlord → Tenant"),
+        (ROLE_TENANT_TO_LANDLORD, "Tenant â†’ Landlord"),
+        (ROLE_LANDLORD_TO_TENANT, "Landlord â†’ Tenant"),
     )
 
     tenancy = models.ForeignKey(
@@ -989,8 +1156,8 @@ class Review(models.Model):
         on_delete=models.CASCADE,
         related_name="reviews",
     )
-  
-     
+
+
     reviewer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -1118,13 +1285,20 @@ class SavedRoom(models.Model):
         ]
 
     def __str__(self):
-        return f"{getattr(self.user, 'username', 'user')} → {getattr(self, 'room_id', '∅')}"
+        return f"{getattr(self.user, 'username', 'user')} â†’ {getattr(self, 'room_id', 'âˆ…')}"
 
 
 # -------------
 # MessageThread
 # -------------
-class MessageThread(models.Model):
+class MessageThread(SoftDeleteModel):
+    room = models.ForeignKey(
+        "Room",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message_threads",
+    )
     participants = models.ManyToManyField(User, related_name="message_threads")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1136,11 +1310,11 @@ class MessageThread(models.Model):
         help_text="Optional label for this thread (e.g. 'Viewing scheduled', 'Good fit').",
     )
 
-    is_deleted = models.BooleanField(default=False, db_index=True)
+
 
     def __str__(self):
         users = ", ".join(self.participants.values_list("username", flat=True)[:2])
-        return f"Thread {self.id} ({users}…)"
+        return f"Thread {self.id} ({users}â€¦)"
 
 
 class MessageThreadState(models.Model):
@@ -1340,6 +1514,50 @@ class Report(models.Model):
             models.Index(fields=["created_at"]),
         ]
 
+    @classmethod
+    def can_transition_status(cls, current: str, new: str) -> bool:
+        """
+        Enforce the moderation report status lifecycle.
+
+        Allowed transitions:
+        open -> in_review/resolved/rejected
+        in_review -> resolved/rejected
+        resolved -> terminal
+        rejected -> terminal
+
+        Same-status updates are allowed as no-op updates.
+        """
+        if not current or not new:
+            return False
+
+        if current == new:
+            return True
+
+        allowed = {
+            "open": {"in_review", "resolved", "rejected"},
+            "in_review": {"resolved", "rejected"},
+            "resolved": set(),
+            "rejected": set(),
+        }
+        return new in allowed.get(current, set())
+
+    def transition_to(self, new_status: str, *, handled_by=None, resolution_notes: str = "") -> None:
+        """
+        Safely transition this report to a new moderation status.
+        """
+        if not self.can_transition_status(self.status, new_status):
+            raise ValidationError(f"Invalid transition from '{self.status}' to '{new_status}'.")
+
+        if resolution_notes:
+            self.resolution_notes = resolution_notes
+
+        self.status = new_status
+
+        if handled_by is not None:
+            self.handled_by = handled_by
+
+        self.save(update_fields=["status", "resolution_notes", "handled_by", "updated_at"])
+
     def __str__(self):
         return f"Report #{self.pk} {self.target_type}:{self.object_id} ({self.status})"
 
@@ -1374,10 +1592,14 @@ class GDPRTombstone(models.Model):
 class EmailOTP(models.Model):
     PURPOSE_EMAIL_VERIFY = "email_verify"
     PURPOSE_PASSWORD_RESET = "password_reset"
+    PURPOSE_ACCOUNT_REACTIVATION = "account_reactivation"
+    PURPOSE_ACCOUNT_DELETE = "account_delete"
 
     PURPOSE_CHOICES = [
         (PURPOSE_EMAIL_VERIFY, "Email verification"),
         (PURPOSE_PASSWORD_RESET, "Password reset"),
+        (PURPOSE_ACCOUNT_REACTIVATION, "Account reactivation"),
+        (PURPOSE_ACCOUNT_DELETE, "Account delete"),
     ]
 
     user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name="email_otps")
@@ -1455,8 +1677,8 @@ class PhoneOTP(models.Model):
     @property
     def is_used(self) -> bool:
         return self.used_at is not None
-    
-    
+
+
     def matches(self, value: str) -> bool:
         raw = (value or "").strip()
         if not raw:
@@ -1477,3 +1699,6 @@ class PhoneOTP(models.Model):
             code=make_password(str(code).strip()),
             expires_at=expires_at,
         )
+
+
+

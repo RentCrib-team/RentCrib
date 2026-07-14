@@ -1,4 +1,4 @@
-# Standard/library
+﻿# Standard/library
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
@@ -64,7 +64,7 @@ from ..serializers import (
     ProviderWebhookRequestSerializer,
     ProviderWebhookResponseSerializer,
 )
-from .common import ok_response
+from .common import ok_response, error_response
 
 
 #Logger
@@ -212,7 +212,7 @@ def stripe_webhook(request):
                             "Content-Type": request.META.get("CONTENT_TYPE", ""),
                         },
                     },
-                ) 
+                )
         except Exception:
             receipt = None
 
@@ -328,7 +328,10 @@ def stripe_webhook(request):
                         today = timezone.now().date()
                         base = room.paid_until if (room.paid_until and room.paid_until > today) else today
                         room.paid_until = base + timedelta(days=30)
-                        room.save(update_fields=["paid_until"])
+
+                        # Payment webhook is the only trusted place that can publish a listing.
+                        room.set_status(Room.Lifecycle.ACTIVE)
+                        room.save(update_fields=["status", "paid_until"])
 
                     Notification.objects.create(
                         user=payment.user,
@@ -374,13 +377,13 @@ def stripe_webhook(request):
                     "stripe_webhook_session_expired payment_id=%s",
                     payment_id,
                 )
-        
+
         if receipt:
             receipt.processed = True
             receipt.processed_at = timezone.now()
             receipt.save(update_fields=["processed", "processed_at"])
-                
-        
+
+
         return ok_response(
             {
                 "detail": "checkout.session.expired processed",
@@ -390,7 +393,7 @@ def stripe_webhook(request):
             },
             status_code=status.HTTP_200_OK,
         )
-    
+
     return ok_response(
         {
             "detail": f"ignored event {evt_type}",
@@ -399,9 +402,9 @@ def stripe_webhook(request):
         },
         status_code=status.HTTP_200_OK,
     )
-    
-    
-    
+
+
+
 class ProviderWebhookView(APIView):
     permission_classes = [AllowAny]
 
@@ -559,12 +562,10 @@ class CreateListingCheckoutSessionView(APIView):
 
         # Only the property owner can pay to list this room
         if room.property_owner != request.user:
-            return Response(
-                {
-                    "ok": False,
-                    "message": "You are not allowed to pay for this listing.",
-                },
-                status=status.HTTP_403_FORBIDDEN,
+            return error_response(
+                message="You are not allowed to pay for this listing.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="permission_denied",
             )
 
         user = request.user
@@ -582,11 +583,11 @@ class CreateListingCheckoutSessionView(APIView):
                     name=user.get_full_name() or user.username,
                 )
             except Exception:
-                return Response(
-                    {"detail": "Unable to create Stripe customer."},
-                    status=status.HTTP_502_BAD_GATEWAY,
+                return error_response(
+                    message="Unable to create Stripe customer.",
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    code="stripe_customer_error",
                 )
-
             stripe_customer_id = getattr(stripe_customer, "id", None)
             if stripe_customer_id:
                 profile.stripe_customer_id = str(stripe_customer_id)
@@ -594,7 +595,7 @@ class CreateListingCheckoutSessionView(APIView):
 
         customer_id = profile.stripe_customer_id or None
 
-        # Listing fee – still £1.00 for 4 weeks
+        # Listing fee â€“ still Â£1.00 for 4 weeks
         amount_gbp = Decimal("1.00")
         amount_pence = int(amount_gbp * 100)
 
@@ -634,12 +635,12 @@ class CreateListingCheckoutSessionView(APIView):
                     }
                 ],
                 success_url=(
-                    f"{base}{success_path}"
-                    f"?session_id={{CHECKOUT_SESSION_ID}}&payment_id={payment.id}"
+                    f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/success"
+                    f"?session_id={{CHECKOUT_SESSION_ID}}&payment_id={payment.id}&room_id={room.id}"
                 ),
                 cancel_url=(
-                    f"{base}{cancel_path}"
-                    f"?payment_id={payment.id}"
+                    f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/cancel"
+                    f"?payment_id={payment.id}&room_id={room.id}"
                 ),
                 metadata={
                     "payment_id": str(payment.id),
@@ -648,9 +649,10 @@ class CreateListingCheckoutSessionView(APIView):
                 },
             )
         except Exception:
-            return Response(
-                {"detail": "Unable to create checkout session."},
-                status=status.HTTP_502_BAD_GATEWAY,
+            return error_response(
+                message="Unable to create checkout session.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="checkout_session_error",
             )
 
         # Safely extract session id + checkout URL (works for real Stripe + dict fakes)
@@ -710,9 +712,10 @@ class SavedCardsListView(APIView):
             pm_list = pm_list.to_dict()  # <--- THIS FIXES THE TYPE ISSUE
 
         except Exception:
-            return Response(
-                {"detail": "Unable to fetch saved cards from Stripe."},
-                status=status.HTTP_502_BAD_GATEWAY,
+            return error_response(
+                message="Unable to fetch saved cards from Stripe.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="stripe_fetch_cards_error",
             )
 
         cards = []
@@ -731,10 +734,10 @@ class SavedCardsListView(APIView):
                 }
             )
 
-        return Response({"cards": cards})  
-      
-      
-      
+        return Response({"cards": cards})
+
+
+
 class DetachSavedCardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -763,17 +766,19 @@ class DetachSavedCardView(APIView):
     def post(self, request, pm_id):
         profile = getattr(request.user, "profile", None)
         if not profile or not profile.stripe_customer_id:
-            return Response(
-                {"detail": "No Stripe customer found for this user."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                message="No Stripe customer found for this user.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="missing_stripe_customer",
             )
 
         try:
             _stripe_mod().PaymentMethod.detach(pm_id)
         except Exception:
-            return Response(
-                {"detail": "Unable to detach saved card."},
-                status=status.HTTP_502_BAD_GATEWAY,
+            return error_response(
+                message="Unable to detach saved card.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="detach_card_error",
             )
 
         return ok_response(
@@ -828,7 +833,7 @@ class PaymentTransactionsListView(ListAPIView):
 
         return qs
 
-    
+
     @extend_schema(
         responses={
             200: inline_serializer(
@@ -889,10 +894,10 @@ class PaymentTransactionsListView(ListAPIView):
         )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
-        
-        
-        
-        
+
+
+
+
 class PaymentTransactionDetailView(RetrieveAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = PaymentTransactionDetailSerializer
@@ -988,8 +993,8 @@ class CreateSetupIntentView(APIView):
             },
             status_code=status.HTTP_200_OK,
         )
-       
-               
+
+
 class SetDefaultSavedCardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1127,4 +1132,5 @@ class StripeCancelView(APIView):
             message="Stripe cancel redirect received.",
             status_code=status.HTTP_200_OK,
         )
-               
+
+

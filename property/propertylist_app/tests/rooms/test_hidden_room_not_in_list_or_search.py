@@ -17,13 +17,15 @@ def test_hidden_room_not_in_list_or_search():
         username="room_owner",
         password="pass12345",
     )
+    paid_until = timezone.now().date() + timedelta(days=30)
 
     Room.objects.create(
-        title="Public Room",
-        category=cat,
-        property_owner=owner,
-        price_per_month=600,
-        status="active",
+    title="Public Room",
+    category=cat,
+    property_owner=owner,
+    price_per_month=600,
+    status="active",
+    paid_until=paid_until,
     )
 
     Room.objects.create(

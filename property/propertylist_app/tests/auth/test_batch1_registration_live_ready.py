@@ -81,7 +81,7 @@ def test_register_requires_terms_version(api_client):
     assert "terms_version" in str(body)
 
 
-def test_register_rejects_duplicate_email(api_client):
+def test_register_resends_otp_for_duplicate_unverified_email(api_client):
     User = get_user_model()
     User.objects.create_user(
         username="existinguser",
@@ -92,7 +92,11 @@ def test_register_rejects_duplicate_email(api_client):
     url = reverse("api:auth-register")
     response = api_client.post(url, registration_payload(), format="json")
 
-    assert response.status_code == 400
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["data"]["need_otp"] is True
+    assert "not verified" in body["message"].lower()
 
 
 def test_register_rejects_duplicate_username(api_client):
