@@ -672,12 +672,12 @@ class TenancyRespondSerializer(serializers.Serializer):
 class TenancyDetailSerializer(serializers.ModelSerializer):
     can_leave_review = serializers.SerializerMethodField()
     review_button_reason = serializers.SerializerMethodField()
-    tenant_avatar = serializers.SerializerMethodField()
+    profile_image = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenancy
         fields = [
-            "id", "room", "landlord", "tenant", "tenant_avatar", "proposed_by",
+            "id", "room", "landlord", "tenant", "profile_image", "proposed_by",
             "move_in_date", "duration_months",
             "landlord_confirmed_at", "tenant_confirmed_at",
             "status",
@@ -691,7 +691,7 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         
         
     @extend_schema_field(OpenApiTypes.URI)
-    def get_tenant_avatar(self, obj):
+    def get_profile_image(self, obj):
         tenant = getattr(obj, "tenant", None)
         profile = getattr(tenant, "profile", None) if tenant else None
         avatar = getattr(profile, "avatar", None) if profile else None
@@ -2868,7 +2868,7 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         return {
             "id": other_user.id,
             "username": other_user.username,
-            "avatar": avatar_url,
+            "profile_image": avatar_url,
         }
         
 
