@@ -325,9 +325,9 @@ You can respond to this viewing request from your RentCrib account.
 },
 
         {
-        "key": "booking.confirmation",
-        "subject": "Your viewing request has been sent for {{ room.title }}",
-        "body": """
+    "key": "booking.confirmation",
+    "subject": "Your viewing request has been sent for {{ room.title }}",
+    "body": """
 {% extends "emails/base.html" %}
 
 {% block content %}
@@ -335,8 +335,8 @@ You can respond to this viewing request from your RentCrib account.
 <table
     role="presentation"
     width="100%"
-    cellspacing="0"
     cellpadding="0"
+    cellspacing="0"
     border="0"
     style="
         width:100%;
@@ -344,180 +344,31 @@ You can respond to this viewing request from your RentCrib account.
     "
 >
     <tr>
-        <td align="center" style="padding:0 0 18px;">
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:12px;
-                font-weight:700;
-                line-height:1.4;
-                letter-spacing:1.8px;
-                text-transform:uppercase;
-                color:#357af0;
-            ">
-                Viewing request
-            </p>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:0 0 20px;">
-
-            <table
-                role="presentation"
-                width="72"
-                height="72"
-                cellspacing="0"
-                cellpadding="0"
-                border="0"
-                style="
-                    width:72px;
-                    height:72px;
-                    border-collapse:separate;
-                    background-color:#eef4ff;
-                    border:1px solid #d8e5ff;
-                    border-radius:5px;
-                "
-            >
-                <tr>
-                    <td
-                        align="center"
-                        valign="middle"
-                        style="
-                            font-family:Arial, Helvetica, sans-serif;
-                            font-size:34px;
-                            line-height:72px;
-                        "
-                    >
-                        ✓
-                    </td>
-                </tr>
-            </table>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:0 0 14px;">
-
-            <h1 style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:30px;
-                font-weight:700;
-                line-height:1.25;
-                letter-spacing:-0.4px;
-                color:#172033;
-            ">
-                Your viewing request has been sent
-            </h1>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:0 0 28px;">
-
-            <p style="
-                max-width:500px;
-                margin:0 auto;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:16px;
-                line-height:1.7;
-                color:#606b7d;
-            ">
-                The landlord has received your request and can now review the proposed viewing.
-            </p>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td style="padding:0 0 22px;">
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:16px;
-                line-height:1.7;
-                color:#354052;
-            ">
-                Hi {{ user.first_name }},
-            </p>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td style="padding:0 0 24px;">
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:16px;
-                line-height:1.7;
-                color:#354052;
-            ">
-                Your request to view
-                <strong style="color:#172033;">{{ room.title }}</strong>
-                has been successfully sent to
-                <strong style="color:#172033;">{{ room.owner_name }}</strong>.
-            </p>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td style="padding:0 0 26px;">
+        <td align="center" style="padding:0;">
 
             <table
                 role="presentation"
                 width="100%"
-                cellspacing="0"
                 cellpadding="0"
+                cellspacing="0"
                 border="0"
                 style="
                     width:100%;
+                    max-width:620px;
                     border-collapse:separate;
-                    background-color:#f7f9fc;
-                    border:1px solid #e4e9f1;
+                    background-color:#ffffff;
+                    border:1px solid #dfe5ee;
                     border-radius:5px;
                 "
             >
                 <tr>
-                    <td style="padding:22px 24px;">
-
-                        <p style="
-                            margin:0 0 7px;
-                            font-family:Arial, Helvetica, sans-serif;
-                            font-size:12px;
-                            font-weight:700;
-                            line-height:1.4;
-                            letter-spacing:1.2px;
-                            text-transform:uppercase;
-                            color:#7b8798;
-                        ">
-                            Property
-                        </p>
-
-                        <p style="
-                            margin:0 0 20px;
-                            font-family:Arial, Helvetica, sans-serif;
-                            font-size:17px;
-                            font-weight:700;
-                            line-height:1.5;
-                            color:#172033;
-                        ">
-                            {{ room.title }}
-                        </p>
+                    <td style="padding:34px 34px 32px;">
 
                         <table
                             role="presentation"
                             width="100%"
-                            cellspacing="0"
                             cellpadding="0"
+                            cellspacing="0"
                             border="0"
                             style="
                                 width:100%;
@@ -525,70 +376,374 @@ You can respond to this viewing request from your RentCrib account.
                             "
                         >
                             <tr>
-                                <td
-                                    valign="top"
-                                    style="
-                                        width:50%;
-                                        padding:0 12px 0 0;
-                                    "
-                                >
-                                    <p style="
-                                        margin:0 0 5px;
-                                        font-family:Arial, Helvetica, sans-serif;
-                                        font-size:12px;
-                                        font-weight:700;
-                                        line-height:1.4;
-                                        letter-spacing:0.8px;
-                                        text-transform:uppercase;
-                                        color:#7b8798;
-                                    ">
-                                        Sent to
-                                    </p>
+                                <td align="center" style="padding:0 0 16px;">
 
                                     <p style="
                                         margin:0;
                                         font-family:Arial, Helvetica, sans-serif;
-                                        font-size:15px;
-                                        font-weight:600;
-                                        line-height:1.5;
-                                        color:#354052;
+                                        font-size:12px;
+                                        line-height:1.4;
+                                        font-weight:700;
+                                        letter-spacing:1.4px;
+                                        text-transform:uppercase;
+                                        color:#357af0;
                                     ">
-                                        {{ room.owner_name }}
+                                        Viewing request
                                     </p>
+
                                 </td>
+                            </tr>
 
-                                <td
-                                    valign="top"
-                                    style="
-                                        width:50%;
-                                        padding:0 0 0 12px;
-                                        border-left:1px solid #e4e9f1;
-                                    "
-                                >
-                                    <p style="
-                                        margin:0 0 5px;
+                            <tr>
+                                <td align="center" style="padding:0 0 10px;">
+
+                                    <h1 style="
+                                        margin:0;
                                         font-family:Arial, Helvetica, sans-serif;
-                                        font-size:12px;
+                                        font-size:28px;
+                                        line-height:1.3;
                                         font-weight:700;
-                                        line-height:1.4;
-                                        letter-spacing:0.8px;
-                                        text-transform:uppercase;
-                                        color:#7b8798;
+                                        letter-spacing:-0.4px;
+                                        color:#172033;
                                     ">
-                                        Reference
-                                    </p>
+                                        Your viewing request has been sent
+                                    </h1>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:0 0 30px;">
 
                                     <p style="
                                         margin:0;
                                         font-family:Arial, Helvetica, sans-serif;
                                         font-size:15px;
-                                        font-weight:600;
-                                        line-height:1.5;
-                                        word-break:break-word;
-                                        color:#354052;
+                                        line-height:1.65;
+                                        color:#6b7689;
                                     ">
-                                        {{ booking_id }}
+                                        The landlord has received your request and can now review it.
                                     </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:0 0 16px;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:16px;
+                                        line-height:1.7;
+                                        color:#4f5b70;
+                                    ">
+                                        Hi {{ user.first_name|default:"there" }},
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:0 0 26px;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:16px;
+                                        line-height:1.75;
+                                        color:#4f5b70;
+                                    ">
+                                        Your request to view
+                                        <strong style="color:#172033;">
+                                            {{ room.title }}
+                                        </strong>
+                                        has been successfully sent to
+                                        <strong style="color:#172033;">
+                                            {{ room.owner_name }}
+                                        </strong>.
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:0;">
+
+                                    <table
+                                        role="presentation"
+                                        width="100%"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                        style="
+                                            width:100%;
+                                            border-collapse:separate;
+                                            background-color:#f7f9fc;
+                                            border:1px solid #dfe6ef;
+                                            border-radius:4px;
+                                        "
+                                    >
+                                        <tr>
+                                            <td style="padding:20px 22px;">
+
+                                                <p style="
+                                                    margin:0 0 6px;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:11px;
+                                                    line-height:1.4;
+                                                    font-weight:700;
+                                                    letter-spacing:0.8px;
+                                                    text-transform:uppercase;
+                                                    color:#7a8497;
+                                                ">
+                                                    Viewing details
+                                                </p>
+
+                                                <p style="
+                                                    margin:0;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:17px;
+                                                    line-height:1.5;
+                                                    font-weight:700;
+                                                    color:#172033;
+                                                ">
+                                                    {{ room.title }}
+                                                </p>
+
+                                                <table
+                                                    role="presentation"
+                                                    width="100%"
+                                                    cellpadding="0"
+                                                    cellspacing="0"
+                                                    border="0"
+                                                    style="
+                                                        width:100%;
+                                                        margin-top:16px;
+                                                        border-collapse:collapse;
+                                                    "
+                                                >
+                                                    <tr>
+                                                        <td
+                                                            valign="top"
+                                                            style="
+                                                                width:50%;
+                                                                padding:14px 12px 0 0;
+                                                                border-top:1px solid #e4e9f0;
+                                                            "
+                                                        >
+
+                                                            <p style="
+                                                                margin:0 0 4px;
+                                                                font-family:Arial, Helvetica, sans-serif;
+                                                                font-size:11px;
+                                                                line-height:1.4;
+                                                                font-weight:700;
+                                                                letter-spacing:0.7px;
+                                                                text-transform:uppercase;
+                                                                color:#7a8497;
+                                                            ">
+                                                                Sent to
+                                                            </p>
+
+                                                            <p style="
+                                                                margin:0;
+                                                                font-family:Arial, Helvetica, sans-serif;
+                                                                font-size:14px;
+                                                                line-height:1.5;
+                                                                font-weight:600;
+                                                                color:#3f4b5f;
+                                                            ">
+                                                                {{ room.owner_name }}
+                                                            </p>
+
+                                                        </td>
+
+                                                        <td
+                                                            valign="top"
+                                                            style="
+                                                                width:50%;
+                                                                padding:14px 0 0 12px;
+                                                                border-top:1px solid #e4e9f0;
+                                                                border-left:1px solid #e4e9f0;
+                                                            "
+                                                        >
+
+                                                            <p style="
+                                                                margin:0 0 4px;
+                                                                font-family:Arial, Helvetica, sans-serif;
+                                                                font-size:11px;
+                                                                line-height:1.4;
+                                                                font-weight:700;
+                                                                letter-spacing:0.7px;
+                                                                text-transform:uppercase;
+                                                                color:#7a8497;
+                                                            ">
+                                                                Reference
+                                                            </p>
+
+                                                            <p style="
+                                                                margin:0;
+                                                                font-family:Arial, Helvetica, sans-serif;
+                                                                font-size:14px;
+                                                                line-height:1.5;
+                                                                font-weight:600;
+                                                                word-break:break-word;
+                                                                color:#3f4b5f;
+                                                            ">
+                                                                {{ booking_id }}
+                                                            </p>
+
+                                                        </td>
+                                                    </tr>
+                                                </table>
+
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:20px 0 0;">
+
+                                    <table
+                                        role="presentation"
+                                        width="100%"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                        style="
+                                            width:100%;
+                                            border-collapse:separate;
+                                            background-color:#f4f8ff;
+                                            border:1px solid #dce8fb;
+                                            border-left:4px solid #357af0;
+                                            border-radius:4px;
+                                        "
+                                    >
+                                        <tr>
+                                            <td style="padding:16px 18px;">
+
+                                                <p style="
+                                                    margin:0 0 5px;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:14px;
+                                                    line-height:1.5;
+                                                    font-weight:700;
+                                                    color:#172033;
+                                                ">
+                                                    What happens next?
+                                                </p>
+
+                                                <p style="
+                                                    margin:0;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:14px;
+                                                    line-height:1.65;
+                                                    color:#566176;
+                                                ">
+                                                    The landlord will review your request and respond through RentCrib. Your viewing is not confirmed until the landlord accepts it.
+                                                </p>
+
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:26px 0 0;">
+
+                                    <table
+                                        role="presentation"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                    >
+                                        <tr>
+                                            <td
+                                                align="center"
+                                                bgcolor="#357af0"
+                                                style="
+                                                    background-color:#357af0;
+                                                    border-radius:4px;
+                                                "
+                                            >
+                                                <a
+                                                    href="{{ cta_url }}"
+                                                    style="
+                                                        display:inline-block;
+                                                        min-width:190px;
+                                                        padding:15px 28px;
+                                                        font-family:Arial, Helvetica, sans-serif;
+                                                        font-size:15px;
+                                                        line-height:1.2;
+                                                        font-weight:700;
+                                                        color:#ffffff;
+                                                        text-decoration:none;
+                                                        text-align:center;
+                                                        border-radius:4px;
+                                                    "
+                                                >
+                                                    View request
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:20px 0 0;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:13px;
+                                        line-height:1.65;
+                                        color:#8892a3;
+                                    ">
+                                        This confirms your request was sent. It does not mean the viewing has been accepted yet.
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:22px 0 0;">
+
+                                    <p style="
+                                        margin:0 0 6px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        line-height:1.6;
+                                        color:#98a1af;
+                                    ">
+                                        If the button does not work, copy and paste this link into your browser:
+                                    </p>
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        line-height:1.6;
+                                        word-break:break-all;
+                                    ">
+                                        <a
+                                            href="{{ cta_url }}"
+                                            style="
+                                                color:#357af0;
+                                                text-decoration:underline;
+                                            "
+                                        >
+                                            {{ cta_url }}
+                                        </a>
+                                    </p>
+
                                 </td>
                             </tr>
                         </table>
@@ -599,113 +754,11 @@ You can respond to this viewing request from your RentCrib account.
 
         </td>
     </tr>
-
-    <tr>
-        <td style="padding:0 0 28px;">
-
-            <table
-                role="presentation"
-                width="100%"
-                cellspacing="0"
-                cellpadding="0"
-                border="0"
-                style="
-                    width:100%;
-                    border-collapse:separate;
-                    background-color:#fffaf0;
-                    border-left:4px solid #f4b740;
-                    border-radius:4px;
-                "
-            >
-                <tr>
-                    <td style="padding:17px 20px;">
-
-                        <p style="
-                            margin:0;
-                            font-family:Arial, Helvetica, sans-serif;
-                            font-size:14px;
-                            line-height:1.65;
-                            color:#5f5136;
-                        ">
-                            <strong style="color:#473b26;">What happens next?</strong><br>
-                            The landlord will review your request and respond through RentCrib. You can also continue the conversation from your account.
-                        </p>
-
-                    </td>
-                </tr>
-            </table>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:0 0 18px;">
-
-            {% include "emails/components/button.html" with button_url=cta_url button_text="View viewing request" %}
-
-        </td>
-    </tr>
-
-    <tr>
-        <td align="center" style="padding:0 0 28px;">
-
-            <p style="
-                margin:0 0 6px;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:13px;
-                line-height:1.6;
-                color:#8892a3;
-            ">
-                Button not working? Copy and paste this link into your browser:
-            </p>
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:13px;
-                line-height:1.6;
-                word-break:break-all;
-            ">
-                <a
-                    href="{{ cta_url }}"
-                    style="
-                        color:#357af0;
-                        text-decoration:underline;
-                    "
-                >
-                    {{ cta_url }}
-                </a>
-            </p>
-
-        </td>
-    </tr>
-
-    <tr>
-        <td
-            style="
-                padding-top:24px;
-                border-top:1px solid #edf0f5;
-            "
-        >
-
-            <p style="
-                margin:0;
-                font-family:Arial, Helvetica, sans-serif;
-                font-size:13px;
-                line-height:1.65;
-                color:#8892a3;
-            ">
-                This email confirms that your viewing request was submitted successfully. It does not mean the viewing has been accepted yet.
-            </p>
-
-        </td>
-    </tr>
 </table>
 
 {% endblock %}
 """,
-    },
-    
+},
     {
             "key": "booking.updated",
             "subject": "Your viewing time has been updated for {{ room.title }}",
