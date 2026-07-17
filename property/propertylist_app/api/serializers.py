@@ -602,9 +602,14 @@ class TenancyRespondSerializer(serializers.Serializer):
         def _set_schedule_fields():
             end_date = _compute_end_date(tenancy.move_in_date, tenancy.duration_months)
             # review opens end + 7 days (your rule)
+            # tenancy.review_open_at = timezone.make_aware(
+            #     timezone.datetime.combine(end_date, timezone.datetime.min.time())
+            # ) + timedelta(days=7)
+            
+            # Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
             tenancy.review_open_at = timezone.make_aware(
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
-            ) + timedelta(days=7)
+            ) + timedelta(minutes=30)
 
             # optional deadline: end + 60 days (safe default)
             tenancy.review_deadline_at = tenancy.review_open_at + timedelta(days=60)
