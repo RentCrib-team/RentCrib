@@ -8147,6 +8147,13 @@ components:
             type: string
             description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
               only.
+        other_user:
+          type: object
+          additionalProperties:
+            type: string
+            nullable: true
+          nullable: true
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -8172,6 +8179,7 @@ components:
       - in_bin
       - label
       - last_message
+      - other_user
       - participants
       - unread_count
     MessageThreadStateUpdateResponse:
@@ -8937,8 +8945,8 @@ components:
         listing_state:
           type: string
           description: |-
-            Returns one of: 'draft', 'active', 'expired', 'hidden'.
-            Used by the 'My Listings' page to group into tabs.
+            Returns one of: 'draft', 'active', 'expired', 'hidden', 'rented'.
+            Used by the 'My Listings' page to group listings into tabs.
           readOnly: true
         landlord_type:
           type: string
@@ -10095,8 +10103,8 @@ components:
         listing_state:
           type: string
           description: |-
-            Returns one of: 'draft', 'active', 'expired', 'hidden'.
-            Used by the 'My Listings' page to group into tabs.
+            Returns one of: 'draft', 'active', 'expired', 'hidden', 'rented'.
+            Used by the 'My Listings' page to group listings into tabs.
           readOnly: true
         landlord_type:
           type: string
@@ -11209,6 +11217,10 @@ components:
         tenant:
           type: integer
           readOnly: true
+        profile_image:
+          type: string
+          format: uri
+          readOnly: true
         proposed_by:
           type: integer
           readOnly: true
@@ -11288,6 +11300,7 @@ components:
       - landlord
       - landlord_confirmed_at
       - move_in_date
+      - profile_image
       - proposed_by
       - review_button_reason
       - review_deadline_at

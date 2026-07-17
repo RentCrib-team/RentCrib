@@ -1147,7 +1147,10 @@ class MyListingsView(generics.ListAPIView):
         # Annotate listing_state so serializer can reuse it
         qs = qs.annotate(
             listing_state=Case(
-                # draft: no paid_until at all
+                # Rented/unavailable must take priority over payment lifecycle.
+                When(is_available=False, then=Value("rented")),
+
+                # Draft: no paid_until at all.
                 When(paid_until__isnull=True, then=Value("draft")),
                 # expired: paid_until in the past OR hidden + past paid_until
                 When(
@@ -1163,7 +1166,7 @@ class MyListingsView(generics.ListAPIView):
             )
         )
 
-        if state in ("draft", "active", "expired", "hidden"):
+        if state in ("draft", "active", "expired", "hidden", "rented"):
             qs = qs.filter(listing_state=state)
 
         return qs.order_by("-created_at")
