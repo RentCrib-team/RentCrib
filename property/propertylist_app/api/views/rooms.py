@@ -657,14 +657,30 @@ class RoomPhotoUploadView(APIView):
         description="List approved room photos. Returns ok_response envelope.",
     )
     def get(self, request, pk):
-        """Return only approved images for a room (for grids on Step 4/5, room cards, etc.)."""
+        """
+        Return room photos based on the requester.
+
+        - The room owner can retrieve all uploaded photos, including pending
+        and rejected photos, so the frontend can display moderation status.
+        - Public users and other authenticated users receive approved photos only.
+        """
         room = get_object_or_404(Room, pk=pk)
-        photos = RoomImage.objects.approved().filter(room=room)
+
+        is_owner = (
+            request.user.is_authenticated
+            and room.property_owner_id == request.user.id
+        )
+
+        if is_owner:
+            photos = RoomImage.objects.filter(room=room).order_by("id")
+        else:
+            photos = RoomImage.objects.approved().filter(room=room).order_by("id")
+
         data = RoomImageSerializer(
-                    photos,
-                    many=True,
-                    context={"request": request},
-                    ).data
+            photos,
+            many=True,
+            context={"request": request},
+        ).data
 
         return ok_response(data, status_code=status.HTTP_200_OK)
 
