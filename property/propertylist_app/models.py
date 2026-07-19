@@ -1419,7 +1419,18 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=["user", "is_read", "created_at"]),
         ]
-
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "type", "target_type", "target_id"],
+                condition=Q(
+                    type="review_available",
+                    target_type="tenancy_review",
+                    target_id__isnull=False,
+                ),
+                name="uq_notification_review_per_user_tenancy",
+            ),
+        ]
+    
     def __str__(self):
         return f"Notif#{self.pk} to {getattr(self.user, 'username', self.user_id)} [{self.type}]"
 
