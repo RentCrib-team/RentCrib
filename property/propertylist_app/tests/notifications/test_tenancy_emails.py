@@ -4,7 +4,13 @@ from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from notifications.models import NotificationTemplate, OutboundNotification
-from propertylist_app.models import RoomCategorie, Room, Tenancy, TenancyExtension
+from propertylist_app.models import (
+    Notification,
+    Room,
+    RoomCategorie,
+    Tenancy,
+    TenancyExtension,
+)
 
 
 User = get_user_model()
@@ -143,6 +149,88 @@ def test_review_available_queues_email():
 
     assert OutboundNotification.objects.filter(user=landlord, template_key="tenancy.review_available").exists()
     assert OutboundNotification.objects.filter(user=tenant, template_key="tenancy.review_available").exists()
+
+
+
+@pytest.mark.django_db
+def test_review_available_not_queued_twice():
+    NotificationTemplate.objects.create(
+        key="tenancy.review_available",
+        channel="email",
+        subject="Review available",
+        body="Open: {{ cta_url }}",
+        is_active=True,
+    )
+
+    landlord = User.objects.create_user(
+        username="landlord_dup",
+        email="landlord_dup@example.com",
+        password="password123",
+    )
+    tenant = User.objects.create_user(
+        username="tenant_dup",
+        email="tenant_dup@example.com",
+        password="password123",
+    )
+
+    cat = RoomCategorie.objects.create(
+        name="Duplicate Review Category",
+        active=True,
+    )
+
+    room = Room.objects.create(
+        property_owner=landlord,
+        title="Duplicate Review Test Room",
+        description="desc",
+        price_per_month=800,
+        location="SW1A 1AE",
+        category=cat,
+    )
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=date.today() - timedelta(days=200),
+        duration_months=6,
+        status=Tenancy.STATUS_ENDED,
+        review_open_at=timezone.now() - timedelta(minutes=1),
+    )
+
+    from propertylist_app.tasks import task_tenancy_prompts_sweep
+
+    task_tenancy_prompts_sweep()
+    task_tenancy_prompts_sweep()
+
+    assert Notification.objects.filter(
+        user=landlord,
+        type="review_available",
+        target_type="tenancy_review",
+        target_id=tenancy.id,
+    ).count() == 1
+
+    assert Notification.objects.filter(
+        user=tenant,
+        type="review_available",
+        target_type="tenancy_review",
+        target_id=tenancy.id,
+    ).count() == 1
+
+    assert OutboundNotification.objects.filter(
+        user=landlord,
+        template_key="tenancy.review_available",
+    ).count() == 1
+
+    assert OutboundNotification.objects.filter(
+        user=tenant,
+        template_key="tenancy.review_available",
+    ).count() == 1
+
+
+
+
+
 
 
 @pytest.mark.django_db

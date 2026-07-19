@@ -133,7 +133,7 @@ font-size:16px;
 line-height:1.7;
 color:#4f5b70;
 ">
-Hi {{ user.first_name|default:user.username|default:"there" }},
+Hi {{ user.first_name|default:"there" }},
 </p>
 
 

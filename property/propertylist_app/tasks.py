@@ -397,38 +397,54 @@ def task_tenancy_prompts_sweep() -> int:
 
         # notify only the side(s) that have NOT reviewed yet
         if not landlord_done:
-            Notification.objects.create(
+            landlord_notification_exists = Notification.objects.filter(
                 user=t.landlord,
                 type="review_available",
-                title="Review available",
-                body=f"You can now leave a review for {t.room.title}.",
                 target_type="tenancy_review",
                 target_id=t.id,
-            )
-            _maybe_queue_reminder(
-                t.landlord,
-                "tenancy.review_available",
-                deep_link=f"/app/tenancies/{t.id}/review",
-                room_title=t.room.title,
-            )
-            count += 1
+            ).exists()
+
+            if not landlord_notification_exists:
+                Notification.objects.create(
+                    user=t.landlord,
+                    type="review_available",
+                    title="Review available",
+                    body=f"You can now leave a review for {t.room.title}.",
+                    target_type="tenancy_review",
+                    target_id=t.id,
+                )
+                _maybe_queue_reminder(
+                    t.landlord,
+                    "tenancy.review_available",
+                    deep_link=f"/app/tenancies/{t.id}/review",
+                    room_title=t.room.title,
+                )
+                count += 1
 
         if not tenant_done:
-            Notification.objects.create(
+            tenant_notification_exists = Notification.objects.filter(
                 user=t.tenant,
                 type="review_available",
-                title="Review available",
-                body=f"You can now leave a review for {t.room.title}.",
                 target_type="tenancy_review",
                 target_id=t.id,
-            )
-            _maybe_queue_reminder(
-                t.tenant,
-                "tenancy.review_available",
-                deep_link=f"/app/tenancies/{t.id}/review",
-                room_title=t.room.title,
-            )
-            count += 1
+            ).exists()
+
+            if not tenant_notification_exists:
+                Notification.objects.create(
+                    user=t.tenant,
+                    type="review_available",
+                    title="Review available",
+                    body=f"You can now leave a review for {t.room.title}.",
+                    target_type="tenancy_review",
+                    target_id=t.id,
+                )
+                _maybe_queue_reminder(
+                    t.tenant,
+                    "tenancy.review_available",
+                    deep_link=f"/app/tenancies/{t.id}/review",
+                    room_title=t.room.title,
+                )
+                count += 1
 
     # -------------------------------------------------
     # 3) REVEAL + RATING UPDATE (your schema)
