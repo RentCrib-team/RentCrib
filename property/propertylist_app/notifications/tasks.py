@@ -204,7 +204,8 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
     Returns number of bookings processed.
     """
     now = timezone.now()
-    completion_delay = timedelta(hours=1)
+    #completion_delay = timedelta(hours=1)
+    completion_delay = timedelta(minutes=10)
     completion_cutoff = now - completion_delay
     window_start = completion_cutoff - timedelta(hours=hours_back)
 
