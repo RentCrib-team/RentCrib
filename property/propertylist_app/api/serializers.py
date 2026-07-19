@@ -692,9 +692,7 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = fields
-        
-        
-        
+
     @extend_schema_field(OpenApiTypes.URI)
     def get_profile_image(self, obj):
         tenant = getattr(obj, "tenant", None)
@@ -713,39 +711,51 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
 
-        return url    
-        
+        return url
+
+    def _get_review_eligibility(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return False, "You must be signed in to leave a review."
+
+        if user.id == obj.tenant_id:
+            review_role = Review.ROLE_TENANT_TO_LANDLORD
+        elif user.id == obj.landlord_id:
+            review_role = Review.ROLE_LANDLORD_TO_TENANT
+        else:
+            return False, "You are not part of this tenancy."
+
+        if obj.status != "ended":
+            return False, "A review can only be left after the tenancy has ended."
+
+        if Review.objects.filter(
+            tenancy=obj,
+            role=review_role,
+        ).exists():
+            return False, "You have already submitted a review for this tenancy."
+
+        now = timezone.now()
+
+        if not obj.review_open_at:
+            return False, "Review window is not open yet."
+
+        if now < obj.review_open_at:
+            return False, "Review will be available later."
+
+        if obj.review_deadline_at and now > obj.review_deadline_at:
+            return False, "Review window has closed."
+
+        return True, "Review is available."
 
     def get_can_leave_review(self, obj):
-        now = timezone.now()
-
-        if not obj.review_open_at:
-            return False
-
-        if now < obj.review_open_at:
-            return False
-
-        if obj.review_deadline_at and now > obj.review_deadline_at:
-            return False
-
-        return True
+        can_leave_review, _ = self._get_review_eligibility(obj)
+        return can_leave_review
 
     def get_review_button_reason(self, obj):
-        now = timezone.now()
-
-        if not obj.review_open_at:
-            return "Review window is not open yet."
-
-        if now < obj.review_open_at:
-            return "Review will be available later."
-
-        if obj.review_deadline_at and now > obj.review_deadline_at:
-            return "Review window has closed."
-
-        return "Review is available."
-
-
-
+        _, reason = self._get_review_eligibility(obj)
+        return reason
 
 class UserReviewSummarySerializer(serializers.Serializer):
     landlord_count = serializers.IntegerField()
