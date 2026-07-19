@@ -678,20 +678,63 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
     can_leave_review = serializers.SerializerMethodField()
     review_button_reason = serializers.SerializerMethodField()
     profile_image = serializers.SerializerMethodField()
+    tenant_name = serializers.SerializerMethodField()
+    landlord_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenancy
         fields = [
-            "id", "room", "landlord", "tenant", "profile_image", "proposed_by",
-            "move_in_date", "duration_months",
-            "landlord_confirmed_at", "tenant_confirmed_at",
-            "status",
-            "review_open_at", "review_deadline_at",
-            "can_leave_review", "review_button_reason",
-            "still_living_check_at", "still_living_confirmed_at",
-            "created_at", "updated_at",
-        ]
+                "id",
+                "room",
+                "landlord",
+                "landlord_name",
+                "tenant",
+                "tenant_name",
+                "profile_image",
+                "proposed_by",
+                "move_in_date",
+                "duration_months",
+                "landlord_confirmed_at",
+                "tenant_confirmed_at",
+                "status",
+                "review_open_at",
+                "review_deadline_at",
+                "can_leave_review",
+                "review_button_reason",
+                "still_living_check_at",
+                "still_living_confirmed_at",
+                "created_at",
+                "updated_at",
+            ]
+                    
         read_only_fields = fields
+        
+        
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_tenant_name(self, obj):
+        tenant = getattr(obj, "tenant", None)
+
+        if tenant is None:
+            return None
+
+        full_name = tenant.get_full_name().strip()
+
+        return full_name or tenant.username
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_name(self, obj):
+        landlord = getattr(obj, "landlord", None)
+
+        if landlord is None:
+            return None
+
+        full_name = landlord.get_full_name().strip()
+
+        return full_name or landlord.username
+        
+        
+        
 
     @extend_schema_field(OpenApiTypes.URI)
     def get_profile_image(self, obj):

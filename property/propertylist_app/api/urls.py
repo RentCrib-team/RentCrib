@@ -42,7 +42,7 @@ from propertylist_app.api.views import (
     MessageThreadStateView,MessageStatsView,InboxListView,
 
     # Bookings & Availability
-    create_booking, BookingListCreateView, BookingDetailView, BookingCancelView,BookingRescheduleView,
+    create_booking, BookingListCreateView, LandlordViewingsListView, BookingDetailView, BookingCancelView, BookingRescheduleView,
     RoomAvailabilityView, RoomAvailabilitySlotListCreateView, RoomAvailabilitySlotDeleteView, RoomAvailabilityPublicView,  FindAddressView,BookingDeleteView,
     BookingSuspendView,
 
@@ -179,9 +179,23 @@ urlpatterns = [
 
 
     # --- Bookings / viewings ---
-    path("bookings/create/",               create_booking,                  name="booking-create"),
-    path("bookings/",                      BookingListCreateView.as_view(), name="bookings-list-create"),
-    path("bookings/<int:pk>/",             BookingDetailView.as_view(),     name="booking-detail"),
+    # --- Bookings / viewings ---
+    path("bookings/create/", create_booking, name="booking-create"),
+    path(
+        "bookings/landlord-viewings/",
+        LandlordViewingsListView.as_view(),
+        name="landlord-viewings-list",
+    ),
+    path(
+        "bookings/",
+        BookingListCreateView.as_view(),
+        name="bookings-list-create",
+    ),
+    path(
+        "bookings/<int:pk>/",
+        BookingDetailView.as_view(),
+        name="booking-detail",
+    ),
     path("bookings/<int:pk>/cancel/",      BookingCancelView.as_view(),     name="booking-cancel"),
     path("bookings/<int:pk>/reschedule/",  BookingRescheduleView.as_view(), name="booking-reschedule",),
     path("rooms/<int:pk>/availability/",   RoomAvailabilityView.as_view(),  name="room-availability"),

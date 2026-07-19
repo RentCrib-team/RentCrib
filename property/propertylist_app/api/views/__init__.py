@@ -80,6 +80,7 @@ from .messaging import (
 from .bookings import (
     create_booking,
     BookingListCreateView,
+    LandlordViewingsListView,
     BookingDetailView,
     BookingCancelView,
     BookingDeleteView,
