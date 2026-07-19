@@ -15,9 +15,10 @@ def compute_review_window(move_in_date, duration_months):
     end_midnight = timezone.make_aware(datetime.combine(end_date, time.min))
 
 
-    # Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
+    #Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
     #review_open_at = end_midnight + timedelta(days=7)
-    review_open_at = end_midnight + timedelta(minutes=30)
+    #review_open_at = end_midnight + timedelta(minutes=30)
+    review_open_at = end_midnight + timedelta(minutes=10)
     review_deadline_at = review_open_at + timedelta(days=30)
     still_living_check_at = end_midnight - timedelta(days=7)
 
