@@ -274,9 +274,12 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                     template_key="booking.completed",
                     scheduled_for=now,
                     context={
+                        "user": {
+                            "first_name": user.first_name,
+                        },
                         "booking_id": booking.id,
                         "room_title": room_title,
-                        "ended_at": booking.end.isoformat(),
+                        "ended_at": end_str,
                         "cta_url": _inbox_link(),
                     },
                 )
