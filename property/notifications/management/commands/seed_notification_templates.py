@@ -1191,49 +1191,362 @@ You can respond to this viewing request from your RentCrib account.
     # Tenancy lifecycle
     # -------------------------
     {
-        "key": "tenancy.proposed",
-        "subject": "Tenancy information received for {{ room_title }}",
-        "body": """
-    {% extends "emails/base.html" %}
+    "key": "tenancy.proposed",
+    "subject": "Tenancy information received for {{ room_title }}",
+    "body": """
+{% extends "emails/base.html" %}
 
-    {% block content %}
+{% block content %}
 
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy information received
-    </h2>
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+    <tr>
+        <td align="center" style="padding:0;">
 
-    <p>
-    Hi {{ user.first_name }},
-    </p>
+            <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="
+                    width:100%;
+                    max-width:620px;
+                    border-collapse:separate;
+                    background-color:#ffffff;
+                    border:1px solid #dfe5ee;
+                    border-radius:5px;
+                "
+            >
+                <tr>
+                    <td style="padding:34px 34px 32px;">
 
-    <p>
-    Tenancy information has been submitted for:
-    </p>
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="
+                                width:100%;
+                                border-collapse:collapse;
+                            "
+                        >
+                            <tr>
+                                <td align="center" style="padding:0 0 16px;">
 
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        line-height:1.4;
+                                        font-weight:700;
+                                        letter-spacing:1.4px;
+                                        text-transform:uppercase;
+                                        color:#357af0;
+                                    ">
+                                        Tenancy information
+                                    </p>
 
-    <p>
-    Please review the information recorded and confirm that it matches the tenancy agreement you agreed with the other party outside RentCrib.
-    </p>
+                                </td>
+                            </tr>
 
-    <p>
-    RentCrib does not create tenancy agreements. We help both parties keep track of the tenancy information they have agreed.
-    </p>
+                            <tr>
+                                <td align="center" style="padding:0 0 10px;">
 
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Review tenancy information" %}
+                                    <h1 style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:28px;
+                                        line-height:1.3;
+                                        font-weight:700;
+                                        letter-spacing:-0.4px;
+                                        color:#172033;
+                                    ">
+                                        Tenancy information received
+                                    </h1>
 
-    <p>
-    Thank you for using RentCrib.
-    </p>
+                                </td>
+                            </tr>
 
-    {% endblock %}
-    """,
-    },
+                            <tr>
+                                <td align="center" style="padding:0 0 30px;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:15px;
+                                        line-height:1.65;
+                                        color:#6b7689;
+                                    ">
+                                        Please review the information recorded for this tenancy.
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:0 0 16px;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:16px;
+                                        line-height:1.7;
+                                        color:#4f5b70;
+                                    ">
+                                        Hi {{ user.first_name|default:"there" }},
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:0 0 26px;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:16px;
+                                        line-height:1.75;
+                                        color:#4f5b70;
+                                    ">
+                                        Tenancy information has been submitted for
+                                        <strong style="color:#172033;">
+                                            {{ room_title }}
+                                        </strong>.
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:0;">
+
+                                    <table
+                                        role="presentation"
+                                        width="100%"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                        style="
+                                            width:100%;
+                                            border-collapse:separate;
+                                            background-color:#f7f9fc;
+                                            border:1px solid #dfe6ef;
+                                            border-radius:4px;
+                                        "
+                                    >
+                                        <tr>
+                                            <td style="padding:20px 22px;">
+
+                                                <p style="
+                                                    margin:0 0 6px;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:11px;
+                                                    line-height:1.4;
+                                                    font-weight:700;
+                                                    letter-spacing:0.8px;
+                                                    text-transform:uppercase;
+                                                    color:#7a8497;
+                                                ">
+                                                    Property
+                                                </p>
+
+                                                <p style="
+                                                    margin:0;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:17px;
+                                                    line-height:1.5;
+                                                    font-weight:700;
+                                                    color:#172033;
+                                                ">
+                                                    {{ room_title }}
+                                                </p>
+
+                                                <p style="
+                                                    margin:16px 0 0;
+                                                    padding-top:14px;
+                                                    border-top:1px solid #e4e9f0;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:14px;
+                                                    line-height:1.65;
+                                                    color:#566176;
+                                                ">
+                                                    Review the recorded information and confirm that it matches the tenancy agreement you made with the other party outside RentCrib.
+                                                </p>
+
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="padding:20px 0 0;">
+
+                                    <table
+                                        role="presentation"
+                                        width="100%"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                        style="
+                                            width:100%;
+                                            border-collapse:separate;
+                                            background-color:#f4f8ff;
+                                            border:1px solid #dce8fb;
+                                            border-left:4px solid #357af0;
+                                            border-radius:4px;
+                                        "
+                                    >
+                                        <tr>
+                                            <td style="padding:16px 18px;">
+
+                                                <p style="
+                                                    margin:0 0 5px;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:14px;
+                                                    line-height:1.5;
+                                                    font-weight:700;
+                                                    color:#172033;
+                                                ">
+                                                    Important to know
+                                                </p>
+
+                                                <p style="
+                                                    margin:0;
+                                                    font-family:Arial, Helvetica, sans-serif;
+                                                    font-size:14px;
+                                                    line-height:1.65;
+                                                    color:#566176;
+                                                ">
+                                                    RentCrib does not create or replace tenancy agreements. We help both parties record and keep track of the tenancy information they agreed outside RentCrib.
+                                                </p>
+
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:26px 0 0;">
+
+                                    <table
+                                        role="presentation"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                    >
+                                        <tr>
+                                            <td
+                                                align="center"
+                                                bgcolor="#357af0"
+                                                style="
+                                                    background-color:#357af0;
+                                                    border-radius:4px;
+                                                "
+                                            >
+                                                <a
+                                                    href="{{ cta_url }}"
+                                                    style="
+                                                        display:inline-block;
+                                                        min-width:220px;
+                                                        padding:15px 28px;
+                                                        font-family:Arial, Helvetica, sans-serif;
+                                                        font-size:15px;
+                                                        line-height:1.2;
+                                                        font-weight:700;
+                                                        color:#ffffff;
+                                                        text-decoration:none;
+                                                        text-align:center;
+                                                        border-radius:4px;
+                                                    "
+                                                >
+                                                    Review tenancy information
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:20px 0 0;">
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:13px;
+                                        line-height:1.65;
+                                        color:#8892a3;
+                                    ">
+                                        Review the information carefully before confirming it.
+                                    </p>
+
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td align="center" style="padding:22px 0 0;">
+
+                                    <p style="
+                                        margin:0 0 6px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        line-height:1.6;
+                                        color:#98a1af;
+                                    ">
+                                        If the button does not work, copy and paste this link into your browser:
+                                    </p>
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:12px;
+                                        line-height:1.6;
+                                        word-break:break-all;
+                                    ">
+                                        <a
+                                            href="{{ cta_url }}"
+                                            style="
+                                                color:#357af0;
+                                                text-decoration:underline;
+                                            "
+                                        >
+                                            {{ cta_url }}
+                                        </a>
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
+    
     {
         "key": "tenancy.updated",
         "subject": "Tenancy information updated for {{ room_title }}",
