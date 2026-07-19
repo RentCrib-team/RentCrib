@@ -397,22 +397,18 @@ def task_tenancy_prompts_sweep() -> int:
 
         # notify only the side(s) that have NOT reviewed yet
         if not landlord_done:
-            landlord_notification_exists = Notification.objects.filter(
+            _, notification_created = Notification.objects.get_or_create(
                 user=t.landlord,
                 type="review_available",
                 target_type="tenancy_review",
                 target_id=t.id,
-            ).exists()
+                defaults={
+                    "title": "Review available",
+                    "body": f"You can now leave a review for {t.room.title}.",
+                },
+            )
 
-            if not landlord_notification_exists:
-                Notification.objects.create(
-                    user=t.landlord,
-                    type="review_available",
-                    title="Review available",
-                    body=f"You can now leave a review for {t.room.title}.",
-                    target_type="tenancy_review",
-                    target_id=t.id,
-                )
+            if notification_created:
                 _maybe_queue_reminder(
                     t.landlord,
                     "tenancy.review_available",
@@ -422,22 +418,18 @@ def task_tenancy_prompts_sweep() -> int:
                 count += 1
 
         if not tenant_done:
-            tenant_notification_exists = Notification.objects.filter(
+            _, notification_created = Notification.objects.get_or_create(
                 user=t.tenant,
                 type="review_available",
                 target_type="tenancy_review",
                 target_id=t.id,
-            ).exists()
+                defaults={
+                    "title": "Review available",
+                    "body": f"You can now leave a review for {t.room.title}.",
+                },
+            )
 
-            if not tenant_notification_exists:
-                Notification.objects.create(
-                    user=t.tenant,
-                    type="review_available",
-                    title="Review available",
-                    body=f"You can now leave a review for {t.room.title}.",
-                    target_type="tenancy_review",
-                    target_id=t.id,
-                )
+            if notification_created:
                 _maybe_queue_reminder(
                     t.tenant,
                     "tenancy.review_available",
