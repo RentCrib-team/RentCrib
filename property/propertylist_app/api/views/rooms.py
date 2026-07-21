@@ -54,6 +54,7 @@ from propertylist_app.validators import (
 )
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.permissions import IsAdminOrReadOnly, IsOwnerOrReadOnly
+from propertylist_app.api.throttling import RoomCreateThrottle
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import standard_response_serializer,standard_paginated_response_serializer
 from propertylist_app.api.serializers import (
@@ -219,7 +220,7 @@ class RoomListGV(CachedAnonymousGETMixin, generics.ListAPIView):
       
       
 class RoomAV(APIView):
-    throttle_classes = [AnonRateThrottle]
+    throttle_classes = [AnonRateThrottle, RoomCreateThrottle]
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 
