@@ -410,7 +410,9 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
             .prefetch_related(
                 Prefetch(
                     "roomimage_set",
-                    queryset=RoomImage.objects.filter(status__in=["approved", "pending"]).order_by("id"),
+                    queryset=RoomImage.objects.filter(
+                        status="approved"
+                    ).order_by("id"),
                     to_attr="prefetched_approved_images",
                 )
             )
@@ -641,7 +643,7 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
             qs = qs.annotate(
                 _has_approved_photo=Exists(approved_photo_exists)
             ).filter(
-                Q(_has_approved_photo=True) | (Q(image__isnull=False) & ~Q(image=""))
+                _has_approved_photo=True
             )
 
 

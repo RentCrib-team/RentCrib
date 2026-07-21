@@ -1286,6 +1286,7 @@ class TokenRefreshView(APIView):
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [PasswordResetScopedThrottle]
+    throttle_scope = "password-reset"
     versioning_class = None
 
     @extend_schema(

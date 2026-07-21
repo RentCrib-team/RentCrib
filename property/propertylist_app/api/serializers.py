@@ -32,10 +32,10 @@ from propertylist_app.validators import (
     validate_listing_photos, sanitize_search_text, validate_numeric_range,
     validate_radius_miles, validate_pagination, validate_ordering,
     normalise_price, normalise_phone, normalise_name, normalise_email,
-    sanitize_plain_text,
+    sanitize_plain_text, validate_plain_text,
     assert_not_duplicate_listing, assert_no_duplicate_files,
     enforce_user_caps,
-)
+    )
 from propertylist_app.services.geo import geocode_postcode_cached
 
 from django.utils import timezone
@@ -1679,37 +1679,25 @@ class RoomSerializer(serializers.ModelSerializer):
                 .first()
             )
 
-        if first_image and first_image.image:
-            url = first_image.image.url
-        elif getattr(obj, "image", None):
-            url = obj.image.url
-        else:
+        if not first_image or not first_image.image:
             return None
 
-        request = self.context.get("request")
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+        url = first_image.image.url
 
         request = self.context.get("request")
         if request is not None:
             return request.build_absolute_uri(url)
+
         return url
 
     @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj):
-        val = getattr(obj, "photo_count", None)
-        if val is not None:
-            return val
-
+    def get_photo_count(self, obj) -> int:
         approved_images = getattr(obj, "prefetched_approved_images", None)
-        if approved_images is not None:
-            approved = len(approved_images)
-        else:
-            approved = obj.roomimage_set.filter(status="approved").count()
 
-        legacy = 1 if getattr(obj, "image", None) else 0
-        return approved + legacy
+        if approved_images is not None:
+            return len(approved_images)
+
+        return obj.roomimage_set.filter(status="approved").count()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1852,6 +1840,9 @@ class SearchFiltersSerializer(serializers.Serializer):
     def validate_postcode(self, value):
         value = sanitize_plain_text(value, max_len=20).upper()
         return normalize_uk_postcode(value)
+    
+ 
+    
 
     def validate_street(self, value):
         return sanitize_plain_text(value, max_len=120)
@@ -2346,6 +2337,31 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return normalize_uk_postcode(value)
         except Exception:
             raise serializers.ValidationError("Invalid UK postcode.")
+        
+        
+    def validate_occupation(self, value):
+        if value is None:
+            return ""
+
+        value = validate_plain_text(value)
+
+        if not value:
+            return ""
+
+        return value
+
+    def validate_about_you(self, value):
+        if value is None:
+            return ""
+
+        value = validate_plain_text(value)
+
+        if not value:
+            return ""
+
+        return value    
+        
+        
 
     def validate_date_of_birth(self, value):
         if not value:
@@ -2659,15 +2675,19 @@ class ContactMessageSerializer(serializers.ModelSerializer):
         return normalise_email(value)
 
     def validate_subject(self, value):
-        value = sanitize_plain_text(value, max_len=200)
+        value = validate_plain_text(value, max_len=200)
+
         if not value:
             raise serializers.ValidationError("Subject is required.")
+
         return value
 
     def validate_message(self, value):
-        value = sanitize_plain_text(value, max_len=5000)
+        value = validate_plain_text(value, max_len=5000)
+
         if not value:
             raise serializers.ValidationError("Message is required.")
+
         return value
 
 

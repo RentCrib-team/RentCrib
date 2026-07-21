@@ -5,7 +5,7 @@ Usage everywhere:
     from propertylist_app.validators import validate_price, normalize_uk_postcode, ...
 """
 
-# ✅ FIX: import image validators RELATIVELY from this package (no self-import)
+#  FIX: import image validators RELATIVELY from this package (no self-import)
 from .images import (
     validate_avatar_image,
     validate_listing_photos,
@@ -57,6 +57,7 @@ from .security import (
     assert_not_duplicate_listing,
     
     sanitize_plain_text,
+    validate_plain_text,
     normalise_email,
 )
 
@@ -90,4 +91,5 @@ __all__ = [
     # normalisation / quotas
     "normalise_price", "normalize_price", "normalise_phone", "normalise_name", "enforce_user_caps",
     "assert_not_duplicate_listing",
+    "validate_plain_text",
 ]
