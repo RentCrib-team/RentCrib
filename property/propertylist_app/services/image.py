@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
+from PIL import Image, ImageFilter
 
-from PIL import Image
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -339,3 +339,38 @@ def generate_thumbnails_and_return_paths(original_file, base_dir: str, stem: str
         out[suffix.strip("_")] = rel_name
 
     return out
+
+
+def generate_blurred_preview(original_file, stem: str) -> str:
+    """
+    Creates a blurred WEBP preview for pending moderation images.
+    """
+
+    original_file.seek(0)
+
+    img = Image.open(original_file)
+
+    img = _ensure_rgb(img)
+
+    img = img.filter(
+        ImageFilter.GaussianBlur(radius=12)
+    )
+
+    buffer = io.BytesIO()
+
+    img.save(
+        buffer,
+        format="WEBP",
+        quality=80,
+    )
+
+    buffer.seek(0)
+
+    path = f"room_images/previews/{stem}_blur.webp"
+
+    default_storage.save(
+        path,
+        ContentFile(buffer.read())
+    )
+
+    return path
