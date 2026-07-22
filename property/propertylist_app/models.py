@@ -860,7 +860,19 @@ class RoomImageQuerySet(models.QuerySet):
 
 class RoomImage(models.Model):
     room = models.ForeignKey("Room", on_delete=models.PROTECT)
-    image = models.ImageField(upload_to="room_images/", null=True, blank=True)
+
+    image = models.ImageField(
+        upload_to="room_images/",
+        null=True,
+        blank=True,
+    )
+
+    preview_image = models.ImageField(
+        upload_to="room_images/previews/",
+        null=True,
+        blank=True,
+    )
+
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     status = models.CharField(

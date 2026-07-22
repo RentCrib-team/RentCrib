@@ -10,7 +10,7 @@ from datetime import date as _date  # add if not already present
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.conf import settings
-
+from propertylist_app.services.image import generate_blurred_preview
 from typing import Optional, Any, Dict, List
 from drf_spectacular.types import OpenApiTypes
 
@@ -2700,22 +2700,32 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RoomImage
-        fields = ["id", "room", "image", "status"]
+        fields = [
+            "id",
+            "room",
+            "image",
+            "status",
+            "preview_image",
+        ]
         read_only_fields = ["room", "status"]
 
     def get_image(self, obj):
-        if not obj.image:
-            return None
 
-        url = obj.image.url
         request = self.context.get("request")
+
+        if obj.status == "pending" and obj.preview_image:
+            url = obj.preview_image.url
+        elif obj.image:
+            url = obj.image.url
+        else:
+            return None
 
         if request is not None:
             return request.build_absolute_uri(url)
 
         return url
 
-    # generate thumbnails after upload
+        # generate thumbnails after upload
     def create(self, validated_data):
             request = self.context.get("request")
 
@@ -2730,6 +2740,24 @@ class RoomImageSerializer(serializers.ModelSerializer):
             validated_data["category"] = room.category
 
             obj = super().create(validated_data)
+            
+
+            f = validated_data.get("image")
+
+            if f:
+                stem = get_random_string(12)
+
+                try:
+                    preview_path = generate_blurred_preview(
+                        f,
+                        stem
+                    )
+
+                    obj.preview_image = preview_path
+                    obj.save(update_fields=["preview_image"])
+
+                except Exception:
+                    pass
 
             f = validated_data.get("image")
             if f:
