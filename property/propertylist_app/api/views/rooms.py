@@ -771,6 +771,30 @@ class RoomPhotoUploadView(APIView):
             image=file_obj,
             status="pending",
         )
+        
+                # Generate the blurred preview used while moderation is pending.
+        try:
+            from django.utils.crypto import get_random_string
+            from propertylist_app.services.image import generate_blurred_preview
+
+            image.image.open("rb")
+
+            preview_path = generate_blurred_preview(
+                image.image,
+                get_random_string(12),
+            )
+
+            image.preview_image = preview_path
+            image.save(update_fields=["preview_image"])
+
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to generate preview for RoomImage id=%s",
+                image.id,
+            )
+        
 
         #  AI moderation (non-blocking, safe)
         try:
