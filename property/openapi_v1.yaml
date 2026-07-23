@@ -8984,9 +8984,29 @@ components:
         main_photo:
           type: string
           format: uri
+          description: |-
+            Return the first visible RoomImage.
+
+            Pending owner photos use their blurred preview when available.
+            Public seekers only reach approved photos.
           readOnly: true
         photo_count:
           type: integer
+          description: |-
+            Count exactly the same RoomImage records exposed through `photos`.
+
+            Public seekers:
+            - approved count only
+
+            Owner:
+            - approved + pending + rejected count
+
+            Legacy Room.image is counted only when no RoomImage records exist.
+          readOnly: true
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomPhotoResponse'
           readOnly: true
         listing_state:
           type: string
@@ -10142,9 +10162,29 @@ components:
         main_photo:
           type: string
           format: uri
+          description: |-
+            Return the first visible RoomImage.
+
+            Pending owner photos use their blurred preview when available.
+            Public seekers only reach approved photos.
           readOnly: true
         photo_count:
           type: integer
+          description: |-
+            Count exactly the same RoomImage records exposed through `photos`.
+
+            Public seekers:
+            - approved count only
+
+            Owner:
+            - approved + pending + rejected count
+
+            Legacy Room.image is counted only when no RoomImage records exist.
+          readOnly: true
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomPhotoResponse'
           readOnly: true
         listing_state:
           type: string
@@ -10684,6 +10724,7 @@ components:
       - owner_username
       - paid_until
       - photo_count
+      - photos
       - price_per_month
       - property_owner
       - property_type
@@ -10867,6 +10908,10 @@ components:
             * `rejected` - Rejected
           x-spec-enum-id: de3702061fc1d433
           readOnly: true
+        preview_image:
+          type: string
+          format: uri
+          nullable: true
       required:
       - id
       - image
@@ -10978,6 +11023,48 @@ components:
       required:
       - data
       - message
+    RoomPhotoResponse:
+      type: object
+      description: Schema and response structure for a photo embedded in RoomSerializer.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          nullable: true
+        image:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
+        url:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
+        original_image:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
+        preview_image:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
+        status:
+          type: string
+          readOnly: true
+        is_main:
+          type: boolean
+          readOnly: true
+      required:
+      - id
+      - image
+      - is_main
+      - original_image
+      - preview_image
+      - status
+      - url
     RoomPhotoUploadRequest:
       type: object
       properties:
