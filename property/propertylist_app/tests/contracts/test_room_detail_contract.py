@@ -159,6 +159,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "parking_available",
         "pets_allowed",
         "photo_count",
+        "photos",
         "preferred_flatmate_gender",
         "preferred_flatmate_language",
         "preferred_flatmate_lgbtqia",

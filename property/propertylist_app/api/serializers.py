@@ -818,6 +818,45 @@ class CreateViewingBookingSerializer(serializers.Serializer):
 
 
 
+
+class RoomPhotoResponseSerializer(serializers.Serializer):
+    """
+    Schema and response structure for a photo embedded in RoomSerializer.
+    """
+
+    id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    url = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    original_image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    preview_image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    status = serializers.CharField(
+        read_only=True,
+    )
+    is_main = serializers.BooleanField(
+        read_only=True,
+    )
+
+
+
+
+
+
+
 # --------------------
 # Room Serializer
 # --------------------
@@ -839,6 +878,7 @@ class RoomSerializer(serializers.ModelSerializer):
     owner_avatar = serializers.SerializerMethodField(read_only=True)
     main_photo = serializers.SerializerMethodField(read_only=True)
     photo_count = serializers.SerializerMethodField(read_only=True)
+    photos = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
     landlord_type = serializers.SerializerMethodField(read_only=True)
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
@@ -1164,44 +1204,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return url
 
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_main_photo(self, obj) -> str:
-        request = self.context.get("request")
 
-        images_qs = obj.roomimage_set.filter(
-            status__in=["approved", "pending"]
-        ).order_by("id")
-
-        approved_photo = images_qs.first()
-
-        if approved_photo and approved_photo.image:
-            url = approved_photo.image.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-
-        legacy_image = getattr(obj, "image", None)
-
-        if legacy_image:
-            url = legacy_image.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-
-        return ""
-
-    @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj) -> int:
-        approved_count = obj.roomimage_set.filter(status="approved").count()
-        legacy_image = getattr(obj, "image", None)
-
-        if approved_count:
-            return approved_count
-
-        if legacy_image:
-            return 1
-
-        return 0
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1666,23 +1669,58 @@ class RoomSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(url)
         return url
 
-    @extend_schema_field(OpenApiTypes.URI)
-    def get_main_photo(self, obj) -> str | None:
+    def _viewer_is_room_owner(self, obj) -> bool:
+        """
+        Return True only when the authenticated requester owns this room.
+
+        Public seekers must only receive approved photos.
+        The room owner may also see pending and rejected photos so they can
+        understand the moderation state of every upload.
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        return bool(
+            user
+            and user.is_authenticated
+            and obj.property_owner_id == user.id
+        )
+
+    def _visible_room_images(self, obj):
+        """
+        Return the RoomImage records visible to the current requester.
+
+        Owner:
+        - approved
+        - pending
+        - rejected
+
+        Public seeker/non-owner:
+        - approved only
+        """
+        if self._viewer_is_room_owner(obj):
+            return obj.roomimage_set.filter(
+                status__in=["approved", "pending", "rejected"]
+            ).order_by("id")
+
         approved_images = getattr(obj, "prefetched_approved_images", None)
 
         if approved_images is not None:
-            first_image = approved_images[0] if approved_images else None
-        else:
-            first_image = (
-                obj.roomimage_set.filter(status="approved")
-                .order_by("id")
-                .first()
-            )
+            return approved_images
 
-        if not first_image or not first_image.image:
+        return obj.roomimage_set.filter(status="approved").order_by("id")
+
+    def _absolute_media_url(self, file_field) -> str | None:
+        """
+        Convert an ImageField into a frontend-ready absolute URL.
+        """
+        if not file_field:
             return None
 
-        url = first_image.image.url
+        try:
+            url = file_field.url
+        except (ValueError, AttributeError):
+            return None
 
         request = self.context.get("request")
         if request is not None:
@@ -1690,14 +1728,114 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return url
 
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_main_photo(self, obj) -> str | None:
+        """
+        Return the first visible RoomImage.
+
+        Pending owner photos use their blurred preview when available.
+        Public seekers only reach approved photos.
+        """
+        images = self._visible_room_images(obj)
+        first_image = images[0] if isinstance(images, list) and images else None
+
+        if not isinstance(images, list):
+            first_image = images.first()
+
+        if first_image:
+            if first_image.status == "pending" and first_image.preview_image:
+                return self._absolute_media_url(first_image.preview_image)
+
+            if first_image.image:
+                return self._absolute_media_url(first_image.image)
+
+        # Backwards-compatible fallback for rooms that only have Room.image.
+        if self._viewer_is_room_owner(obj):
+            legacy_image = getattr(obj, "image", None)
+            return self._absolute_media_url(legacy_image)
+
+        return None
+
     @extend_schema_field(OpenApiTypes.INT)
     def get_photo_count(self, obj) -> int:
-        approved_images = getattr(obj, "prefetched_approved_images", None)
+        """
+        Count exactly the same RoomImage records exposed through `photos`.
 
-        if approved_images is not None:
-            return len(approved_images)
+        Public seekers:
+        - approved count only
 
-        return obj.roomimage_set.filter(status="approved").count()
+        Owner:
+        - approved + pending + rejected count
+
+        Legacy Room.image is counted only when no RoomImage records exist.
+        """
+        images = self._visible_room_images(obj)
+
+        if isinstance(images, list):
+            count = len(images)
+        else:
+            count = images.count()
+
+        if count:
+            return count
+
+        return 1 if getattr(obj, "image", None) else 0
+
+    @extend_schema_field(
+        RoomPhotoResponseSerializer(many=True)
+    )
+    def get_photos(self, obj) -> list[dict]:
+        """
+        Return the complete room gallery.
+
+        `image` is kept for the mobile developer's expected field name.
+        `url` is also returned for compatibility with the existing preview API.
+        """
+        images = self._visible_room_images(obj)
+        photos = []
+
+        for index, room_image in enumerate(images):
+            original_url = self._absolute_media_url(room_image.image)
+            preview_url = self._absolute_media_url(room_image.preview_image)
+
+            if room_image.status == "pending" and preview_url:
+                display_url = preview_url
+            else:
+                display_url = original_url
+
+            if not display_url:
+                continue
+
+            photos.append(
+                {
+                    "id": room_image.id,
+                    "image": display_url,
+                    "url": display_url,
+                    "original_image": original_url,
+                    "preview_image": preview_url,
+                    "status": room_image.status,
+                    "is_main": index == 0,
+                }
+            )
+
+        # Support old listings that still only use Room.image.
+        if not photos:
+            legacy_url = self._absolute_media_url(getattr(obj, "image", None))
+
+            if legacy_url:
+                photos.append(
+                    {
+                        "id": None,
+                        "image": legacy_url,
+                        "url": legacy_url,
+                        "original_image": legacy_url,
+                        "preview_image": None,
+                        "status": "legacy",
+                        "is_main": True,
+                    }
+                )
+
+        return photos
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1779,26 +1917,89 @@ class RoomPreviewSerializer(serializers.Serializer):
     def get_room(self, obj) -> Dict[str, Any]:
         return RoomSerializer(obj, context=self.context).data
 
-    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
+    @extend_schema_field(
+    RoomPhotoResponseSerializer(many=True)
+    )
     def get_photos(self, obj) -> List[Dict[str, Any]]:
-        # keep your existing logic exactly as-is
+        """
+        Return all owner-visible photos for the room preview endpoint.
+
+        Approved images use the original image.
+        Pending images use preview_image when available.
+        """
         request = self.context.get("request")
         photos = []
 
-        qs = obj.roomimage_set.filter(status__in=["approved", "pending"]).order_by("id")
-        for img in qs:
-            if not img.image:
-                continue
-            url = img.image.url
-            if request is not None:
-                url = request.build_absolute_uri(url)
-            photos.append({"id": img.id, "url": url, "status": img.status})
+        qs = obj.roomimage_set.filter(
+            status__in=["approved", "pending", "rejected"]
+        ).order_by("id")
 
-        if not photos and obj.image:
-            url = obj.image.url
+        for index, img in enumerate(qs):
+            original_url = None
+            preview_url = None
+
+            if img.image:
+                try:
+                    original_url = img.image.url
+                except (ValueError, AttributeError):
+                    original_url = None
+
+            if img.preview_image:
+                try:
+                    preview_url = img.preview_image.url
+                except (ValueError, AttributeError):
+                    preview_url = None
+
             if request is not None:
-                url = request.build_absolute_uri(url)
-            photos.append({"id": None, "url": url, "status": "legacy"})
+                if original_url:
+                    original_url = request.build_absolute_uri(original_url)
+
+                if preview_url:
+                    preview_url = request.build_absolute_uri(preview_url)
+
+            if img.status == "pending" and preview_url:
+                display_url = preview_url
+            else:
+                display_url = original_url
+
+            if not display_url:
+                continue
+
+            photos.append(
+                {
+                    "id": img.id,
+                    "image": display_url,
+                    "url": display_url,
+                    "original_image": original_url,
+                    "preview_image": preview_url,
+                    "status": img.status,
+                    "is_main": index == 0,
+                }
+            )
+
+        legacy_image = getattr(obj, "image", None)
+
+        if not photos and legacy_image:
+            try:
+                legacy_url = legacy_image.url
+            except (ValueError, AttributeError):
+                legacy_url = None
+
+            if legacy_url and request is not None:
+                legacy_url = request.build_absolute_uri(legacy_url)
+
+            if legacy_url:
+                photos.append(
+                    {
+                        "id": None,
+                        "image": legacy_url,
+                        "url": legacy_url,
+                        "original_image": legacy_url,
+                        "preview_image": None,
+                        "status": "legacy",
+                        "is_main": True,
+                    }
+                )
 
         return photos
 
@@ -2689,6 +2890,14 @@ class ContactMessageSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Message is required.")
 
         return value
+
+
+
+
+
+
+
+
 
 
 # --------------------
