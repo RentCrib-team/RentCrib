@@ -2896,71 +2896,28 @@ class RoomImageSerializer(serializers.ModelSerializer):
         read_only_fields = ["room", "status"]
 
     def get_image(self, obj):
+        """
+        Return the original image only after approval.
+
+        Pending and rejected images must not expose the original file.
+        Their blurred preview is returned separately through preview_image.
+        """
+        if obj.status != "approved" or not obj.image:
+            return None
+
+        try:
+            url = obj.image.url
+        except (ValueError, AttributeError):
+            return None
 
         request = self.context.get("request")
-
-        if obj.status == "pending" and obj.preview_image:
-            url = obj.preview_image.url
-        elif obj.image:
-            url = obj.image.url
-        else:
-            return None
 
         if request is not None:
             return request.build_absolute_uri(url)
 
         return url
-
-        # generate thumbnails after upload
-    def create(self, validated_data):
-            request = self.context.get("request")
-
-            #  ALWAYS get room from context (NOT payload)
-            room = self.context.get("room")
-
-            if not room:
-                raise ValidationError("Room is required for image upload")
-
-            validated_data["room"] = room
-            validated_data["property_owner"] = room.property_owner
-            validated_data["category"] = room.category
-
-            obj = super().create(validated_data)
-            
-
-            f = validated_data.get("image")
-
-            if f:
-                stem = get_random_string(12)
-
-                try:
-                    preview_path = generate_blurred_preview(
-                        f,
-                        stem
-                    )
-
-                    obj.preview_image = preview_path
-                    obj.save(update_fields=["preview_image"])
-
-                except Exception:
-                    pass
-
-            f = validated_data.get("image")
-            if f:
-                from django.utils.crypto import get_random_string
-                from propertylist_app.services.image import generate_thumbnails_and_return_paths
-
-                stem = get_random_string(12)
-                base_dir = "room_images/thumbs"
-
-                try:
-                    generate_thumbnails_and_return_paths(f, base_dir, stem)
-                except Exception:
-                    pass
-
-            return obj
-
-
+        
+    
 
 class AvatarUploadResponseSerializer(serializers.Serializer):
     avatar = serializers.URLField(allow_null=True)
