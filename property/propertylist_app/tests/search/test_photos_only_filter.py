@@ -179,17 +179,28 @@ def test_public_search_main_photo_exposes_only_approved_room_images():
     results = extract_results(response)
     rooms_by_id = {item["id"]: item for item in results}
 
-    assert rooms_by_id[legacy_room.id]["main_photo"] is None
-    assert rooms_by_id[legacy_room.id]["photo_count"] == 0
+    legacy_payload = rooms_by_id[legacy_room.id]
 
-    assert rooms_by_id[pending_room.id]["main_photo"] is None
-    assert rooms_by_id[pending_room.id]["photo_count"] == 0
+    assert legacy_payload["cover_image"] is not None
+    assert legacy_payload["cover_image"].endswith(
+        "/media/rooms/legacy-main.jpg"
+    )
+    assert legacy_payload["other_images"] == []
+    assert legacy_payload["preview_image"] is None
+    assert legacy_payload["image_status"] == "approved"
 
-    assert rooms_by_id[rejected_room.id]["main_photo"] is None
-    assert rooms_by_id[rejected_room.id]["photo_count"] == 0
+    assert rooms_by_id[pending_room.id]["cover_image"] is None
+    assert rooms_by_id[pending_room.id]["other_images"] is None
+    assert rooms_by_id[pending_room.id]["image_status"] == "pending"
 
-    approved_main_photo = rooms_by_id[approved_room.id]["main_photo"]
+    assert rooms_by_id[rejected_room.id]["cover_image"] is None
+    assert rooms_by_id[rejected_room.id]["other_images"] is None
+    assert rooms_by_id[rejected_room.id]["image_status"] == "rejected"
 
-    assert approved_main_photo is not None
-    assert approved_main_photo.endswith("/media/rooms/approved-main.jpg")
-    assert rooms_by_id[approved_room.id]["photo_count"] == 1
+    approved_cover = rooms_by_id[approved_room.id]["cover_image"]
+
+    assert approved_cover is not None
+    assert approved_cover.endswith("/media/rooms/approved-main.jpg")
+    assert rooms_by_id[approved_room.id]["other_images"] == []
+    assert rooms_by_id[approved_room.id]["preview_image"] is None
+    assert rooms_by_id[approved_room.id]["image_status"] == "approved"

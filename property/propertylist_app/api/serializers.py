@@ -876,9 +876,10 @@ class RoomSerializer(serializers.ModelSerializer):
     owner_name = serializers.SerializerMethodField(read_only=True)
     owner_username = serializers.SerializerMethodField(read_only=True)
     owner_avatar = serializers.SerializerMethodField(read_only=True)
-    main_photo = serializers.SerializerMethodField(read_only=True)
-    photo_count = serializers.SerializerMethodField(read_only=True)
-    photos = serializers.SerializerMethodField(read_only=True)
+    cover_image = serializers.SerializerMethodField(read_only=True)
+    other_images = serializers.SerializerMethodField(read_only=True)
+    preview_image = serializers.SerializerMethodField(read_only=True)
+    image_status = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
     landlord_type = serializers.SerializerMethodField(read_only=True)
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
@@ -1686,29 +1687,16 @@ class RoomSerializer(serializers.ModelSerializer):
             and obj.property_owner_id == user.id
         )
 
-    def _visible_room_images(self, obj):
+    def _room_images(self, obj):
         """
-        Return the RoomImage records visible to the current requester.
-
-        Owner:
-        - approved
-        - pending
-        - rejected
-
-        Public seeker/non-owner:
-        - approved only
+        Return all uploaded images so the serializer can calculate one
+        overall public image-verification status.
         """
-        if self._viewer_is_room_owner(obj):
-            return obj.roomimage_set.filter(
+        return list(
+            obj.roomimage_set.filter(
                 status__in=["approved", "pending", "rejected"]
             ).order_by("id")
-
-        approved_images = getattr(obj, "prefetched_approved_images", None)
-
-        if approved_images is not None:
-            return approved_images
-
-        return obj.roomimage_set.filter(status="approved").order_by("id")
+        )
 
     def _absolute_media_url(self, file_field) -> str | None:
         """
@@ -1723,119 +1711,108 @@ class RoomSerializer(serializers.ModelSerializer):
             return None
 
         request = self.context.get("request")
+
         if request is not None:
             return request.build_absolute_uri(url)
 
         return url
 
-    @extend_schema_field(OpenApiTypes.URI)
-    def get_main_photo(self, obj) -> str | None:
+    def _image_payload(self, obj) -> dict:
         """
-        Return the first visible RoomImage.
+        Return one public image state for the room.
 
-        Pending owner photos use their blurred preview when available.
-        Public seekers only reach approved photos.
+        Approved:
+        - cover_image contains the first approved image
+        - other_images contains the remaining approved images
+        - preview_image is null
+
+        Pending/rejected:
+        - cover_image is null
+        - other_images is null
+        - preview_image contains the first available blurred preview
         """
-        images = self._visible_room_images(obj)
-        first_image = images[0] if isinstance(images, list) and images else None
+        images = self._room_images(obj)
 
-        if not isinstance(images, list):
-            first_image = images.first()
-
-        if first_image:
-            if first_image.status == "pending" and first_image.preview_image:
-                return self._absolute_media_url(first_image.preview_image)
-
-            if first_image.image:
-                return self._absolute_media_url(first_image.image)
-
-        # Backwards-compatible fallback for rooms that only have Room.image.
-        if self._viewer_is_room_owner(obj):
-            legacy_image = getattr(obj, "image", None)
-            return self._absolute_media_url(legacy_image)
-
-        return None
-
-    @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj) -> int:
-        """
-        Count exactly the same RoomImage records exposed through `photos`.
-
-        Public seekers:
-        - approved count only
-
-        Owner:
-        - approved + pending + rejected count
-
-        Legacy Room.image is counted only when no RoomImage records exist.
-        """
-        images = self._visible_room_images(obj)
-
-        if isinstance(images, list):
-            count = len(images)
-        else:
-            count = images.count()
-
-        if count:
-            return count
-
-        return 1 if getattr(obj, "image", None) else 0
-
-    @extend_schema_field(
-        RoomPhotoResponseSerializer(many=True)
-    )
-    def get_photos(self, obj) -> list[dict]:
-        """
-        Return the complete room gallery.
-
-        `image` is kept for the mobile developer's expected field name.
-        `url` is also returned for compatibility with the existing preview API.
-        """
-        images = self._visible_room_images(obj)
-        photos = []
-
-        for index, room_image in enumerate(images):
-            original_url = self._absolute_media_url(room_image.image)
-            preview_url = self._absolute_media_url(room_image.preview_image)
-
-            if room_image.status == "pending" and preview_url:
-                display_url = preview_url
-            else:
-                display_url = original_url
-
-            if not display_url:
-                continue
-
-            photos.append(
-                {
-                    "id": room_image.id,
-                    "image": display_url,
-                    "url": display_url,
-                    "original_image": original_url,
-                    "preview_image": preview_url,
-                    "status": room_image.status,
-                    "is_main": index == 0,
-                }
+        if not images:
+            legacy_url = self._absolute_media_url(
+                getattr(obj, "image", None)
             )
 
-        # Support old listings that still only use Room.image.
-        if not photos:
-            legacy_url = self._absolute_media_url(getattr(obj, "image", None))
-
             if legacy_url:
-                photos.append(
-                    {
-                        "id": None,
-                        "image": legacy_url,
-                        "url": legacy_url,
-                        "original_image": legacy_url,
-                        "preview_image": None,
-                        "status": "legacy",
-                        "is_main": True,
-                    }
-                )
+                return {
+                    "cover_image": legacy_url,
+                    "other_images": [],
+                    "preview_image": None,
+                    "image_status": "approved",
+                }
 
-        return photos
+            return {
+                "cover_image": None,
+                "other_images": None,
+                "preview_image": None,
+                "image_status": None,
+            }
+
+        statuses = {image.status for image in images}
+
+        if "rejected" in statuses:
+            image_status = "rejected"
+        elif "pending" in statuses:
+            image_status = "pending"
+        else:
+            image_status = "approved"
+
+        if image_status != "approved":
+            preview_url = next(
+                (
+                    self._absolute_media_url(image.preview_image)
+                    for image in images
+                    if image.preview_image
+                ),
+                None,
+            )
+
+            return {
+                "cover_image": None,
+                "other_images": None,
+                "preview_image": preview_url,
+                "image_status": image_status,
+            }
+
+        approved_urls = [
+            self._absolute_media_url(image.image)
+            for image in images
+            if image.status == "approved" and image.image
+        ]
+        approved_urls = [url for url in approved_urls if url]
+
+        return {
+            "cover_image": approved_urls[0] if approved_urls else None,
+            "other_images": approved_urls[1:],
+            "preview_image": None,
+            "image_status": "approved",
+        }
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_cover_image(self, obj) -> str | None:
+        return self._image_payload(obj)["cover_image"]
+
+    @extend_schema_field(
+        serializers.ListField(
+            child=serializers.URLField(),
+            allow_null=True,
+        )
+    )
+    def get_other_images(self, obj) -> list[str] | None:
+        return self._image_payload(obj)["other_images"]
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_preview_image(self, obj) -> str | None:
+        return self._image_payload(obj)["preview_image"]
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_image_status(self, obj) -> str | None:
+        return self._image_payload(obj)["image_status"]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
