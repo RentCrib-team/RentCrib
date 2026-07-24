@@ -1715,17 +1715,16 @@ class RoomSerializer(serializers.ModelSerializer):
 
     def _image_payload(self, obj) -> dict:
         """
-        Return one public image state for the room.
+        Return the correct room image payload for the requester.
 
-        Approved:
-        - cover_image contains the first approved image
-        - other_images contains the remaining approved images
-        
+        Owner:
+        - can see approved, pending and rejected uploads
+        - receives the first uploaded image as cover_image
+        - receives the remaining uploads as other_images
 
-        Pending/rejected:
-        - cover_image is null
-        - other_images is null
-       
+        Public:
+        - can only see approved images
+        - images remain hidden until at least 3 are approved
         """
         images = self._room_images(obj)
 
@@ -1761,6 +1760,24 @@ class RoomSerializer(serializers.ModelSerializer):
         else:
             image_status = "rejected"
 
+        # The authenticated room owner can see every uploaded image,
+        # including pending and rejected uploads.
+        if self._viewer_is_room_owner(obj):
+            owner_urls = [
+                self._absolute_media_url(image.image)
+                for image in images
+                if image.image
+            ]
+            owner_urls = [url for url in owner_urls if url]
+
+            return {
+                "cover_image": owner_urls[0] if owner_urls else None,
+                "other_images": owner_urls[1:],
+                "image_status": image_status,
+            }
+
+        # Public users must not see images until the room has at least
+        # three approved photos.
         if image_status != "approved":
             return {
                 "cover_image": None,
@@ -1778,7 +1795,6 @@ class RoomSerializer(serializers.ModelSerializer):
         return {
             "cover_image": approved_urls[0] if approved_urls else None,
             "other_images": approved_urls[1:],
-          
             "image_status": "approved",
         }
 
