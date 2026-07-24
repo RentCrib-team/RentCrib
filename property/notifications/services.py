@@ -279,12 +279,27 @@ class NotificationService:
     @staticmethod
     @transaction.atomic
     def deliver(notification: OutboundNotification):
-        # Preferences (leave as you originally intended)
+        """
+        Deliver one queued notification.
+
+        Any rendering or provider error is recorded against this notification
+        without allowing it to block later notifications in the queue.
+        """
         prefs = getattr(notification.user, "notification_pref", None)
-        if notification.channel == "email" and prefs and not prefs.email_enabled:
+
+        if (
+            notification.channel == NotificationTemplate.CHANNEL_EMAIL
+            and prefs
+            and not prefs.email_enabled
+        ):
             notification.status = OutboundNotification.STATUS_SKIPPED
             notification.sent_at = timezone.now()
-            notification.save(update_fields=["status", "sent_at"])
+            notification.save(
+                update_fields=[
+                    "status",
+                    "sent_at",
+                ]
+            )
             return
 
         tpl = NotificationTemplate.objects.filter(
@@ -296,15 +311,21 @@ class NotificationService:
         if not tpl:
             notification.status = OutboundNotification.STATUS_FAILED
             notification.error = f"Template not found: {notification.template_key}"
-            notification.save(update_fields=["status", "error"])
+            notification.save(
+                update_fields=[
+                    "status",
+                    "error",
+                ]
+            )
             return
 
-       
-        # render now injects cta_url/inbox_url/next_path/frontend_base_url
-        subject, body = NotificationService.render(tpl, notification.context)
-
         try:
-            if notification.channel == "email":
+            subject, body = NotificationService.render(
+                tpl,
+                notification.context,
+            )
+
+            if notification.channel == NotificationTemplate.CHANNEL_EMAIL:
                 res = EmailTransport.send(
                     notification.user.email,
                     subject,
@@ -314,29 +335,52 @@ class NotificationService:
             else:
                 res = {"sent": 0}
 
+            sent = bool(res.get("sent"))
+
             DeliveryAttempt.objects.create(
                 notification=notification,
                 provider=notification.channel,
-                success=bool(res.get("sent")),
+                success=sent,
                 response=str(res),
             )
 
-            if res.get("sent"):
+            if sent:
                 notification.status = OutboundNotification.STATUS_SENT
                 notification.sent_at = timezone.now()
-                notification.save(update_fields=["status", "sent_at"])
-            else:
-                notification.status = OutboundNotification.STATUS_FAILED
-                notification.error = "Provider reported failure"
-                notification.save(update_fields=["status", "error"])
+                notification.error = ""
+                notification.save(
+                    update_fields=[
+                        "status",
+                        "sent_at",
+                        "error",
+                    ]
+                )
+                return
+
+            notification.status = OutboundNotification.STATUS_FAILED
+            notification.error = "Provider reported failure"
+            notification.save(
+                update_fields=[
+                    "status",
+                    "error",
+                ]
+            )
 
         except Exception as exc:
+            error_message = str(exc)
+
             DeliveryAttempt.objects.create(
                 notification=notification,
                 provider=notification.channel,
                 success=False,
-                response=str(exc),
+                response=error_message,
             )
+
             notification.status = OutboundNotification.STATUS_FAILED
-            notification.error = str(exc)
-            notification.save(update_fields=["status", "error"])
+            notification.error = error_message
+            notification.save(
+                update_fields=[
+                    "status",
+                    "error",
+                ]
+            )

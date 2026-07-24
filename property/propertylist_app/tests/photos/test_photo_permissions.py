@@ -33,10 +33,8 @@ def _png(name="ok.png"):
 
 @pytest.mark.django_db
 @override_settings(MEDIA_URL="/media/")
-def test_only_owner_can_upload_room_photo(monkeypatch):
-    # Reason: bypass RoomImage.save override that closes the file before storage writes it (test-only)
+def test_only_owner_can_delete_room_photo():
     import propertylist_app.models as app_models
-    monkeypatch.setattr(app_models.RoomImage, "save", models.Model.save, raising=False)
 
     owner = User.objects.create_user(username="o", password="x")
     other = User.objects.create_user(username="u", password="x")

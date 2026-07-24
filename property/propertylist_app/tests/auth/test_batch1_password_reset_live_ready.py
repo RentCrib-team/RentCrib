@@ -21,8 +21,11 @@ import pytest
 from django.contrib.auth import authenticate, get_user_model
 from django.urls import reverse
 
-from propertylist_app.models import EmailOTP
+from rest_framework.settings import api_settings
 
+
+from propertylist_app.models import EmailOTP
+from django.core.cache import caches
 pytestmark = pytest.mark.django_db
 
 
@@ -113,3 +116,47 @@ def test_password_reset_confirm_wrong_token_increments_attempts(api_client):
     otp.refresh_from_db()
     assert otp.attempts == 1
     assert otp.used_at is None
+    
+    
+    
+def test_password_reset_request_is_throttled_after_three_requests(
+    api_client,
+    settings,
+    monkeypatch,
+):
+    """
+    Password-reset requests are limited by IP.
+
+    The first three requests are allowed.
+    The fourth request from the same IP must return HTTP 429.
+    """
+    monkeypatch.setitem(
+        settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"],
+        "password-reset",
+        "3/hour",
+    )
+
+    api_settings.reload()
+    caches["default"].clear()
+
+    url = reverse("api:auth-password-reset")
+    request_ip = "203.0.113.90"
+
+    for index in range(3):
+        response = api_client.post(
+            url,
+            {"email": f"reset-target-{index}@example.com"},
+            format="json",
+            REMOTE_ADDR=request_ip,
+        )
+
+        assert response.status_code == 200, response.json()
+
+    throttled_response = api_client.post(
+        url,
+        {"email": "reset-target-4@example.com"},
+        format="json",
+        REMOTE_ADDR=request_ip,
+    )
+
+    assert throttled_response.status_code == 429, throttled_response.json()

@@ -1240,6 +1240,52 @@ paths:
           description: Missing/invalid fields or invalid datetime format.
         '401':
           description: Authentication required.
+  /api/v1/bookings/landlord-viewings/:
+    get:
+      operationId: bookings_landlord_viewings_list
+      description: Return all viewing bookings for rooms owned by the authenticated
+        landlord.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      tags:
+      - bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/PaginatedBookingList'
+                required:
+                - ok
+                - data
+          description: ''
   /api/v1/bookings/viewing/:
     post:
       operationId: bookings_viewing_create
@@ -8935,12 +8981,23 @@ components:
           type: string
           format: uri
           readOnly: true
-        main_photo:
+        cover_image:
           type: string
           format: uri
           readOnly: true
-        photo_count:
-          type: integer
+        other_images:
+          type: array
+          items:
+            type: string
+            format: uri
+          nullable: true
+          readOnly: true
+        preview_image:
+          type: string
+          format: uri
+          readOnly: true
+        image_status:
+          type: string
           readOnly: true
         listing_state:
           type: string
@@ -10093,12 +10150,23 @@ components:
           type: string
           format: uri
           readOnly: true
-        main_photo:
+        cover_image:
           type: string
           format: uri
           readOnly: true
-        photo_count:
-          type: integer
+        other_images:
+          type: array
+          items:
+            type: string
+            format: uri
+          nullable: true
+          readOnly: true
+        preview_image:
+          type: string
+          format: uri
+          readOnly: true
+        image_status:
+          type: string
           readOnly: true
         listing_state:
           type: string
@@ -10620,10 +10688,12 @@ components:
       - avg_rating
       - category
       - category_id
+      - cover_image
       - created_at
       - deleted_at
       - distance_miles
       - id
+      - image_status
       - is_deleted
       - is_saved
       - landlord_type
@@ -10631,13 +10701,13 @@ components:
       - landlord_verified
       - listing_state
       - location
-      - main_photo
       - number_rating
+      - other_images
       - owner_avatar
       - owner_name
       - owner_username
       - paid_until
-      - photo_count
+      - preview_image
       - price_per_month
       - property_owner
       - property_type
@@ -10821,6 +10891,10 @@ components:
             * `rejected` - Rejected
           x-spec-enum-id: de3702061fc1d433
           readOnly: true
+        preview_image:
+          type: string
+          format: uri
+          nullable: true
       required:
       - id
       - image
@@ -11214,8 +11288,14 @@ components:
         landlord:
           type: integer
           readOnly: true
+        landlord_name:
+          type: string
+          readOnly: true
         tenant:
           type: integer
+          readOnly: true
+        tenant_name:
+          type: string
           readOnly: true
         profile_image:
           type: string
@@ -11299,6 +11379,7 @@ components:
       - id
       - landlord
       - landlord_confirmed_at
+      - landlord_name
       - move_in_date
       - profile_image
       - proposed_by
@@ -11311,6 +11392,7 @@ components:
       - still_living_confirmed_at
       - tenant
       - tenant_confirmed_at
+      - tenant_name
       - updated_at
     TenancyExtensionCreate:
       type: object

@@ -1,37 +1,33 @@
-﻿from django.db import transaction
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
+﻿from django.apps import apps
 from django.db.models import Avg, Count
-from .models import Message, Notification, MessageThread, Review, Room
+from django.db.models.signals import post_delete, post_save, pre_save
+from django.dispatch import receiver
 from django.utils import timezone
-from django.db.models.signals import post_save,pre_save
+
+from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.models import (
-    Review,
+    Booking,
     Message,
     MessageThread,
     Notification,
+    Review,
+    Room,
     UserProfile,
-    Booking,
 )
-from notifications.models import NotificationTemplate, OutboundNotification
-from propertylist_app.tasks import task_send_new_message_email
-from django.db.models import Avg, Count, Q
-from propertylist_app.services.reviews import update_room_rating_from_revealed_reviews
-from django.apps import apps
-
 from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.reviews import (
+    update_room_rating_from_revealed_reviews,
+)
 
 
-
-
-
-def _recalc_room_rating(room: Room):
+def _recalc_room_rating(room: Room) -> None:
     """
-    Room rating: only revealed tenant -> landlord tenancy reviews count.
+    Recalculate a room's rating using only active, revealed
+    tenant-to-landlord tenancy reviews.
     """
     now = timezone.now()
 
-    agg = Review.objects.filter(
+    aggregate = Review.objects.filter(
         tenancy__room=room,
         role=Review.ROLE_TENANT_TO_LANDLORD,
         active=True,
@@ -39,31 +35,29 @@ def _recalc_room_rating(room: Room):
         reveal_at__lte=now,
     ).aggregate(
         avg=Avg("overall_rating"),
-        cnt=Count("id"),
+        count=Count("id"),
     )
 
-    room.avg_rating = float(agg["avg"] or 0.0)
-    room.number_rating = int(agg["cnt"] or 0)
-    room.save(update_fields=["avg_rating", "number_rating"])
+    room.avg_rating = float(aggregate["avg"] or 0.0)
+    room.number_rating = int(aggregate["count"] or 0)
+
+    room.save(
+        update_fields=[
+            "avg_rating",
+            "number_rating",
+        ]
+    )
 
 
-@receiver(post_save, sender=apps.get_model("propertylist_app", "Review"))
-def review_saved_update_room_rating(sender, instance, created, **kwargs):
-    room = None
-    if getattr(instance, "tenancy_id", None) and getattr(instance.tenancy, "room_id", None):
-        room = instance.tenancy.room
-
-    if not room:
-        return
-
-    update_room_rating_from_revealed_reviews(room)
-
-
-@receiver(post_delete, sender=apps.get_model("propertylist_app", "Review"))
-def review_deleted_update_room_rating(sender, instance, **kwargs):
-    room = None
-    if getattr(instance, "tenancy_id", None) and getattr(instance.tenancy, "room_id", None):
-        room = instance.tenancy.room
+@receiver(post_save, sender=Review)
+def review_saved_update_room_rating(
+    sender,
+    instance: Review,
+    created,
+    **kwargs,
+) -> None:
+    tenancy = getattr(instance, "tenancy", None)
+    room = getattr(tenancy, "room", None)
 
     if not room:
         return
@@ -71,20 +65,43 @@ def review_deleted_update_room_rating(sender, instance, **kwargs):
     update_room_rating_from_revealed_reviews(room)
 
 
+@receiver(post_delete, sender=Review)
+def review_deleted_update_room_rating(
+    sender,
+    instance: Review,
+    **kwargs,
+) -> None:
+    tenancy = getattr(instance, "tenancy", None)
+    room = getattr(tenancy, "room", None)
+
+    if not room:
+        return
+
+    update_room_rating_from_revealed_reviews(room)
 
 
-
-def _queue_email(*, user, template_key: str, context: dict | None = None) -> None:
+def _queue_email(
+    *,
+    user,
+    template_key: str,
+    context: dict | None = None,
+) -> None:
     """
-    Queues an email in the notifications app pipeline (does NOT send immediately).
-    Only queues if an active email template exists for the key.
+    Queue an email through the notifications pipeline.
+
+    The email is queued only when an active email template exists for
+    the supplied template key. It is not sent immediately.
     """
-    template = NotificationTemplate.objects.filter(
+    if not user:
+        return
+
+    template_exists = NotificationTemplate.objects.filter(
         key=template_key,
         channel=NotificationTemplate.CHANNEL_EMAIL,
         is_active=True,
-    ).first()
-    if not template:
+    ).exists()
+
+    if not template_exists:
         return
 
     OutboundNotification.objects.create(
@@ -95,9 +112,13 @@ def _queue_email(*, user, template_key: str, context: dict | None = None) -> Non
     )
 
 
-
 @receiver(post_save, sender=Booking)
-def booking_created_queue_emails(sender, instance: Booking, created, **kwargs):
+def booking_created_queue_emails(
+    sender,
+    instance: Booking,
+    created,
+    **kwargs,
+) -> None:
     if not created:
         return
 
@@ -106,33 +127,53 @@ def booking_created_queue_emails(sender, instance: Booking, created, **kwargs):
     booker = instance.user
 
     booking_deep_link = f"/app/bookings/{instance.id}"
-    booking_full_url = build_absolute_url(booking_deep_link, force_login=True)
+    booking_full_url = build_absolute_url(
+        booking_deep_link,
+        force_login=True,
+    )
 
     if owner:
         _queue_email(
             user=owner,
             template_key="booking.new",
             context={
-                "user": {"first_name": owner.first_name},
-                "room_id": room.id,
+                "user": {
+                    "first_name": owner.first_name,
+                },
+                "room": {
+                    "title": room.title,
+                },
                 "booking_id": instance.id,
-
-                # F2 links
+                "room_id": room.id,
                 "deep_link": booking_deep_link,
                 "cta_url": booking_full_url,
             },
         )
 
     if booker:
+        owner_name = ""
+
+        if owner:
+            owner_name = (
+                owner.get_full_name()
+                or owner.username
+                or owner.first_name
+                or ""
+            )
+
         _queue_email(
             user=booker,
             template_key="booking.confirmation",
             context={
-                "user": {"first_name": booker.first_name},
-                "room_id": room.id,
+                "user": {
+                    "first_name": booker.first_name,
+                },
+                "room": {
+                    "title": room.title,
+                    "owner_name": owner_name,
+                },
                 "booking_id": instance.id,
-
-                # F2 links
+                "room_id": room.id,
                 "deep_link": booking_deep_link,
                 "cta_url": booking_full_url,
             },
@@ -140,36 +181,50 @@ def booking_created_queue_emails(sender, instance: Booking, created, **kwargs):
 
 
 @receiver(post_save, sender=Message)
-def message_created_create_notifications(sender, instance: Message, created, **kwargs):
+def message_created_create_notifications(
+    sender,
+    instance: Message,
+    created,
+    **kwargs,
+) -> None:
     if not created:
         return
 
     thread: MessageThread = instance.thread
-    recipients = thread.participants.exclude(pk=instance.sender_id).all()
 
-    notifs = []
-    queued_any_email = False
+    recipients = thread.participants.exclude(
+        pk=instance.sender_id
+    ).all()
 
-    # Build once (same for all recipients)
+    notifications_to_create = []
+
     deep_link = f"/app/threads/{thread.id}"
-    full_url = build_absolute_url(deep_link, force_login=True)
+    full_url = build_absolute_url(
+        deep_link,
+        force_login=True,
+    )
+
+    sender_name = (
+        instance.sender.get_full_name()
+        or instance.sender.get_username()
+    )
+
+    message_snippet = instance.body[:200] if instance.body else ""
 
     for user in recipients:
         profile, _ = UserProfile.objects.get_or_create(user=user)
+
         if not getattr(profile, "notify_messages", True):
             continue
 
-        # Eligible recipient exists -> enqueue async email task later (even if template missing/disabled)
-        queued_any_email = True
-
-        notifs.append(
+        notifications_to_create.append(
             Notification(
                 user=user,
                 type=Notification.Type.MESSAGE,
                 thread=thread,
                 message=instance,
                 title="New message",
-                body=(instance.body[:200] or ""),
+                body=message_snippet,
             )
         )
 
@@ -177,143 +232,196 @@ def message_created_create_notifications(sender, instance: Message, created, **k
             user=user,
             template_key="message.new",
             context={
-                "user": {"first_name": user.first_name},
-                "sender": {"name": instance.sender.get_username()},
+                "user": {
+                    "first_name": user.first_name,
+                },
+                "sender": {
+                    "name": sender_name,
+                },
                 "thread_id": thread.id,
                 "message_id": instance.id,
-
-                # F2: link fields for the email button
                 "deep_link": deep_link,
                 "cta_url": full_url,
 
-                # Backwards compatible fields (if your template still uses them)
+                # Backwards-compatible variables for older templates.
                 "thread_url": full_url,
-                "snippet": (instance.body[:200] or ""),
+                "snippet": message_snippet,
             },
         )
 
-    if notifs:
-        Notification.objects.bulk_create(notifs, ignore_conflicts=True)
-
-    # Enqueue once per message if at least one recipient opted-in
-    if queued_any_email:
-        transaction.on_commit(
-            lambda: task_send_new_message_email.delay(instance.id)
+    if notifications_to_create:
+        Notification.objects.bulk_create(
+            notifications_to_create,
+            ignore_conflicts=True,
         )
 
 
 # -------------------------------------------------------------------
-# TenancyExtension -> Notifications (proposal / accept / reject)
+# TenancyExtension notifications
 # -------------------------------------------------------------------
 
 
-
-
-def _ext_other_party(ext):
+def _ext_other_party(extension):
     """
-    Returns the user who should be notified when an extension is proposed.
-    If landlord proposed -> notify tenant.
-    If tenant proposed -> notify landlord.
+    Return the party who should be notified about a new proposal.
+
+    Landlord proposal: notify the tenant.
+    Tenant proposal: notify the landlord.
     """
-    t = ext.tenancy
-    if ext.proposed_by_id == getattr(t, "landlord_id", None):
-        return t.tenant
-    return t.landlord
+    tenancy = extension.tenancy
+
+    if extension.proposed_by_id == getattr(
+        tenancy,
+        "landlord_id",
+        None,
+    ):
+        return tenancy.tenant
+
+    return tenancy.landlord
 
 
-@receiver(pre_save, sender=apps.get_model("propertylist_app", "TenancyExtension"))
-def tenancy_extension_cache_old_status(sender, instance, **kwargs):
+@receiver(
+    pre_save,
+    sender=apps.get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    ),
+)
+def tenancy_extension_cache_old_status(
+    sender,
+    instance,
+    **kwargs,
+) -> None:
     if not instance.pk:
         instance._old_status = None
         return
-    old = sender.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
-    instance._old_status = old
-template_key="message.new"
 
-@receiver(post_save, sender=apps.get_model("propertylist_app", "TenancyExtension"))
-def tenancy_extension_notifications(sender, instance, created, **kwargs):
-    Notification = apps.get_model("propertylist_app", "Notification")
-    UserProfile = apps.get_model("propertylist_app", "UserProfile")
+    instance._old_status = sender.objects.filter(
+        pk=instance.pk
+    ).values_list(
+        "status",
+        flat=True,
+    ).first()
 
-    # safety: tenancy must exist
+
+@receiver(
+    post_save,
+    sender=apps.get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    ),
+)
+def tenancy_extension_notifications(
+    sender,
+    instance,
+    created,
+    **kwargs,
+) -> None:
     if not getattr(instance, "tenancy_id", None):
         return
 
-    t = instance.tenancy  # <-- define t first
+    tenancy = instance.tenancy
 
-    # build once (used by all emails)
-    deep_link = f"/app/tenancies/{t.id}"
-    cta_url = build_absolute_url(deep_link, force_login=True)
+    deep_link = f"/app/tenancies/{tenancy.id}"
+    cta_url = build_absolute_url(
+        deep_link,
+        force_login=True,
+    )
 
-    def _maybe_queue(user, template_key: str):
+    def maybe_queue_email(user, template_key: str) -> None:
+        if not user:
+            return
+
         profile, _ = UserProfile.objects.get_or_create(user=user)
+
         if not getattr(profile, "notify_confirmations", True):
             return
+
         _queue_email(
             user=user,
             template_key=template_key,
             context={
-                "user": {"first_name": user.first_name},
-                "tenancy_id": t.id,
-                "room_title": t.room.title,
+                "user": {
+                    "first_name": user.first_name,
+                },
+                "tenancy_id": tenancy.id,
+                "room_title": tenancy.room.title,
                 "deep_link": deep_link,
                 "cta_url": cta_url,
             },
         )
 
-    # 1) created -> proposal notification to the other party
     if created:
-        other = _ext_other_party(instance)
+        other_party = _ext_other_party(instance)
+
+        if not other_party:
+            return
 
         Notification.objects.create(
-            user=other,
+            user=other_party,
             type="tenancy_extension_proposed",
             title="Tenancy extension proposed",
-            body=f"A tenancy extension was proposed for {t.room.title}.",
+            body=(
+                "A tenancy extension was proposed for "
+                f"{tenancy.room.title}."
+            ),
             target_type="tenancy_extension",
-            target_id=t.id,
+            target_id=tenancy.id,
         )
 
-        _maybe_queue(other, "tenancy.extension.proposed")
+        maybe_queue_email(
+            other_party,
+            "tenancy.extension.proposed",
+        )
         return
 
-    # 2) status changed -> accept/reject notifications
-    old = getattr(instance, "_old_status", None)
-    new = instance.status
-    if old == new:
+    old_status = getattr(instance, "_old_status", None)
+    new_status = instance.status
+
+    if old_status == new_status:
         return
 
-    if new == instance.STATUS_ACCEPTED:
-        # notify both
-        Notification.objects.create(
-            user=t.landlord,
-            type="tenancy_extension_accepted",
-            title="Tenancy extension accepted",
-            body=f"The tenancy extension for {t.room.title} was accepted.",
-            target_type="tenancy_extension",
-            target_id=t.id,
-        )
-        Notification.objects.create(
-            user=t.tenant,
-            type="tenancy_extension_accepted",
-            title="Tenancy extension accepted",
-            body=f"The tenancy extension for {t.room.title} was accepted.",
-            target_type="tenancy_extension",
-            target_id=t.id,
-        )
+    if new_status == instance.STATUS_ACCEPTED:
+        for user in (tenancy.landlord, tenancy.tenant):
+            if not user:
+                continue
 
-        _maybe_queue(t.landlord, "tenancy.extension.accepted")
-        _maybe_queue(t.tenant, "tenancy.extension.accepted")
+            Notification.objects.create(
+                user=user,
+                type="tenancy_extension_accepted",
+                title="Tenancy extension accepted",
+                body=(
+                    "The tenancy extension for "
+                    f"{tenancy.room.title} was accepted."
+                ),
+                target_type="tenancy_extension",
+                target_id=tenancy.id,
+            )
 
-    elif new == instance.STATUS_REJECTED:
-        # notify proposer only
+            maybe_queue_email(
+                user,
+                "tenancy.extension.accepted",
+            )
+
+    elif new_status == instance.STATUS_REJECTED:
+        proposer = instance.proposed_by
+
+        if not proposer:
+            return
+
         Notification.objects.create(
-            user=instance.proposed_by,
+            user=proposer,
             type="tenancy_extension_rejected",
             title="Tenancy extension rejected",
-            body=f"The tenancy extension for {t.room.title} was rejected.",
+            body=(
+                "The tenancy extension for "
+                f"{tenancy.room.title} was rejected."
+            ),
             target_type="tenancy_extension",
-            target_id=t.id,
+            target_id=tenancy.id,
         )
 
-        _maybe_queue(instance.proposed_by, "tenancy.extension.rejected")
+        maybe_queue_email(
+            proposer,
+            "tenancy.extension.rejected",
+        )

@@ -857,58 +857,120 @@ class RoomImageQuerySet(models.QuerySet):
     def approved(self):
         return self.filter(status="approved")
 
+    def pending(self):
+        return self.filter(status="pending")
+
+    def rejected(self):
+        return self.filter(status="rejected")
+
 
 class RoomImage(models.Model):
-    room = models.ForeignKey("Room", on_delete=models.PROTECT)
-    image = models.ImageField(upload_to="room_images/", null=True, blank=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    MODERATION_AWAITING_CHECK = "awaiting_check"
+    MODERATION_AUTO_APPROVED = "auto_approved"
+    MODERATION_MANUAL_REVIEW = "manual_review"
+    MODERATION_UNSAFE_CONTENT = "unsafe_content"
+    MODERATION_NOT_PROPERTY_PHOTO = "not_property_photo"
+    MODERATION_LOW_CONFIDENCE = "low_confidence"
+    MODERATION_TIMEOUT = "timeout"
+    MODERATION_SERVICE_UNAVAILABLE = "service_unavailable"
+    MODERATION_VALIDATION_FAILED = "validation_failed"
+
+    MODERATION_REASON_CHOICES = [
+        (
+            MODERATION_AWAITING_CHECK,
+            "Awaiting automated check",
+        ),
+        (
+            MODERATION_AUTO_APPROVED,
+            "Automatically approved",
+        ),
+        (
+            MODERATION_MANUAL_REVIEW,
+            "Manual review",
+        ),
+        (
+            MODERATION_UNSAFE_CONTENT,
+            "Unsafe content detected",
+        ),
+        (
+            MODERATION_NOT_PROPERTY_PHOTO,
+            "Not a property photo",
+        ),
+        (
+            MODERATION_LOW_CONFIDENCE,
+            "Low moderation confidence",
+        ),
+        (
+            MODERATION_TIMEOUT,
+            "Moderation service timeout",
+        ),
+        (
+            MODERATION_SERVICE_UNAVAILABLE,
+            "Moderation service unavailable",
+        ),
+        (
+            MODERATION_VALIDATION_FAILED,
+            "Basic image validation failed",
+        ),
+    ]
+
+    room = models.ForeignKey(
+        "Room",
+        on_delete=models.PROTECT,
+    )
+
+    image = models.ImageField(
+        upload_to="room_images/",
+        null=True,
+        blank=True,
+    )
+
+    preview_image = models.ImageField(
+        upload_to="room_images/previews/",
+        null=True,
+        blank=True,
+    )
+
+    uploaded_at = models.DateTimeField(
+        auto_now_add=True,
+    )
 
     status = models.CharField(
         max_length=16,
-        choices=[
-            ("pending", "Pending"),
-            ("approved", "Approved"),
-            ("rejected", "Rejected"),
-        ],
-        default="pending",
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
         db_index=True,
     )
 
+    moderation_reason = models.CharField(
+        max_length=32,
+        choices=MODERATION_REASON_CHOICES,
+        default=MODERATION_AWAITING_CHECK,
+        db_index=True,
+    )
+
+    moderation_notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Internal moderation result or provider error details.",
+    )
+
+    moderation_checked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     objects = RoomImageQuerySet.as_manager()
-
-
-    def save(self, *args, **kwargs):
-            """
-            Reason:
-            Always call Django's real save so RoomImage rows are written to the database.
-
-            Auto-approval is handled by RoomPhotoUploadView during API upload.
-            Admin/shell-created images can remain pending unless manually approved.
-            """
-            super().save(*args, **kwargs)
-
-        # Only auto-approve on create, and only when still pending.
-        # if is_new and self.status == "pending" and self.image:
-        #     try:
-        #         from propertylist_app.services.image import should_auto_approve_upload
-
-        #         file_obj = getattr(self.image, "file", None)
-        #         if file_obj and should_auto_approve_upload(file_obj):
-        #             self.status = "approved"
-
-        #         # Important: reset pointer for Django storage save
-        #         if file_obj:
-        #             try:
-        #                 file_obj.seek(0)
-        #             except Exception:
-        #                 pass
-
-        #     except Exception:
-        #         # if anything goes wrong, leave as pending for manual moderation
-        #         pass
-
-        # super().save(*args, **kwargs)
-
 
 # -----------------
 # AvailabilitySlot
@@ -1419,7 +1481,18 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=["user", "is_read", "created_at"]),
         ]
-
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "type", "target_type", "target_id"],
+                condition=Q(
+                    type="review_available",
+                    target_type="tenancy_review",
+                    target_id__isnull=False,
+                ),
+                name="uq_notification_review_per_user_tenancy",
+            ),
+        ]
+    
     def __str__(self):
         return f"Notif#{self.pk} to {getattr(self.user, 'username', self.user_id)} [{self.type}]"
 

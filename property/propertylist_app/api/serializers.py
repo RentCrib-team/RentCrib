@@ -10,7 +10,7 @@ from datetime import date as _date  # add if not already present
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.conf import settings
-
+from propertylist_app.services.image import generate_blurred_preview
 from typing import Optional, Any, Dict, List
 from drf_spectacular.types import OpenApiTypes
 
@@ -32,10 +32,10 @@ from propertylist_app.validators import (
     validate_listing_photos, sanitize_search_text, validate_numeric_range,
     validate_radius_miles, validate_pagination, validate_ordering,
     normalise_price, normalise_phone, normalise_name, normalise_email,
-    sanitize_plain_text,
+    sanitize_plain_text, validate_plain_text,
     assert_not_duplicate_listing, assert_no_duplicate_files,
     enforce_user_caps,
-)
+    )
 from propertylist_app.services.geo import geocode_postcode_cached
 
 from django.utils import timezone
@@ -678,23 +678,64 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
     can_leave_review = serializers.SerializerMethodField()
     review_button_reason = serializers.SerializerMethodField()
     profile_image = serializers.SerializerMethodField()
+    tenant_name = serializers.SerializerMethodField()
+    landlord_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenancy
         fields = [
-            "id", "room", "landlord", "tenant", "profile_image", "proposed_by",
-            "move_in_date", "duration_months",
-            "landlord_confirmed_at", "tenant_confirmed_at",
-            "status",
-            "review_open_at", "review_deadline_at",
-            "can_leave_review", "review_button_reason",
-            "still_living_check_at", "still_living_confirmed_at",
-            "created_at", "updated_at",
-        ]
+                "id",
+                "room",
+                "landlord",
+                "landlord_name",
+                "tenant",
+                "tenant_name",
+                "profile_image",
+                "proposed_by",
+                "move_in_date",
+                "duration_months",
+                "landlord_confirmed_at",
+                "tenant_confirmed_at",
+                "status",
+                "review_open_at",
+                "review_deadline_at",
+                "can_leave_review",
+                "review_button_reason",
+                "still_living_check_at",
+                "still_living_confirmed_at",
+                "created_at",
+                "updated_at",
+            ]
+                    
         read_only_fields = fields
         
         
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_tenant_name(self, obj):
+        tenant = getattr(obj, "tenant", None)
+
+        if tenant is None:
+            return None
+
+        full_name = tenant.get_full_name().strip()
+
+        return full_name or tenant.username
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_name(self, obj):
+        landlord = getattr(obj, "landlord", None)
+
+        if landlord is None:
+            return None
+
+        full_name = landlord.get_full_name().strip()
+
+        return full_name or landlord.username
         
+        
+        
+
     @extend_schema_field(OpenApiTypes.URI)
     def get_profile_image(self, obj):
         tenant = getattr(obj, "tenant", None)
@@ -713,39 +754,51 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
 
-        return url    
-        
+        return url
+
+    def _get_review_eligibility(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return False, "You must be signed in to leave a review."
+
+        if user.id == obj.tenant_id:
+            review_role = Review.ROLE_TENANT_TO_LANDLORD
+        elif user.id == obj.landlord_id:
+            review_role = Review.ROLE_LANDLORD_TO_TENANT
+        else:
+            return False, "You are not part of this tenancy."
+
+        if obj.status != "ended":
+            return False, "A review can only be left after the tenancy has ended."
+
+        if Review.objects.filter(
+            tenancy=obj,
+            role=review_role,
+        ).exists():
+            return False, "You have already submitted a review for this tenancy."
+
+        now = timezone.now()
+
+        if not obj.review_open_at:
+            return False, "Review window is not open yet."
+
+        if now < obj.review_open_at:
+            return False, "Review will be available later."
+
+        if obj.review_deadline_at and now > obj.review_deadline_at:
+            return False, "Review window has closed."
+
+        return True, "Review is available."
 
     def get_can_leave_review(self, obj):
-        now = timezone.now()
-
-        if not obj.review_open_at:
-            return False
-
-        if now < obj.review_open_at:
-            return False
-
-        if obj.review_deadline_at and now > obj.review_deadline_at:
-            return False
-
-        return True
+        can_leave_review, _ = self._get_review_eligibility(obj)
+        return can_leave_review
 
     def get_review_button_reason(self, obj):
-        now = timezone.now()
-
-        if not obj.review_open_at:
-            return "Review window is not open yet."
-
-        if now < obj.review_open_at:
-            return "Review will be available later."
-
-        if obj.review_deadline_at and now > obj.review_deadline_at:
-            return "Review window has closed."
-
-        return "Review is available."
-
-
-
+        _, reason = self._get_review_eligibility(obj)
+        return reason
 
 class UserReviewSummarySerializer(serializers.Serializer):
     landlord_count = serializers.IntegerField()
@@ -762,6 +815,45 @@ class CreateViewingBookingSerializer(serializers.Serializer):
     slot_id = serializers.IntegerField(required=False)
     room_id = serializers.IntegerField(required=False)
     start = serializers.DateTimeField(required=False)
+
+
+
+
+class RoomPhotoResponseSerializer(serializers.Serializer):
+    """
+    Schema and response structure for a photo embedded in RoomSerializer.
+    """
+
+    id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    url = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    original_image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    preview_image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    status = serializers.CharField(
+        read_only=True,
+    )
+    is_main = serializers.BooleanField(
+        read_only=True,
+    )
+
+
+
+
 
 
 
@@ -784,8 +876,10 @@ class RoomSerializer(serializers.ModelSerializer):
     owner_name = serializers.SerializerMethodField(read_only=True)
     owner_username = serializers.SerializerMethodField(read_only=True)
     owner_avatar = serializers.SerializerMethodField(read_only=True)
-    main_photo = serializers.SerializerMethodField(read_only=True)
-    photo_count = serializers.SerializerMethodField(read_only=True)
+    cover_image = serializers.SerializerMethodField(read_only=True)
+    other_images = serializers.SerializerMethodField(read_only=True)
+    preview_image = serializers.SerializerMethodField(read_only=True)
+    image_status = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
     landlord_type = serializers.SerializerMethodField(read_only=True)
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
@@ -1111,44 +1205,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return url
 
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_main_photo(self, obj) -> str:
-        request = self.context.get("request")
 
-        images_qs = obj.roomimage_set.filter(
-            status__in=["approved", "pending"]
-        ).order_by("id")
-
-        approved_photo = images_qs.first()
-
-        if approved_photo and approved_photo.image:
-            url = approved_photo.image.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-
-        legacy_image = getattr(obj, "image", None)
-
-        if legacy_image:
-            url = legacy_image.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-
-        return ""
-
-    @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj) -> int:
-        approved_count = obj.roomimage_set.filter(status="approved").count()
-        legacy_image = getattr(obj, "image", None)
-
-        if approved_count:
-            return approved_count
-
-        if legacy_image:
-            return 1
-
-        return 0
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1613,50 +1670,154 @@ class RoomSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(url)
         return url
 
-    @extend_schema_field(OpenApiTypes.URI)
-    def get_main_photo(self, obj) -> str | None:
-        approved_images = getattr(obj, "prefetched_approved_images", None)
+    def _viewer_is_room_owner(self, obj) -> bool:
+        """
+        Return True only when the authenticated requester owns this room.
 
-        if approved_images is not None:
-            first_image = approved_images[0] if approved_images else None
-        else:
-            first_image = (
-                obj.roomimage_set.filter(status="approved")
-                .order_by("id")
-                .first()
-            )
+        Public seekers must only receive approved photos.
+        The room owner may also see pending and rejected photos so they can
+        understand the moderation state of every upload.
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
 
-        if first_image and first_image.image:
-            url = first_image.image.url
-        elif getattr(obj, "image", None):
-            url = obj.image.url
-        else:
+        return bool(
+            user
+            and user.is_authenticated
+            and obj.property_owner_id == user.id
+        )
+
+    def _room_images(self, obj):
+        """
+        Return all uploaded images so the serializer can calculate one
+        overall public image-verification status.
+        """
+        return list(
+            obj.roomimage_set.filter(
+                status__in=["approved", "pending", "rejected"]
+            ).order_by("id")
+        )
+
+    def _absolute_media_url(self, file_field) -> str | None:
+        """
+        Convert an ImageField into a frontend-ready absolute URL.
+        """
+        if not file_field:
+            return None
+
+        try:
+            url = file_field.url
+        except (ValueError, AttributeError):
             return None
 
         request = self.context.get("request")
+
         if request is not None:
             return request.build_absolute_uri(url)
+
         return url
 
-        request = self.context.get("request")
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+    def _image_payload(self, obj) -> dict:
+        """
+        Return one public image state for the room.
 
-    @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj):
-        val = getattr(obj, "photo_count", None)
-        if val is not None:
-            return val
+        Approved:
+        - cover_image contains the first approved image
+        - other_images contains the remaining approved images
+        - preview_image is null
 
-        approved_images = getattr(obj, "prefetched_approved_images", None)
-        if approved_images is not None:
-            approved = len(approved_images)
+        Pending/rejected:
+        - cover_image is null
+        - other_images is null
+        - preview_image contains the first available blurred preview
+        """
+        images = self._room_images(obj)
+
+        if not images:
+            legacy_url = self._absolute_media_url(
+                getattr(obj, "image", None)
+            )
+
+            if legacy_url:
+                return {
+                    "cover_image": legacy_url,
+                    "other_images": [],
+                    "preview_image": None,
+                    "image_status": "approved",
+                }
+
+            return {
+                "cover_image": None,
+                "other_images": None,
+                "preview_image": None,
+                "image_status": None,
+            }
+
+        approved_count = sum(
+            1 for image in images if image.status == "approved"
+        )
+        pending_count = sum(
+            1 for image in images if image.status == "pending"
+        )
+
+        if approved_count >= 3:
+            image_status = "approved"
+        elif pending_count > 0:
+            image_status = "pending"
         else:
-            approved = obj.roomimage_set.filter(status="approved").count()
+            image_status = "rejected"
 
-        legacy = 1 if getattr(obj, "image", None) else 0
-        return approved + legacy
+        if image_status != "approved":
+            preview_url = next(
+                (
+                    self._absolute_media_url(image.preview_image)
+                    for image in images
+                    if image.preview_image
+                ),
+                None,
+            )
+
+            return {
+                "cover_image": None,
+                "other_images": None,
+                "preview_image": preview_url,
+                "image_status": image_status,
+            }
+
+        approved_urls = [
+            self._absolute_media_url(image.image)
+            for image in images
+            if image.status == "approved" and image.image
+        ]
+        approved_urls = [url for url in approved_urls if url]
+
+        return {
+            "cover_image": approved_urls[0] if approved_urls else None,
+            "other_images": approved_urls[1:],
+            "preview_image": None,
+            "image_status": "approved",
+        }
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_cover_image(self, obj) -> str | None:
+        return self._image_payload(obj)["cover_image"]
+
+    @extend_schema_field(
+        serializers.ListField(
+            child=serializers.URLField(),
+            allow_null=True,
+        )
+    )
+    def get_other_images(self, obj) -> list[str] | None:
+        return self._image_payload(obj)["other_images"]
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_preview_image(self, obj) -> str | None:
+        return self._image_payload(obj)["preview_image"]
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_image_status(self, obj) -> str | None:
+        return self._image_payload(obj)["image_status"]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1738,26 +1899,89 @@ class RoomPreviewSerializer(serializers.Serializer):
     def get_room(self, obj) -> Dict[str, Any]:
         return RoomSerializer(obj, context=self.context).data
 
-    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
+    @extend_schema_field(
+    RoomPhotoResponseSerializer(many=True)
+    )
     def get_photos(self, obj) -> List[Dict[str, Any]]:
-        # keep your existing logic exactly as-is
+        """
+        Return all owner-visible photos for the room preview endpoint.
+
+        Approved images use the original image.
+        Pending images use preview_image when available.
+        """
         request = self.context.get("request")
         photos = []
 
-        qs = obj.roomimage_set.filter(status__in=["approved", "pending"]).order_by("id")
-        for img in qs:
-            if not img.image:
-                continue
-            url = img.image.url
-            if request is not None:
-                url = request.build_absolute_uri(url)
-            photos.append({"id": img.id, "url": url, "status": img.status})
+        qs = obj.roomimage_set.filter(
+            status__in=["approved", "pending", "rejected"]
+        ).order_by("id")
 
-        if not photos and obj.image:
-            url = obj.image.url
+        for index, img in enumerate(qs):
+            original_url = None
+            preview_url = None
+
+            if img.image:
+                try:
+                    original_url = img.image.url
+                except (ValueError, AttributeError):
+                    original_url = None
+
+            if img.preview_image:
+                try:
+                    preview_url = img.preview_image.url
+                except (ValueError, AttributeError):
+                    preview_url = None
+
             if request is not None:
-                url = request.build_absolute_uri(url)
-            photos.append({"id": None, "url": url, "status": "legacy"})
+                if original_url:
+                    original_url = request.build_absolute_uri(original_url)
+
+                if preview_url:
+                    preview_url = request.build_absolute_uri(preview_url)
+
+            if img.status == "pending" and preview_url:
+                display_url = preview_url
+            else:
+                display_url = original_url
+
+            if not display_url:
+                continue
+
+            photos.append(
+                {
+                    "id": img.id,
+                    "image": display_url,
+                    "url": display_url,
+                    "original_image": original_url,
+                    "preview_image": preview_url,
+                    "status": img.status,
+                    "is_main": index == 0,
+                }
+            )
+
+        legacy_image = getattr(obj, "image", None)
+
+        if not photos and legacy_image:
+            try:
+                legacy_url = legacy_image.url
+            except (ValueError, AttributeError):
+                legacy_url = None
+
+            if legacy_url and request is not None:
+                legacy_url = request.build_absolute_uri(legacy_url)
+
+            if legacy_url:
+                photos.append(
+                    {
+                        "id": None,
+                        "image": legacy_url,
+                        "url": legacy_url,
+                        "original_image": legacy_url,
+                        "preview_image": None,
+                        "status": "legacy",
+                        "is_main": True,
+                    }
+                )
 
         return photos
 
@@ -1799,6 +2023,9 @@ class SearchFiltersSerializer(serializers.Serializer):
     def validate_postcode(self, value):
         value = sanitize_plain_text(value, max_len=20).upper()
         return normalize_uk_postcode(value)
+    
+ 
+    
 
     def validate_street(self, value):
         return sanitize_plain_text(value, max_len=120)
@@ -2293,6 +2520,31 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return normalize_uk_postcode(value)
         except Exception:
             raise serializers.ValidationError("Invalid UK postcode.")
+        
+        
+    def validate_occupation(self, value):
+        if value is None:
+            return ""
+
+        value = validate_plain_text(value)
+
+        if not value:
+            return ""
+
+        return value
+
+    def validate_about_you(self, value):
+        if value is None:
+            return ""
+
+        value = validate_plain_text(value)
+
+        if not value:
+            return ""
+
+        return value    
+        
+        
 
     def validate_date_of_birth(self, value):
         if not value:
@@ -2606,16 +2858,28 @@ class ContactMessageSerializer(serializers.ModelSerializer):
         return normalise_email(value)
 
     def validate_subject(self, value):
-        value = sanitize_plain_text(value, max_len=200)
+        value = validate_plain_text(value, max_len=200)
+
         if not value:
             raise serializers.ValidationError("Subject is required.")
+
         return value
 
     def validate_message(self, value):
-        value = sanitize_plain_text(value, max_len=5000)
+        value = validate_plain_text(value, max_len=5000)
+
         if not value:
             raise serializers.ValidationError("Message is required.")
+
         return value
+
+
+
+
+
+
+
+
 
 
 # --------------------
@@ -2627,53 +2891,38 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RoomImage
-        fields = ["id", "room", "image", "status"]
+        fields = [
+            "id",
+            "room",
+            "image",
+            "status",
+            "preview_image",
+        ]
         read_only_fields = ["room", "status"]
 
     def get_image(self, obj):
-        if not obj.image:
+        """
+        Return the original image only after approval.
+
+        Pending and rejected images must not expose the original file.
+        Their blurred preview is returned separately through preview_image.
+        """
+        if obj.status != "approved" or not obj.image:
             return None
 
-        url = obj.image.url
+        try:
+            url = obj.image.url
+        except (ValueError, AttributeError):
+            return None
+
         request = self.context.get("request")
 
         if request is not None:
             return request.build_absolute_uri(url)
 
         return url
-
-    # generate thumbnails after upload
-    def create(self, validated_data):
-            request = self.context.get("request")
-
-            #  ALWAYS get room from context (NOT payload)
-            room = self.context.get("room")
-
-            if not room:
-                raise ValidationError("Room is required for image upload")
-
-            validated_data["room"] = room
-            validated_data["property_owner"] = room.property_owner
-            validated_data["category"] = room.category
-
-            obj = super().create(validated_data)
-
-            f = validated_data.get("image")
-            if f:
-                from django.utils.crypto import get_random_string
-                from propertylist_app.services.image import generate_thumbnails_and_return_paths
-
-                stem = get_random_string(12)
-                base_dir = "room_images/thumbs"
-
-                try:
-                    generate_thumbnails_and_return_paths(f, base_dir, stem)
-                except Exception:
-                    pass
-
-            return obj
-
-
+        
+    
 
 class AvatarUploadResponseSerializer(serializers.Serializer):
     avatar = serializers.URLField(allow_null=True)

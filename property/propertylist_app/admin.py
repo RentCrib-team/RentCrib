@@ -263,14 +263,44 @@ class RoomAdmin(admin.ModelAdmin):
 
 # ---------- photo_verification_upload ----------
 
-@admin.action(description="Approve selected photos (set status=approved)")
+@admin.action(description="Approve selected photos")
 def approve_photos(modeladmin, request, queryset):
-    queryset.update(status="approved")
+    checked_at = timezone.now()
+
+    updated = queryset.update(
+        status=RoomImage.STATUS_APPROVED,
+        moderation_reason=RoomImage.MODERATION_MANUAL_REVIEW,
+        moderation_notes=(
+            "Manually approved by admin "
+            f"{request.user.get_username()}."
+        ),
+        moderation_checked_at=checked_at,
+    )
+
+    modeladmin.message_user(
+        request,
+        f"{updated} photo(s) approved.",
+    )
 
 
-@admin.action(description="Reject selected photos (set status=rejected)")
+@admin.action(description="Reject selected photos")
 def reject_photos(modeladmin, request, queryset):
-    queryset.update(status="rejected")
+    checked_at = timezone.now()
+
+    updated = queryset.update(
+        status=RoomImage.STATUS_REJECTED,
+        moderation_reason=RoomImage.MODERATION_MANUAL_REVIEW,
+        moderation_notes=(
+            "Manually rejected by admin "
+            f"{request.user.get_username()}."
+        ),
+        moderation_checked_at=checked_at,
+    )
+
+    modeladmin.message_user(
+        request,
+        f"{updated} photo(s) rejected.",
+    )
     
     
 
@@ -477,13 +507,74 @@ class SavedRoomAdmin(admin.ModelAdmin):
 
 @admin.register(RoomImage)
 class RoomImageAdmin(admin.ModelAdmin):
-    list_display = ("id", "room", "status", "image", "uploaded_at")
-    list_filter = ("room", "status")
-    search_fields = ("room__title",)
-    readonly_fields = ("uploaded_at",)
-    actions = [approve_photos, reject_photos]
+    list_display = (
+        "id",
+        "room",
+        "status",
+        "moderation_reason",
+        "uploaded_at",
+        "moderation_checked_at",
+        "image",
+    )
 
+    list_filter = (
+        "status",
+        "moderation_reason",
+        "uploaded_at",
+    )
 
+    search_fields = (
+        "room__title",
+        "room__property_owner__username",
+        "room__property_owner__email",
+        "moderation_notes",
+    )
+
+    readonly_fields = (
+        "uploaded_at",
+        "moderation_checked_at",
+    )
+
+    fieldsets = (
+        (
+            "Photo",
+            {
+                "fields": (
+                    "room",
+                    "image",
+                    "preview_image",
+                ),
+            },
+        ),
+        (
+            "Moderation",
+            {
+                "fields": (
+                    "status",
+                    "moderation_reason",
+                    "moderation_notes",
+                    "moderation_checked_at",
+                ),
+            },
+        ),
+        (
+            "Audit",
+            {
+                "fields": (
+                    "uploaded_at",
+                ),
+            },
+        ),
+    )
+
+    actions = [
+        approve_photos,
+        reject_photos,
+    ]
+
+    ordering = (
+        "-uploaded_at",
+    )
 
 @admin.register(IdempotencyKey)
 class IdempotencyKeyAdmin(admin.ModelAdmin):

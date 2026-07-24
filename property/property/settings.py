@@ -79,8 +79,10 @@ if not DEBUG and not TESTING:
     SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = "DENY"
 
-    # HSTS (start low; increase later once confirmed stable)
-    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600"))  # 1 hour
+ # Enforce HTTPS for one year once the browser has visited the HTTPS service.
+    SECURE_HSTS_SECONDS = int(
+        os.getenv("SECURE_HSTS_SECONDS", "31536000")
+    )
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "false").lower() in {"1", "true", "yes"}
 
@@ -202,6 +204,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
+    "property.middleware.SecurityHeadersMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -328,6 +331,7 @@ REST_FRAMEWORK = {
 
         "user": "1000/hour",
         "anon": "100/hour",
+        "room-create": "10/hour",
 
         "login": "5/minute",
         "register": "5/hour",

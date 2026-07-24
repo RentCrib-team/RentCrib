@@ -54,6 +54,36 @@ class MessageUserThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
+class RoomCreateThrottle(SimpleRateThrottle):
+    """
+    Per-user throttle for creating room listings.
+
+    Only authenticated POST requests are counted. Reading the public room
+    list does not consume this throttle allowance.
+    """
+
+    scope = "room-create"
+
+    def get_rate(self):
+        return api_settings.DEFAULT_THROTTLE_RATES.get(self.scope)
+
+    def get_cache_key(self, request, view):
+        if request.method != "POST":
+            return None
+
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return None
+
+        ident = str(user.pk)
+
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": ident,
+        }
+
+
+
 class  ReviewCreateThrottle(UserRateThrottle):
   scope = 'review-create'
 
@@ -69,6 +99,15 @@ class RegisterScopedThrottle(ScopedRateThrottle):
 
 class PasswordResetScopedThrottle(ScopedRateThrottle):
     scope = "password-reset"
+
+    def get_rate(self):
+        """
+        Read the current configured rate.
+
+        This keeps production settings authoritative and allows focused tests
+        to temporarily override this scope without stale DRF cached values.
+        """
+        return api_settings.DEFAULT_THROTTLE_RATES.get(self.scope)
 
 class PasswordResetConfirmScopedThrottle(ScopedRateThrottle):
     scope = "password-reset-confirm"
