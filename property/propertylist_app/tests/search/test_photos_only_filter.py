@@ -186,7 +186,7 @@ def test_public_search_main_photo_exposes_only_approved_room_images():
         "/media/rooms/legacy-main.jpg"
     )
     assert legacy_payload["other_images"] == []
-    assert legacy_payload["preview_image"] is None
+   
     assert legacy_payload["image_status"] == "approved"
 
     assert rooms_by_id[pending_room.id]["cover_image"] is None
@@ -202,5 +202,5 @@ def test_public_search_main_photo_exposes_only_approved_room_images():
     assert approved_cover is not None
     assert approved_cover.endswith("/media/rooms/approved-main.jpg")
     assert rooms_by_id[approved_room.id]["other_images"] == []
-    assert rooms_by_id[approved_room.id]["preview_image"] is None
+    
     assert rooms_by_id[approved_room.id]["image_status"] == "approved"

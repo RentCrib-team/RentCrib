@@ -10,7 +10,7 @@ from datetime import date as _date  # add if not already present
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.conf import settings
-from propertylist_app.services.image import generate_blurred_preview
+
 from typing import Optional, Any, Dict, List
 from drf_spectacular.types import OpenApiTypes
 
@@ -840,10 +840,7 @@ class RoomPhotoResponseSerializer(serializers.Serializer):
         read_only=True,
         allow_null=True,
     )
-    preview_image = serializers.URLField(
-        read_only=True,
-        allow_null=True,
-    )
+   
     status = serializers.CharField(
         read_only=True,
     )
@@ -878,7 +875,6 @@ class RoomSerializer(serializers.ModelSerializer):
     owner_avatar = serializers.SerializerMethodField(read_only=True)
     cover_image = serializers.SerializerMethodField(read_only=True)
     other_images = serializers.SerializerMethodField(read_only=True)
-    preview_image = serializers.SerializerMethodField(read_only=True)
     image_status = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
     landlord_type = serializers.SerializerMethodField(read_only=True)
@@ -1724,12 +1720,12 @@ class RoomSerializer(serializers.ModelSerializer):
         Approved:
         - cover_image contains the first approved image
         - other_images contains the remaining approved images
-        - preview_image is null
+        
 
         Pending/rejected:
         - cover_image is null
         - other_images is null
-        - preview_image contains the first available blurred preview
+       
         """
         images = self._room_images(obj)
 
@@ -1742,14 +1738,12 @@ class RoomSerializer(serializers.ModelSerializer):
                 return {
                     "cover_image": legacy_url,
                     "other_images": [],
-                    "preview_image": None,
                     "image_status": "approved",
                 }
 
             return {
                 "cover_image": None,
                 "other_images": None,
-                "preview_image": None,
                 "image_status": None,
             }
 
@@ -1768,19 +1762,9 @@ class RoomSerializer(serializers.ModelSerializer):
             image_status = "rejected"
 
         if image_status != "approved":
-            preview_url = next(
-                (
-                    self._absolute_media_url(image.preview_image)
-                    for image in images
-                    if image.preview_image
-                ),
-                None,
-            )
-
             return {
                 "cover_image": None,
                 "other_images": None,
-                "preview_image": preview_url,
                 "image_status": image_status,
             }
 
@@ -1794,7 +1778,7 @@ class RoomSerializer(serializers.ModelSerializer):
         return {
             "cover_image": approved_urls[0] if approved_urls else None,
             "other_images": approved_urls[1:],
-            "preview_image": None,
+          
             "image_status": "approved",
         }
 
@@ -1811,9 +1795,7 @@ class RoomSerializer(serializers.ModelSerializer):
     def get_other_images(self, obj) -> list[str] | None:
         return self._image_payload(obj)["other_images"]
 
-    @extend_schema_field(OpenApiTypes.URI)
-    def get_preview_image(self, obj) -> str | None:
-        return self._image_payload(obj)["preview_image"]
+    
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_image_status(self, obj) -> str | None:
@@ -1907,7 +1889,7 @@ class RoomPreviewSerializer(serializers.Serializer):
         Return all owner-visible photos for the room preview endpoint.
 
         Approved images use the original image.
-        Pending images use preview_image when available.
+       
         """
         request = self.context.get("request")
         photos = []
@@ -1918,7 +1900,7 @@ class RoomPreviewSerializer(serializers.Serializer):
 
         for index, img in enumerate(qs):
             original_url = None
-            preview_url = None
+            
 
             if img.image:
                 try:
@@ -1926,23 +1908,13 @@ class RoomPreviewSerializer(serializers.Serializer):
                 except (ValueError, AttributeError):
                     original_url = None
 
-            if img.preview_image:
-                try:
-                    preview_url = img.preview_image.url
-                except (ValueError, AttributeError):
-                    preview_url = None
+            
 
             if request is not None:
                 if original_url:
                     original_url = request.build_absolute_uri(original_url)
 
-                if preview_url:
-                    preview_url = request.build_absolute_uri(preview_url)
-
-            if img.status == "pending" and preview_url:
-                display_url = preview_url
-            else:
-                display_url = original_url
+            display_url = original_url
 
             if not display_url:
                 continue
@@ -1953,7 +1925,7 @@ class RoomPreviewSerializer(serializers.Serializer):
                     "image": display_url,
                     "url": display_url,
                     "original_image": original_url,
-                    "preview_image": preview_url,
+                   
                     "status": img.status,
                     "is_main": index == 0,
                 }
@@ -1977,7 +1949,7 @@ class RoomPreviewSerializer(serializers.Serializer):
                         "image": legacy_url,
                         "url": legacy_url,
                         "original_image": legacy_url,
-                        "preview_image": None,
+                        
                         "status": "legacy",
                         "is_main": True,
                     }
@@ -2896,7 +2868,7 @@ class RoomImageSerializer(serializers.ModelSerializer):
             "room",
             "image",
             "status",
-            "preview_image",
+           
         ]
         read_only_fields = ["room", "status"]
 
@@ -2905,7 +2877,7 @@ class RoomImageSerializer(serializers.ModelSerializer):
         Return the original image only after approval.
 
         Pending and rejected images must not expose the original file.
-        Their blurred preview is returned separately through preview_image.
+        
         """
         if obj.status != "approved" or not obj.image:
             return None

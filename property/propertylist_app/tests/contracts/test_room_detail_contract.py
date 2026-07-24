@@ -159,7 +159,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "pets_allowed",
         "cover_image",
         "other_images",
-        "preview_image",
+        
         "image_status",
         "preferred_flatmate_gender",
         "preferred_flatmate_language",
@@ -204,7 +204,7 @@ def test_room_detail_contract_v1_shape_and_types():
     
     assert payload["cover_image"] is None or isinstance(payload["cover_image"], str)
     assert payload["other_images"] is None or isinstance(payload["other_images"],list,)
-    assert payload["preview_image"] is None or isinstance(payload["preview_image"], str)
+    
     assert payload["image_status"] is None or payload["image_status"] in {
         "pending",
         "verified",

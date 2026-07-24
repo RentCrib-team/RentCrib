@@ -140,7 +140,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "pets_allowed",
         "cover_image",
         "other_images",
-        "preview_image",
+   
         "image_status",
         "preferred_flatmate_gender",
         "preferred_flatmate_language",
@@ -184,7 +184,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
     
     assert first["cover_image"] is None or isinstance(first["cover_image"], str)
     assert first["other_images"] is None or isinstance(first["other_images"],list,)
-    assert first["preview_image"] is None or isinstance(first["preview_image"], str)
+  
     assert first["image_status"] is None or first["image_status"] in {
         "pending",
         "verified",

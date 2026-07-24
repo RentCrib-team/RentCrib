@@ -935,11 +935,7 @@ class RoomImage(models.Model):
         blank=True,
     )
 
-    preview_image = models.ImageField(
-        upload_to="room_images/previews/",
-        null=True,
-        blank=True,
-    )
+   
 
     uploaded_at = models.DateTimeField(
         auto_now_add=True,

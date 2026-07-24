@@ -25,7 +25,7 @@ REQUIRED_MY_LISTINGS_ITEM_FIELDS = {
     "price_per_month",
     "cover_image",
     "other_images",
-    "preview_image",
+
     "image_status",
     "listing_state",
     "status",
