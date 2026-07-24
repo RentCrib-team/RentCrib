@@ -2874,27 +2874,45 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
     def get_image(self, obj):
         """
-        Return the original image only after approval.
+        Return image URL based on visibility rules.
 
-        Pending and rejected images must not expose the original file.
-        
+        Approved:
+            - visible to everyone.
+
+        Pending/rejected:
+            - visible only to the listing owner.
+            - hidden from public users.
         """
-        if obj.status != "approved" or not obj.image:
-            return None
 
-        try:
-            url = obj.image.url
-        except (ValueError, AttributeError):
+        if not obj.image:
             return None
 
         request = self.context.get("request")
 
-        if request is not None:
-            return request.build_absolute_uri(url)
+        # Approved images are public
+        if obj.status == "approved":
+            try:
+                url = obj.image.url
+            except (ValueError, AttributeError):
+                return None
 
-        return url
-        
-    
+            if request is not None:
+                return request.build_absolute_uri(url)
+
+            return url
+
+        # Pending/rejected images:
+        # only the landlord who owns the room can see them
+        if request and request.user.is_authenticated:
+            if obj.room.property_owner_id == request.user.id:
+                try:
+                    url = obj.image.url
+                except (ValueError, AttributeError):
+                    return None
+
+                return request.build_absolute_uri(url)
+
+        return None
 
 class AvatarUploadResponseSerializer(serializers.Serializer):
     avatar = serializers.URLField(allow_null=True)
