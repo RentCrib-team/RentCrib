@@ -542,7 +542,7 @@ class RoomImageAdmin(admin.ModelAdmin):
                 "fields": (
                     "room",
                     "image",
-                    "preview_image",
+                   
                 ),
             },
         ),
