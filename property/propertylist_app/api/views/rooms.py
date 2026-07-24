@@ -454,16 +454,27 @@ class RoomDetailAV(APIView):
         ser.save()
 
         if action == "preview":
-            total_photos = RoomImage.objects.filter(room=room).count()
+            approved_photo_count = (
+                RoomImage.objects
+                .filter(
+                    room=room,
+                    status="approved",
+                )
+                .exclude(image="")
+                .count()
+            )
 
-            if total_photos < 3:
+            if approved_photo_count < 3:
                 return Response(
                     {
                         "ok": False,
-                        "message": "Please upload at least 3 photos before previewing your listing.",
+                        "message": (
+                            "Please upload at least 3 approved photos "
+                            "before previewing your listing."
+                        ),
                         "errors": {
                             "photos_min_required": 3,
-                            "photos_current": total_photos,
+                            "photos_current": approved_photo_count,
                         },
                     },
                     status=status.HTTP_400_BAD_REQUEST,
@@ -765,17 +776,23 @@ class RoomPhotoUploadView(APIView):
         except Exception:
             pass
 
-        #  SINGLE SOURCE OF TRUTH: create ONCE
+        # SINGLE SOURCE OF TRUTH: create the image only once.
         image = RoomImage.objects.create(
             room=room,
             image=file_obj,
-            status="pending",
+            status=RoomImage.STATUS_PENDING,
+            moderation_reason=(
+                RoomImage.MODERATION_AWAITING_CHECK
+            ),
+            moderation_notes="Awaiting automated moderation.",
         )
-        
-                # Generate the blurred preview used while moderation is pending.
+
+        # Generate the blurred preview used while moderation is pending.
         try:
             from django.utils.crypto import get_random_string
-            from propertylist_app.services.image import generate_blurred_preview
+            from propertylist_app.services.image import (
+                generate_blurred_preview,
+            )
 
             image.image.open("rb")
 
@@ -785,7 +802,11 @@ class RoomPhotoUploadView(APIView):
             )
 
             image.preview_image = preview_path
-            image.save(update_fields=["preview_image"])
+            image.save(
+                update_fields=[
+                    "preview_image",
+                ]
+            )
 
         except Exception:
             import logging
@@ -794,17 +815,99 @@ class RoomPhotoUploadView(APIView):
                 "Failed to generate preview for RoomImage id=%s",
                 image.id,
             )
-        
 
-        #  AI moderation (non-blocking, safe)
+        # Run automated moderation and persist the complete outcome.
         try:
-            file_obj.seek(0)
-            if should_auto_approve_upload(file_obj):
-                image.status = "approved"
-                image.save(update_fields=["status"])
-        except Exception:
-            pass
+            import logging
 
+            from django.utils import timezone
+
+            file_obj.seek(0)
+
+            moderation_result = should_auto_approve_upload(
+                file_obj
+            )
+
+            # Backward compatibility for tests or temporary monkeypatches
+            # that still return True or False.
+            if isinstance(moderation_result, bool):
+                moderation_result = {
+                    "approved": moderation_result,
+                    "reason": (
+                        RoomImage.MODERATION_AUTO_APPROVED
+                        if moderation_result
+                        else RoomImage.MODERATION_MANUAL_REVIEW
+                    ),
+                    "notes": (
+                        "Automatically approved."
+                        if moderation_result
+                        else "Held for manual moderation review."
+                    ),
+                }
+
+            approved = bool(
+                moderation_result.get("approved")
+            )
+
+            image.status = (
+                RoomImage.STATUS_APPROVED
+                if approved
+                else RoomImage.STATUS_PENDING
+            )
+
+            image.moderation_reason = (
+                moderation_result.get("reason")
+                or (
+                    RoomImage.MODERATION_AUTO_APPROVED
+                    if approved
+                    else RoomImage.MODERATION_MANUAL_REVIEW
+                )
+            )
+
+            image.moderation_notes = (
+                moderation_result.get("notes")
+                or "Moderation completed without additional notes."
+            )
+
+            image.moderation_checked_at = timezone.now()
+
+            image.save(
+                update_fields=[
+                    "status",
+                    "moderation_reason",
+                    "moderation_notes",
+                    "moderation_checked_at",
+                ]
+            )
+
+        except Exception as exc:
+            import logging
+
+            from django.utils import timezone
+
+            logging.getLogger(__name__).exception(
+                "Automated moderation failed for RoomImage id=%s",
+                image.id,
+            )
+
+            image.status = RoomImage.STATUS_PENDING
+            image.moderation_reason = (
+                RoomImage.MODERATION_SERVICE_UNAVAILABLE
+            )
+            image.moderation_notes = (
+                "Unexpected moderation workflow failure. "
+                f"{exc.__class__.__name__}: {exc}"
+            )[:2000]
+            image.moderation_checked_at = timezone.now()
+
+            image.save(
+                update_fields=[
+                    "status",
+                    "moderation_reason",
+                    "moderation_notes",
+                    "moderation_checked_at",
+                ]
+            )
         # Response (serializer safe context)
         return ok_response(
             RoomImageSerializer(
