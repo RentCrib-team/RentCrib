@@ -41,7 +41,8 @@ def _patch_photo_upload_sources_of_500(monkeypatch):
     - this test is about moderation state (pending/hidden), not validator behaviour
     """
 
-    # patch the service module (RoomImage.save() imports from here)
+    # Patch validation and moderation helpers so this test focuses on
+    # upload moderation state rather than external services.
     from propertylist_app.services import image as image_service
 
     if hasattr(image_service, "validate_listing_photos"):

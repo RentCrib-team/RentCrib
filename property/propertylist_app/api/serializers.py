@@ -1753,14 +1753,19 @@ class RoomSerializer(serializers.ModelSerializer):
                 "image_status": None,
             }
 
-        statuses = {image.status for image in images}
+        approved_count = sum(
+            1 for image in images if image.status == "approved"
+        )
+        pending_count = sum(
+            1 for image in images if image.status == "pending"
+        )
 
-        if "rejected" in statuses:
-            image_status = "rejected"
-        elif "pending" in statuses:
+        if approved_count >= 3:
+            image_status = "approved"
+        elif pending_count > 0:
             image_status = "pending"
         else:
-            image_status = "approved"
+            image_status = "rejected"
 
         if image_status != "approved":
             preview_url = next(
