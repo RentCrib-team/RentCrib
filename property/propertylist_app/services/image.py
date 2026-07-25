@@ -424,7 +424,7 @@ Return JSON only in this exact shape:
             ],
             "generationConfig": {
                 "temperature": 0,
-                "maxOutputTokens": 200,
+                "maxOutputTokens": 500,
             },
         }
 
