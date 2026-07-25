@@ -477,6 +477,7 @@ Return JSON only in this exact shape:
             if "text" in part:
                 text += part.get("text") or ""
 
+        print("GEMINI RAW RESPONSE:", repr(text))
         result = _extract_json_object(text)
 
         if not result:
