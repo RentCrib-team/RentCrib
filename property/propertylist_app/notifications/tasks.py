@@ -195,23 +195,29 @@ def send_due_notifications() -> dict:
 @shared_task
 def notify_completed_viewings(hours_back: int = 24) -> int:
     """
-    Viewing done = booking ended.
+    Send the post-viewing notification 10 minutes after the selected
+    viewing start time.
 
-    Creates (only once per booking):
-      1) in-app notification (respects notify_confirmations)
-      2) queued email OutboundNotification using template key: "booking.completed"
+    Temporary staging/testing rule:
+    - Viewing starts at 08:00
+    - Post-viewing notification becomes eligible at 08:10
 
-    Returns number of bookings processed.
+    Creates only once per booking:
+      1) in-app notification
+      2) queued booking.completed email
     """
     now = timezone.now()
-    #completion_delay = timedelta(hours=1)
     completion_delay = timedelta(minutes=10)
-    completion_cutoff = now - completion_delay
-    window_start = completion_cutoff - timedelta(hours=hours_back)
+
+    # A booking becomes eligible when:
+    # booking.start + 10 minutes <= now
+    start_cutoff = now - completion_delay
+    window_start = start_cutoff - timedelta(hours=hours_back)
 
     qs = (
-        Booking.objects.filter(is_deleted=False, canceled_at__isnull=True)
-        .filter(end__gte=window_start, end__lte=completion_cutoff)
+        Booking.objects
+        .filter(is_deleted=False, canceled_at__isnull=True)
+        .filter(start__gte=window_start, start__lte=start_cutoff)
         .select_related("user", "room")
     )
 
@@ -237,11 +243,14 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
         room = getattr(booking, "room", None)
         room_title = getattr(room, "title", "your room")
 
-        end_local = timezone.localtime(booking.end)
-        end_str = end_local.strftime("%d %b %Y, %H:%M")
+        start_local = timezone.localtime(booking.start)
+        start_str = start_local.strftime("%d %b %Y, %H:%M")
 
         title = "Viewing completed"
-        body = f"Your viewing for '{room_title}' has finished ({end_str}). (booking_id={booking.id})"
+        body = (
+            f"Your viewing for '{room_title}' was scheduled for "
+            f"{start_str}. (booking_id={booking.id})"
+        )
 
         # ---------- 1) IN-APP (dedupe by booking_id) ----------
         already_in_app = Notification.objects.filter(
@@ -259,7 +268,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 preference_field="notify_confirmations",
             )
 
-        # ---------- 2) EMAIL QUEUE (dedupe by context.booking_id) ----------
+        # ---------- 2) EMAIL QUEUE (dedupe by booking_id) ----------
         if template:
             already_queued = OutboundNotification.objects.filter(
                 user=user,
@@ -280,7 +289,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                         },
                         "booking_id": booking.id,
                         "room_title": room_title,
-                        "ended_at": end_str,
+                        "ended_at": start_str,
                         "cta_url": _inbox_link(),
                     },
                 )
