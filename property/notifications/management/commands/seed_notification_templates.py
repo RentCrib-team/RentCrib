@@ -1910,12 +1910,20 @@ You can respond to this viewing request from your RentCrib account.
     """,
     },
     
+        {
+        "key": "booking.reminder",
+        "subject": "Reminder: your viewing starts soon for {{ room_title }}",
+        "body": """
+        {% include "emails/booking/reminder.html" %}
+        """,
+    },
+
     {
-    "key": "identity_verification.received",
-    "subject": "We've received your identity verification",
-    "body": """
-    {% include "emails/identity_verification/request_received.html" %}
-    """,
+        "key": "identity_verification.received",
+        "subject": "We've received your identity verification",
+        "body": """
+        {% include "emails/identity_verification/request_received.html" %}
+        """,
     },
     {
         "key": "identity_verification.approved",
