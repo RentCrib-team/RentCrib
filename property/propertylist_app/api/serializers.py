@@ -3,9 +3,11 @@ User = get_user_model()
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 import re
+
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.shortcuts import get_object_or_404
 from django.db import transaction
@@ -1284,93 +1286,168 @@ class RoomSerializer(serializers.ModelSerializer):
 
 
     def _sync_availability_slots(self, room):
+        """
+        Convert landlord-selected viewing availability into consecutive
+        30-minute bookable slots.
+
+        Rules:
+        - Start and end times are rounded up to the nearest quarter hour.
+        - Each viewing lasts 30 minutes.
+        - Slots never extend beyond the rounded end time.
+        - Recurring modes generate slots for the next 30 calendar days.
+        - Custom mode uses only the landlord-selected dates.
+        - Existing future slots with active bookings are preserved.
+
+        Example:
+        09:02-11:08 becomes 09:15-11:15 and creates:
+
+        09:15-09:45
+        09:45-10:15
+        10:15-10:45
+        10:45-11:15
+        """
+
+        def round_up_to_quarter(value):
             """
-            Convert landlord-selected viewing dates/times into real bookable slots.
+            Round a time upward to the next 00, 15, 30 or 45 minute boundary.
 
-            Example:
-            dates: ["2026-06-18"]
-            from: 07:00
-            to: 17:00
-
-            Creates:
-            07:00-07:30
-            07:30-08:00
-            etc.
-
-            Already-booked slots are not deleted.
+            Examples:
+            09:00 -> 09:00
+            09:02 -> 09:15
+            09:15 -> 09:15
+            09:16 -> 09:30
+            09:46 -> 10:00
             """
-            dates = room.view_available_custom_dates or []
-            start_time = room.availability_from_time
-            end_time = room.availability_to_time
+            total_minutes = (value.hour * 60) + value.minute
 
-            if room.view_available_days_mode != "custom":
-                return
+            if value.second or value.microsecond:
+                total_minutes += 1
 
-            if not dates or not start_time or not end_time:
-                return
+            rounded_minutes = ((total_minutes + 14) // 15) * 15
 
-            slot_minutes = 30
-            desired_slots = []
+            # datetime.combine() handles a rounded value of 24:00 more safely
+            # when the rounding is applied to a complete datetime below.
+            return rounded_minutes
 
-            for d in dates:
-                if isinstance(d, str):
-                    day = datetime.fromisoformat(d).date()
-                else:
-                    day = d
+        mode = room.view_available_days_mode
+        start_time = room.availability_from_time
+        end_time = room.availability_to_time
 
-                current = datetime.combine(day, start_time)
-                finish = datetime.combine(day, end_time)
+        valid_modes = {"everyday", "weekdays", "weekends", "custom"}
 
-                if timezone.is_naive(current):
-                    current = timezone.make_aware(current)
+        if mode not in valid_modes:
+            return
 
-                if timezone.is_naive(finish):
-                    finish = timezone.make_aware(finish)
+        if not start_time or not end_time:
+            return
 
-                while current + timedelta(minutes=slot_minutes) <= finish:
-                    slot_end = current + timedelta(minutes=slot_minutes)
-                    desired_slots.append((current, slot_end))
-                    current = slot_end
+        slot_minutes = 30
+        today = timezone.localdate()
+        desired_dates = []
 
-            desired_set = set(desired_slots)
+        if mode == "custom":
+            for selected_date in room.view_available_custom_dates or []:
+                if isinstance(selected_date, str):
+                    try:
+                        selected_date = datetime.fromisoformat(
+                            selected_date
+                        ).date()
+                    except (TypeError, ValueError):
+                        continue
 
-            # Remove only future unbooked slots that are no longer part of landlord's selected availability.
-            future_slots = AvailabilitySlot.objects.filter(
-                room=room,
-                end__gt=timezone.now(),
-            )
+                if selected_date >= today:
+                    desired_dates.append(selected_date)
 
-            for slot in future_slots:
-                has_booking = Booking.objects.filter(
-                    slot=slot,
-                    canceled_at__isnull=True,
-                    is_deleted=False,
-                ).exists()
+        else:
+            # Generate today plus the following 29 days.
+            for day_offset in range(30):
+                selected_date = today + timedelta(days=day_offset)
 
-                if has_booking:
+                if mode == "weekdays" and selected_date.weekday() >= 5:
                     continue
 
-                if (slot.start, slot.end) not in desired_set:
-                    slot.delete()
+                if mode == "weekends" and selected_date.weekday() < 5:
+                    continue
 
-            existing_set = set(
-                AvailabilitySlot.objects.filter(room=room).values_list("start", "end")
-            )
+                desired_dates.append(selected_date)
 
-            new_slots = [
-                AvailabilitySlot(
-                    room=room,
-                    start=start,
-                    end=end,
-                    max_bookings=1,
+        desired_slots = []
+
+        start_minutes = round_up_to_quarter(start_time)
+        end_minutes = round_up_to_quarter(end_time)
+
+        for selected_date in desired_dates:
+            day_start = datetime.combine(selected_date, time.min)
+            rounded_start = day_start + timedelta(minutes=start_minutes)
+            rounded_finish = day_start + timedelta(minutes=end_minutes)
+
+            if timezone.is_naive(rounded_start):
+                rounded_start = timezone.make_aware(
+                    rounded_start,
+                    timezone.get_current_timezone(),
                 )
-                for start, end in desired_slots
-                if (start, end) not in existing_set
-            ]
 
-            AvailabilitySlot.objects.bulk_create(new_slots, ignore_conflicts=True)
+            if timezone.is_naive(rounded_finish):
+                rounded_finish = timezone.make_aware(
+                    rounded_finish,
+                    timezone.get_current_timezone(),
+                )
 
+            current = rounded_start
 
+            while current + timedelta(minutes=slot_minutes) <= rounded_finish:
+                slot_end = current + timedelta(minutes=slot_minutes)
+
+                # Do not create a slot which has already ended.
+                if slot_end > timezone.now():
+                    desired_slots.append((current, slot_end))
+
+                current = slot_end
+
+        desired_set = set(desired_slots)
+
+        # Remove only future unbooked slots that no longer match the
+        # landlord's current availability selection.
+        future_slots = AvailabilitySlot.objects.filter(
+            room=room,
+            end__gt=timezone.now(),
+        )
+
+        for slot in future_slots:
+            has_active_booking = Booking.objects.filter(
+                slot=slot,
+                canceled_at__isnull=True,
+                is_deleted=False,
+            ).exists()
+
+            if has_active_booking:
+                continue
+
+            if (slot.start, slot.end) not in desired_set:
+                slot.delete()
+
+        existing_set = set(
+            AvailabilitySlot.objects.filter(room=room).values_list(
+                "start",
+                "end",
+            )
+        )
+
+        new_slots = [
+            AvailabilitySlot(
+                room=room,
+                start=slot_start,
+                end=slot_end,
+                max_bookings=1,
+            )
+            for slot_start, slot_end in desired_slots
+            if (slot_start, slot_end) not in existing_set
+        ]
+
+        AvailabilitySlot.objects.bulk_create(
+            new_slots,
+            ignore_conflicts=True,
+        )
 
 
     def create(self, validated_data):
@@ -2431,6 +2508,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "phone_verified_at",
             "advertiser_verified",
             "marketing_consent",
+            "preferred_timezone",
             "notify_rentout_updates",
             "notify_reminders",
             "notify_messages",
@@ -2531,6 +2609,24 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return ""
 
         return value    
+    
+    
+    def validate_preferred_timezone(self, value):
+        value = (value or "").strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Timezone is required."
+            )
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise serializers.ValidationError(
+                "Enter a valid IANA timezone, for example Europe/London."
+            )
+
+        return value
         
         
 
@@ -3676,13 +3772,32 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = (
+            # Consent
             "marketing_consent",
+
+            # Display and regional preferences
+            "theme",
+            "date_format",
+            "time_format",
+
+            # Delivery channels
+            "notify_email",
+            "notify_push",
+            "notify_sms",
+
+            # Existing RentCrib notification categories
             "notify_rentout_updates",
             "notify_reminders",
             "notify_messages",
             "notify_confirmations",
-        )
 
+            # Admin dashboard reports and alerts
+            "notify_weekly_reports",
+            "notify_monthly_reports",
+            "notify_system_alerts",
+            "notify_user_reports",
+            "notify_payment_alerts",
+        )
 
 
 class BookingPreflightRequestSerializer(serializers.Serializer):

@@ -692,7 +692,61 @@ class UserProfile(models.Model):
         default="en-GB",
     )
 
+    # Personal display and regional preferences.
+    # Store the IANA timezone name, for example: Europe/London.
+    preferred_timezone = models.CharField(
+        max_length=64,
+        default="Europe/London",
+    )
+
+    THEME_CHOICES = (
+        ("system", "System default"),
+        ("light", "Light"),
+        ("dark", "Dark"),
+    )
+    theme = models.CharField(
+        max_length=10,
+        choices=THEME_CHOICES,
+        default="system",
+    )
+
+    DATE_FORMAT_CHOICES = (
+        ("DD/MM/YYYY", "DD/MM/YYYY"),
+        ("MM/DD/YYYY", "MM/DD/YYYY"),
+        ("YYYY-MM-DD", "YYYY-MM-DD"),
+    )
+    date_format = models.CharField(
+        max_length=10,
+        choices=DATE_FORMAT_CHOICES,
+        default="DD/MM/YYYY",
+    )
+
+    TIME_FORMAT_CHOICES = (
+        ("12h", "12-hour"),
+        ("24h", "24-hour"),
+    )
+    time_format = models.CharField(
+        max_length=3,
+        choices=TIME_FORMAT_CHOICES,
+        default="24h",
+    )
+
+    # Notification delivery channels.
+    # These control how notifications may be delivered, while the existing
+    # notify_* fields below control which notification categories are enabled.
+    notify_email = models.BooleanField(default=True)
+    notify_push = models.BooleanField(default=True)
+    notify_sms = models.BooleanField(default=False)
+
+    # Admin account notification/report categories.
+    notify_weekly_reports = models.BooleanField(default=True)
+    notify_monthly_reports = models.BooleanField(default=True)
+    notify_system_alerts = models.BooleanField(default=True)
+    notify_user_reports = models.BooleanField(default=True)
+    notify_payment_alerts = models.BooleanField(default=True)
+
     notify_rentout_updates = models.BooleanField(default=True)
+    
     notify_reminders = models.BooleanField(default=True)
     notify_messages = models.BooleanField(default=True)
     notify_confirmations = models.BooleanField(default=True)

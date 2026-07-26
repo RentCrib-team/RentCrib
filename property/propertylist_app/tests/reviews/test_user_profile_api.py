@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
@@ -76,7 +76,9 @@ def test_profile_me_patch_updates_profile_fields_and_normalises_postcode():
     assert body["occupation"] == "Professional"
     assert body["postcode"] == "SO32 1AA"
     assert body["about_you"] == "Short bio"
-    assert body["address_manual"] == "1 Constant Close, Bursledon, Southampton, SO32 1AA"
+    assert body["address_manual"] == (
+        "1 Constant Close, Bursledon, Southampton, SO32 1AA"
+    )
     assert str(body["date_of_birth"]) == "1993-11-09"
 
 
@@ -84,9 +86,69 @@ def test_profile_me_patch_rejects_invalid_postcode():
     user = make_user("profile_bad_pc@example.com")
     client = auth_client(user)
 
-    res = client.patch(profile_me_url(), data={"postcode": "NOT_A_POSTCODE"}, format="json")
+    res = client.patch(
+        profile_me_url(),
+        data={"postcode": "NOT_A_POSTCODE"},
+        format="json",
+    )
+
     assert res.status_code == 400, getattr(res, "data", None)
 
     field_errors = res.data.get("field_errors", {})
     details = res.data.get("details", {})
+
     assert "postcode" in field_errors or "postcode" in details
+
+
+def test_profile_me_get_returns_preferred_timezone():
+    user = make_user("profile_timezone_get@example.com")
+    client = auth_client(user)
+
+    response = client.get(profile_me_url())
+
+    assert response.status_code == 200, getattr(response, "data", None)
+
+    body = _body(response)
+
+    assert body["preferred_timezone"] == "Europe/London"
+
+
+def test_profile_me_patch_updates_preferred_timezone():
+    user = make_user("profile_timezone_patch@example.com")
+    client = auth_client(user)
+
+    response = client.patch(
+        profile_me_url(),
+        data={"preferred_timezone": "Africa/Lagos"},
+        format="json",
+    )
+
+    assert response.status_code == 200, getattr(response, "data", None)
+
+    body = _body(response)
+
+    assert body["preferred_timezone"] == "Africa/Lagos"
+
+    user.profile.refresh_from_db()
+    assert user.profile.preferred_timezone == "Africa/Lagos"
+
+
+def test_profile_me_patch_rejects_invalid_preferred_timezone():
+    user = make_user("profile_timezone_invalid@example.com")
+    client = auth_client(user)
+
+    response = client.patch(
+        profile_me_url(),
+        data={"preferred_timezone": "London"},
+        format="json",
+    )
+
+    assert response.status_code == 400, getattr(response, "data", None)
+
+    field_errors = response.data.get("field_errors", {})
+    details = response.data.get("details", {})
+
+    assert (
+        "preferred_timezone" in field_errors
+        or "preferred_timezone" in details
+    )
