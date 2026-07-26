@@ -42,7 +42,29 @@ def ensure_notification_periodic_tasks(**kwargs) -> None:
             "args": "[]",
             "kwargs": "{}",
         },
+           
     )
+
+    PeriodicTask.objects.update_or_create(
+        name="notify-upcoming-bookings-every-minute",
+        defaults={
+            "task": "propertylist_app.services.tasks.notify_upcoming_bookings",
+            "crontab": every_minute,
+            "enabled": True,
+            "one_off": False,
+            "queue": "celery",
+            "routing_key": "celery",
+            "exchange": None,
+            "args": "[5]",
+            "kwargs": "{}",
+            "description": (
+                "Checks every minute for viewings starting within the next "
+                "5 minutes and queues seeker reminders."
+            ),
+        },
+    )
+
+
 
     # OPTIONAL: keep/repair your daily listing expiry task (if you want it here too)
     # daily_7am, _ = CrontabSchedule.objects.get_or_create(
