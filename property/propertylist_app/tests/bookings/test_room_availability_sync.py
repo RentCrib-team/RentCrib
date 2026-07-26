@@ -98,7 +98,7 @@ def test_room_custom_dates_generate_public_booking_slots():
         end_time="10:00",
     )
 
-    assert AvailabilitySlot.objects.filter(room=room).count() == 2
+    assert AvailabilitySlot.objects.filter(room=room).count() == 3
 
     client = APIClient()
     url = reverse("v1:room-slots-public", args=[room.id])
@@ -125,7 +125,7 @@ def test_room_custom_dates_generate_public_booking_slots():
     )
 
     assert slots_response.status_code == 200
-    assert len(slots_response.data.get("results", [])) == 2
+    assert len(slots_response.data.get("results", [])) == 3
 
 
 @pytest.mark.django_db
@@ -204,7 +204,7 @@ def test_everyday_mode_generates_slots_for_next_30_days():
 
     slots = AvailabilitySlot.objects.filter(room=room)
 
-    # Each complete future day has two 30-minute slots.
+    # Each complete future day has three 30-minute slots.
     tomorrow = timezone.localdate() + timedelta(days=1)
     final_day = timezone.localdate() + timedelta(days=29)
 
@@ -226,7 +226,7 @@ def test_everyday_mode_generates_slots_for_next_30_days():
             slots.filter(
                 start__date=expected_date,
             ).count()
-            == 2
+             == 3
         )
 
 
@@ -349,10 +349,11 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         AvailabilitySlot.objects.filter(room=room).order_by("start")
     )
 
-    assert len(original_slots) == 2
+    assert len(original_slots) == 3
 
     booked_slot = original_slots[0]
     obsolete_unbooked_slot = original_slots[1]
+    retained_matching_slot = original_slots[2]
 
     Booking.objects.create(
         user=tenant,
@@ -380,10 +381,16 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         pk=obsolete_unbooked_slot.pk,
     ).exists()
 
+    # Existing unbooked slot which still matches must be retained.
+    assert AvailabilitySlot.objects.filter(
+        pk=retained_matching_slot.pk,
+    ).exists()
+
     remaining_times = local_slot_times(room)
 
     assert remaining_times == [
         ("09:00", "09:30"),
         ("10:00", "10:30"),
         ("10:30", "11:00"),
+        ("11:00", "11:30"),
     ]

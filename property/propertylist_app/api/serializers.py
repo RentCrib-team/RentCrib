@@ -1291,20 +1291,26 @@ class RoomSerializer(serializers.ModelSerializer):
         30-minute bookable slots.
 
         Rules:
-        - Start and end times are rounded up to the nearest quarter hour.
+        - The start time is rounded up to the nearest quarter hour.
+        - The end time is rounded down to the nearest quarter hour and is
+          treated as the latest selectable viewing start time.
         - Each viewing lasts 30 minutes.
-        - Slots never extend beyond the rounded end time.
         - Recurring modes generate slots for the next 30 calendar days.
         - Custom mode uses only the landlord-selected dates.
         - Existing future slots with active bookings are preserved.
 
         Example:
-        09:02-11:08 becomes 09:15-11:15 and creates:
+        17:13-21:18 creates:
 
-        09:15-09:45
-        09:45-10:15
-        10:15-10:45
-        10:45-11:15
+        17:15-17:45
+        17:45-18:15
+        18:15-18:45
+        18:45-19:15
+        19:15-19:45
+        19:45-20:15
+        20:15-20:45
+        20:45-21:15
+        21:15-21:45
         """
 
         def round_up_to_quarter(value):
@@ -1323,17 +1329,33 @@ class RoomSerializer(serializers.ModelSerializer):
             if value.second or value.microsecond:
                 total_minutes += 1
 
-            rounded_minutes = ((total_minutes + 14) // 15) * 15
+            return ((total_minutes + 14) // 15) * 15
 
-            # datetime.combine() handles a rounded value of 24:00 more safely
-            # when the rounding is applied to a complete datetime below.
-            return rounded_minutes
+        def round_down_to_quarter(value):
+            """
+            Round a time downward to the previous 00, 15, 30 or 45
+            minute boundary.
+
+            Examples:
+            09:00 -> 09:00
+            09:02 -> 09:00
+            09:15 -> 09:15
+            09:18 -> 09:15
+            09:59 -> 09:45
+            """
+            total_minutes = (value.hour * 60) + value.minute
+            return (total_minutes // 15) * 15
 
         mode = room.view_available_days_mode
         start_time = room.availability_from_time
         end_time = room.availability_to_time
 
-        valid_modes = {"everyday", "weekdays", "weekends", "custom"}
+        valid_modes = {
+            "everyday",
+            "weekdays",
+            "weekends",
+            "custom",
+        }
 
         if mode not in valid_modes:
             return
@@ -1363,10 +1385,16 @@ class RoomSerializer(serializers.ModelSerializer):
             for day_offset in range(30):
                 selected_date = today + timedelta(days=day_offset)
 
-                if mode == "weekdays" and selected_date.weekday() >= 5:
+                if (
+                    mode == "weekdays"
+                    and selected_date.weekday() >= 5
+                ):
                     continue
 
-                if mode == "weekends" and selected_date.weekday() < 5:
+                if (
+                    mode == "weekends"
+                    and selected_date.weekday() < 5
+                ):
                     continue
 
                 desired_dates.append(selected_date)
@@ -1374,12 +1402,28 @@ class RoomSerializer(serializers.ModelSerializer):
         desired_slots = []
 
         start_minutes = round_up_to_quarter(start_time)
-        end_minutes = round_up_to_quarter(end_time)
+        latest_start_minutes = round_down_to_quarter(end_time)
+
+        # Do not generate slots if the rounded latest start is before
+        # the rounded first start.
+        if latest_start_minutes < start_minutes:
+            return
+
+        # Do not generate slots if the rounded latest start is before
+        # the rounded first start.
+        if latest_start_minutes < start_minutes:
+            return
 
         for selected_date in desired_dates:
             day_start = datetime.combine(selected_date, time.min)
-            rounded_start = day_start + timedelta(minutes=start_minutes)
-            rounded_finish = day_start + timedelta(minutes=end_minutes)
+
+            rounded_start = day_start + timedelta(
+                minutes=start_minutes
+            )
+
+            latest_start = day_start + timedelta(
+                minutes=latest_start_minutes
+            )
 
             if timezone.is_naive(rounded_start):
                 rounded_start = timezone.make_aware(
@@ -1387,16 +1431,18 @@ class RoomSerializer(serializers.ModelSerializer):
                     timezone.get_current_timezone(),
                 )
 
-            if timezone.is_naive(rounded_finish):
-                rounded_finish = timezone.make_aware(
-                    rounded_finish,
+            if timezone.is_naive(latest_start):
+                latest_start = timezone.make_aware(
+                    latest_start,
                     timezone.get_current_timezone(),
                 )
 
             current = rounded_start
 
-            while current + timedelta(minutes=slot_minutes) <= rounded_finish:
-                slot_end = current + timedelta(minutes=slot_minutes)
+            while current <= latest_start:
+                slot_end = current + timedelta(
+                    minutes=slot_minutes
+                )
 
                 # Do not create a slot which has already ended.
                 if slot_end > timezone.now():
@@ -1427,7 +1473,9 @@ class RoomSerializer(serializers.ModelSerializer):
                 slot.delete()
 
         existing_set = set(
-            AvailabilitySlot.objects.filter(room=room).values_list(
+            AvailabilitySlot.objects.filter(
+                room=room
+            ).values_list(
                 "start",
                 "end",
             )
@@ -1441,15 +1489,17 @@ class RoomSerializer(serializers.ModelSerializer):
                 max_bookings=1,
             )
             for slot_start, slot_end in desired_slots
-            if (slot_start, slot_end) not in existing_set
+            if (
+                slot_start,
+                slot_end,
+            ) not in existing_set
         ]
 
         AvailabilitySlot.objects.bulk_create(
             new_slots,
             ignore_conflicts=True,
         )
-
-
+        
     def create(self, validated_data):
         room = super().create(validated_data)
 
