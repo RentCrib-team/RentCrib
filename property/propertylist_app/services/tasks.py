@@ -87,9 +87,16 @@ def send_new_message_email(message_id: int) -> int:
 
 
 @shared_task
-def notify_upcoming_bookings(hours_ahead: int = 24):
+def notify_upcoming_bookings(minutes_ahead: int = 5):
+    """
+    Send an upcoming-viewing reminder shortly before the viewing starts.
+
+    Temporary staging/testing rule:
+    - Viewing at 08:00
+    - Reminder becomes eligible from 07:55
+    """
     now = timezone.now()
-    window_end = now + timedelta(hours=hours_ahead)
+    window_end = now + timedelta(minutes=minutes_ahead)
 
     qs = (
         Booking.objects
