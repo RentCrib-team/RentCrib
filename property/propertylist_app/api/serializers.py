@@ -484,48 +484,50 @@ class TenancyProposalSerializer(serializers.Serializer):
         landlord = validated_data["landlord"]
         tenant = validated_data["tenant"]
 
-        # proposer auto-confirms their side
+        existing_tenancy = (
+            Tenancy.objects
+            .select_for_update()
+            .filter(
+                room=room,
+                tenant=tenant,
+            )
+            .first()
+        )
+
+        if existing_tenancy is not None:
+            if user.id == landlord.id:
+                other_party = "tenant"
+            else:
+                other_party = "landlord"
+
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        (
+                            f"Your {other_party} has already created the tenancy "
+                            "information for this room. Please review the existing "
+                            "tenancy information instead."
+                        )
+                    ]
+                }
+            )
+
+        # The party submitting the original tenancy information
+        # automatically confirms their own side.
         landlord_confirmed_at = now if user.id == landlord.id else None
         tenant_confirmed_at = now if user.id == tenant.id else None
 
-        tenancy, created = Tenancy.objects.get_or_create(
+        tenancy = Tenancy.objects.create(
             room=room,
+            landlord=landlord,
             tenant=tenant,
-            defaults={
-                "landlord": landlord,
-                "proposed_by": user,
-                "move_in_date": validated_data["move_in_date"],
-                "duration_months": validated_data["duration_months"],
-                "landlord_confirmed_at": landlord_confirmed_at,
-                "tenant_confirmed_at": tenant_confirmed_at,
-                "status": Tenancy.STATUS_PROPOSED,
-            },
+            proposed_by=user,
+            move_in_date=validated_data["move_in_date"],
+            duration_months=validated_data["duration_months"],
+            landlord_confirmed_at=landlord_confirmed_at,
+            tenant_confirmed_at=tenant_confirmed_at,
+            status=Tenancy.STATUS_PROPOSED,
         )
-
-        if not created:
-            # â€œlast write winsâ€ update
-            tenancy.landlord = landlord  # keep consistent with room owner
-            tenancy.proposed_by = user
-            tenancy.move_in_date = validated_data["move_in_date"]
-            tenancy.duration_months = validated_data["duration_months"]
-
-            # reset confirmations: proposer confirmed, other cleared
-            if user.id == landlord.id:
-                tenancy.landlord_confirmed_at = now
-                tenancy.tenant_confirmed_at = None
-            else:
-                tenancy.tenant_confirmed_at = now
-                tenancy.landlord_confirmed_at = None
-
-            tenancy.status = Tenancy.STATUS_PROPOSED
-
-            # clear schedule fields (recomputed on final confirm)
-            tenancy.review_open_at = None
-            tenancy.review_deadline_at = None
-            tenancy.still_living_check_at = None
-            tenancy.still_living_confirmed_at = None
-
-            tenancy.save()
 
         return tenancy
 
@@ -559,14 +561,27 @@ class TenancyRespondSerializer(serializers.Serializer):
         action = attrs["action"]
 
         if action == "propose_changes":
-            if user.id != tenancy.tenant_id:
+            # Only the party reviewing the current proposal may edit it.
+            # The person who submitted the current proposal cannot edit
+            # their own tenancy information through the review endpoint.
+            if user.id == tenancy.proposed_by_id:
                 raise serializers.ValidationError(
-                    {"action": "Only the tenant can edit tenancy details at this stage."}
+                    {
+                        "action": (
+                            "You submitted the current tenancy information. "
+                            "The other party must review it before changes can be proposed."
+                        )
+                    }
                 )
 
             if tenancy.tenant_has_edited:
                 raise serializers.ValidationError(
-                    {"action": "You have already edited this tenancy once."}
+                    {
+                        "action": (
+                            "The one-time edit for this tenancy information "
+                            "has already been used."
+                        )
+                    }
                 )
 
 
@@ -621,22 +636,24 @@ class TenancyRespondSerializer(serializers.Serializer):
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
             ) - timedelta(days=7)
 
-        if action == "cancel":
-            tenancy.status = STATUS_CANCELLED
-            tenancy.save(update_fields=["status", "updated_at"] if hasattr(tenancy, "updated_at") else ["status"])
-            return tenancy
-
         if action == "propose_changes":
             tenancy.move_in_date = self.validated_data["move_in_date"]
             tenancy.duration_months = self.validated_data["duration_months"]
             tenancy.proposed_by = user
 
-            # reset confirmations
-            tenancy.landlord_confirmed_at = None
-            tenancy.tenant_confirmed_at = None
+            # The person submitting the amended terms confirms their own
+            # counter-proposal. The other party must review and agree.
+            if user.id == tenancy.landlord_id:
+                tenancy.landlord_confirmed_at = now
+                tenancy.tenant_confirmed_at = None
+            else:
+                tenancy.tenant_confirmed_at = now
+                tenancy.landlord_confirmed_at = None
+
             tenancy.status = STATUS_PROPOSED
 
-            # clear schedule-related fields (will be recomputed on confirm)
+            # Clear schedule-related fields. They will be recomputed when
+            # the other party agrees to the amended tenancy information.
             tenancy.review_open_at = None
             tenancy.review_deadline_at = None
             tenancy.still_living_check_at = None
@@ -683,6 +700,11 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
     tenant_name = serializers.SerializerMethodField()
     landlord_name = serializers.SerializerMethodField()
 
+    can_agree = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    available_actions = serializers.SerializerMethodField()
+    tenancy_action_reason = serializers.SerializerMethodField()
+
     class Meta:
         model = Tenancy
         fields = [
@@ -699,6 +721,10 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
                 "landlord_confirmed_at",
                 "tenant_confirmed_at",
                 "status",
+                "can_agree",
+                "can_edit",
+                "available_actions",
+                "tenancy_action_reason",
                 "review_open_at",
                 "review_deadline_at",
                 "can_leave_review",
@@ -757,6 +783,97 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(url)
 
         return url
+
+
+    
+    def _get_tenancy_action_permissions(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "You must be signed in to respond.",
+            }
+
+        if user.id not in {obj.landlord_id, obj.tenant_id}:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "You are not part of this tenancy.",
+            }
+
+        if obj.status != Tenancy.STATUS_PROPOSED:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "This tenancy information is no longer awaiting review.",
+            }
+
+        # The person who submitted the current terms must wait for
+        # the other party to review them.
+        if user.id == obj.proposed_by_id:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "Waiting for the other party to review the tenancy information.",
+            }
+
+        can_edit = not obj.tenant_has_edited
+
+        available_actions = ["confirm"]
+
+        if can_edit:
+            available_actions.append("propose_changes")
+
+        if can_edit:
+            reason = "You can agree to the tenancy information or edit it once."
+        else:
+            reason = (
+                "The one-time edit has already been used. "
+                "You can now agree to the tenancy information."
+            )
+
+        return {
+            "can_agree": True,
+            "can_edit": can_edit,
+            "available_actions": available_actions,
+            "reason": reason,
+        }
+
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_can_agree(self, obj):
+        return self._get_tenancy_action_permissions(obj)["can_agree"]
+
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_can_edit(self, obj):
+        return self._get_tenancy_action_permissions(obj)["can_edit"]
+
+
+    @extend_schema_field(
+        serializers.ListField(
+            child=serializers.CharField(),
+        )
+    )
+    def get_available_actions(self, obj):
+        return self._get_tenancy_action_permissions(obj)["available_actions"]
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_tenancy_action_reason(self, obj):
+        return self._get_tenancy_action_permissions(obj)["reason"]
+        
+        
+        
+        
+
 
     def _get_review_eligibility(self, obj):
         request = self.context.get("request")

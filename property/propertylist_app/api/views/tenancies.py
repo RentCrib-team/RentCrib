@@ -388,7 +388,10 @@ class TenancyRespondView(APIView):
             response_message = "Tenancy updated successfully."
 
         return ok_response(
-            TenancyDetailSerializer(tenancy).data,
+            TenancyDetailSerializer(
+                tenancy,
+                context={"request": request},
+            ).data,
             message=response_message,
             status_code=status.HTTP_200_OK,
         )               
