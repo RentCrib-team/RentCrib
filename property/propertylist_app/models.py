@@ -1168,7 +1168,8 @@ class Tenancy(models.Model):
     landlord_confirmed_at = models.DateTimeField(null=True, blank=True)
     tenant_confirmed_at = models.DateTimeField(null=True, blank=True)
 
-    # tenant is allowed to edit tenancy details only once before final confirmation
+    # One review-stage edit is allowed in total.
+    # The existing field name is retained for database compatibility.
     tenant_has_edited = models.BooleanField(default=False)
 
     

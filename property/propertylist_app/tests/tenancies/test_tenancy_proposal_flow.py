@@ -94,12 +94,28 @@ def test_landlord_proposes_tenancy_creates_single_proposal_row():
     # landlord initiated, so landlord_confirmed_at should be set (as per our planned logic)
     assert tenancy.landlord_confirmed_at is not None
     assert tenancy.tenant_confirmed_at is None
+    # The landlord submitted the terms, so the landlord must wait.
+    assert response_payload["can_agree"] is False
+    assert response_payload["can_edit"] is False
+    assert response_payload["available_actions"] == []
 
-    # proposing again should reuse same tenancy row (no duplicates)
-    resp2 = client.post(f"{API_PREFIX}/tenancies/propose/", data=payload, format="json")
-    assert resp2.status_code in (200, 201), resp2.data
+    # A second initial proposal must not overwrite the existing tenancy.
+    resp2 = client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data=payload,
+        format="json",
+    )
 
+    assert resp2.status_code == 400, resp2.data
     assert Tenancy.objects.filter(room=room, tenant=tenant).count() == 1
+
+    tenancy.refresh_from_db()
+
+    assert tenancy.proposed_by_id == landlord.id
+    assert tenancy.move_in_date == date.today() + timedelta(days=7)
+    assert tenancy.duration_months == 6
+    assert tenancy.landlord_confirmed_at is not None
+    assert tenancy.tenant_confirmed_at is None
 
 
 def test_tenant_can_propose_tenancy_when_landlord_is_busy():
@@ -175,10 +191,247 @@ def test_propose_changes_resets_confirmations_and_updates_dates():
     assert str(tenancy.move_in_date) == str(date.today() + timedelta(days=14))
     assert tenancy.duration_months == 12
 
-    # confirmations reset
+  
+    # Tenant submitted the amended terms, so the tenant has confirmed
+    # the counter-proposal. The landlord must now agree.
     assert tenancy.landlord_confirmed_at is None
-    assert tenancy.tenant_confirmed_at is None
+    assert tenancy.tenant_confirmed_at is not None
     assert tenancy.status == Tenancy.STATUS_PROPOSED
+    
+    
+def test_landlord_can_edit_once_when_tenant_created_original_proposal():
+    landlord = _make_user("landlord_landlord_edit")
+    tenant = _make_user("tenant_landlord_edit")
+    room = _make_room(owner=landlord)
+    _make_viewing_booking(user=tenant, room=room)
+
+    landlord_client = _api_client_for(landlord)
+    tenant_client = _api_client_for(tenant)
+
+    original_move_in_date = date.today() + timedelta(days=10)
+    amended_move_in_date = date.today() + timedelta(days=14)
+
+    # Tenant creates the original tenancy information.
+    response = tenant_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": landlord.id,
+            "move_in_date": str(original_move_in_date),
+            "duration_months": 3,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    
+    tenant_proposal_payload = response.data.get("data", response.data)
+
+    # Tenant submitted the terms and must wait for the landlord.
+    assert tenant_proposal_payload["can_agree"] is False
+    assert tenant_proposal_payload["can_edit"] is False
+    assert tenant_proposal_payload["available_actions"] == []
+
+    response_payload = response.data.get("data", response.data)
+    tenancy_id = response_payload["id"]
+
+    # Landlord is the reviewing party and may edit once.
+    edit_response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
+        data={
+            "action": "propose_changes",
+            "move_in_date": str(amended_move_in_date),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert edit_response.status_code == 200, edit_response.data
+    
+    edit_payload = edit_response.data.get("data", edit_response.data)
+
+    # The landlord submitted the amended terms and must now wait
+    # for the tenant to agree.
+    assert edit_payload["can_agree"] is False
+    assert edit_payload["can_edit"] is False
+    assert edit_payload["available_actions"] == []
+
+    tenancy = Tenancy.objects.get(id=tenancy_id)
+
+    assert tenancy.proposed_by_id == landlord.id
+    assert tenancy.move_in_date == amended_move_in_date
+    assert tenancy.duration_months == 6
+    assert tenancy.tenant_has_edited is True
+
+    # Landlord submitted the amended terms, so the landlord confirms
+    # the counter-proposal. The tenant must now agree.
+    assert tenancy.landlord_confirmed_at is not None
+    assert tenancy.tenant_confirmed_at is None
+    assert tenancy.status == Tenancy.STATUS_PROPOSED   
+
+
+def test_receiving_party_gets_agree_and_edit_actions():
+    landlord = _make_user("landlord_actions")
+    tenant = _make_user("tenant_actions")
+    room = _make_room(owner=landlord)
+    _make_viewing_booking(user=tenant, room=room)
+
+    landlord_client = _api_client_for(landlord)
+    tenant_client = _api_client_for(tenant)
+
+    response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": tenant.id,
+            "move_in_date": str(date.today() + timedelta(days=7)),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+
+    # Fetch the tenancy list as the receiving tenant.
+    list_response = tenant_client.get(
+    f"{API_PREFIX}/tenancies/mine/",
+    )
+
+    assert list_response.status_code == 200, getattr(
+    list_response,
+    "data",
+    list_response.content,
+)
+
+    response_data = list_response.data.get("data", list_response.data)
+
+    if isinstance(response_data, dict) and "results" in response_data:
+        tenancies = response_data["results"]
+    else:
+        tenancies = response_data
+
+    tenancy_payload = next(
+        item
+        for item in tenancies
+        if item["room"] == room.id
+    )
+
+    assert tenancy_payload["can_agree"] is True
+    assert tenancy_payload["can_edit"] is True
+    assert tenancy_payload["available_actions"] == [
+        "confirm",
+        "propose_changes",
+    ]
+
+
+
+
+def test_original_proposer_cannot_edit_own_tenancy_information():
+    landlord = _make_user("landlord_own_edit")
+    tenant = _make_user("tenant_own_edit")
+    room = _make_room(owner=landlord)
+    _make_viewing_booking(user=tenant, room=room)
+
+    landlord_client = _api_client_for(landlord)
+
+    response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": tenant.id,
+            "move_in_date": str(date.today() + timedelta(days=7)),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+
+    response_payload = response.data.get("data", response.data)
+    tenancy_id = response_payload["id"]
+
+    edit_response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
+        data={
+            "action": "propose_changes",
+            "move_in_date": str(date.today() + timedelta(days=14)),
+            "duration_months": 12,
+        },
+        format="json",
+    )
+
+    assert edit_response.status_code == 400, edit_response.data
+
+    tenancy = Tenancy.objects.get(id=tenancy_id)
+
+    assert tenancy.proposed_by_id == landlord.id
+    assert tenancy.move_in_date == date.today() + timedelta(days=7)
+    assert tenancy.duration_months == 6
+    assert tenancy.tenant_has_edited is False
+
+
+
+def test_tenancy_information_can_only_be_edited_once_in_total():
+    landlord = _make_user("landlord_single_edit")
+    tenant = _make_user("tenant_single_edit")
+    room = _make_room(owner=landlord)
+    _make_viewing_booking(user=tenant, room=room)
+
+    landlord_client = _api_client_for(landlord)
+    tenant_client = _api_client_for(tenant)
+
+    response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": tenant.id,
+            "move_in_date": str(date.today() + timedelta(days=7)),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+
+    response_payload = response.data.get("data", response.data)
+    tenancy_id = response_payload["id"]
+
+    # Tenant uses the one-time edit.
+    first_edit = tenant_client.post(
+        f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
+        data={
+            "action": "propose_changes",
+            "move_in_date": str(date.today() + timedelta(days=14)),
+            "duration_months": 12,
+        },
+        format="json",
+    )
+
+    assert first_edit.status_code == 200, first_edit.data
+
+    # Landlord is now reviewing the counter-proposal, but no second edit
+    # is permitted. The landlord must agree or cancel.
+    second_edit = landlord_client.post(
+        f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
+        data={
+            "action": "propose_changes",
+            "move_in_date": str(date.today() + timedelta(days=21)),
+            "duration_months": 9,
+        },
+        format="json",
+    )
+
+    assert second_edit.status_code == 400, second_edit.data
+
+    tenancy = Tenancy.objects.get(id=tenancy_id)
+
+    assert tenancy.proposed_by_id == tenant.id
+    assert tenancy.move_in_date == date.today() + timedelta(days=14)
+    assert tenancy.duration_months == 12
+    assert tenancy.tenant_has_edited is True
+
+
+
 
 
 def test_both_confirm_locks_schedule_and_sets_review_dates():
@@ -224,7 +477,7 @@ def test_both_confirm_locks_schedule_and_sets_review_dates():
     assert tenancy.still_living_check_at is not None
 
 
-def test_two_sided_proposals_do_not_create_two_rows_last_write_wins():
+def test_second_party_cannot_overwrite_existing_proposal_through_propose_endpoint():
     landlord = _make_user("landlord_e")
     tenant = _make_user("tenant_e")
     room = _make_room(owner=landlord)
@@ -233,22 +486,27 @@ def test_two_sided_proposals_do_not_create_two_rows_last_write_wins():
     landlord_client = _api_client_for(landlord)
     tenant_client = _api_client_for(tenant)
 
-    # tenant proposes first
+    tenant_move_in_date = date.today() + timedelta(days=10)
+
+    # Tenant submits the original tenancy information.
     resp1 = tenant_client.post(
         f"{API_PREFIX}/tenancies/propose/",
         data={
             "room_id": room.id,
             "counterparty_user_id": landlord.id,
-            "move_in_date": str(date.today() + timedelta(days=10)),
+            "move_in_date": str(tenant_move_in_date),
             "duration_months": 3,
         },
         format="json",
     )
+
     assert resp1.status_code == 201, resp1.data
+
     payload1 = resp1.data.get("data", resp1.data)
     tenancy_id = payload1["id"]
 
-    # landlord proposes "at the same time" (second write)
+    # Landlord must review/respond to the existing proposal.
+    # Calling the initial proposal endpoint again must not overwrite it.
     resp2 = landlord_client.post(
         f"{API_PREFIX}/tenancies/propose/",
         data={
@@ -259,11 +517,89 @@ def test_two_sided_proposals_do_not_create_two_rows_last_write_wins():
         },
         format="json",
     )
-    assert resp2.status_code in (200, 201), resp2.data
 
+    assert resp2.status_code == 400, resp2.data
     assert Tenancy.objects.filter(room=room, tenant=tenant).count() == 1
 
     tenancy = Tenancy.objects.get(id=tenancy_id)
-    # After landlord overwrote, proposal terms should match landlord payload
-    assert str(tenancy.move_in_date) == str(date.today() + timedelta(days=7))
-    assert tenancy.duration_months == 6
+
+    # The original tenant proposal remains unchanged.
+    assert tenancy.proposed_by_id == tenant.id
+    assert tenancy.move_in_date == tenant_move_in_date
+    assert tenancy.duration_months == 3
+    assert tenancy.tenant_confirmed_at is not None
+    assert tenancy.landlord_confirmed_at is None
+    
+    
+    
+def test_other_party_agreeing_after_edit_completes_tenancy():
+    landlord = _make_user("landlord_edit_confirm")
+    tenant = _make_user("tenant_edit_confirm")
+    room = _make_room(owner=landlord)
+    _make_viewing_booking(user=tenant, room=room)
+
+    landlord_client = _api_client_for(landlord)
+    tenant_client = _api_client_for(tenant)
+
+    # Landlord creates the original tenancy information.
+    proposal_response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": tenant.id,
+            "move_in_date": str(date.today() + timedelta(days=7)),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert proposal_response.status_code == 201, proposal_response.data
+
+    proposal_payload = proposal_response.data.get(
+        "data",
+        proposal_response.data,
+    )
+    tenancy_id = proposal_payload["id"]
+
+    # Tenant uses the one-time Edit action.
+    edit_response = tenant_client.post(
+        f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
+        data={
+            "action": "propose_changes",
+            "move_in_date": str(date.today() + timedelta(days=14)),
+            "duration_months": 12,
+        },
+        format="json",
+    )
+
+    assert edit_response.status_code == 200, edit_response.data
+
+    tenancy = Tenancy.objects.get(id=tenancy_id)
+
+    assert tenancy.proposed_by_id == tenant.id
+    assert tenancy.tenant_confirmed_at is not None
+    assert tenancy.landlord_confirmed_at is None
+    assert tenancy.status == Tenancy.STATUS_PROPOSED
+
+    # Landlord agrees to the tenant's amended information.
+    confirm_response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
+        data={"action": "confirm"},
+        format="json",
+    )
+
+    assert confirm_response.status_code == 200, confirm_response.data
+
+    tenancy.refresh_from_db()
+    room.refresh_from_db()
+
+    assert tenancy.landlord_confirmed_at is not None
+    assert tenancy.tenant_confirmed_at is not None
+    assert tenancy.status in {
+        Tenancy.STATUS_CONFIRMED,
+        Tenancy.STATUS_ACTIVE,
+    }
+
+    assert tenancy.review_open_at is not None
+    assert tenancy.still_living_check_at is not None
+    assert room.is_available is False    
