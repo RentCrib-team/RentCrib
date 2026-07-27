@@ -54,6 +54,7 @@ from .reviews import (
 from .tenancies import (
     TenancyRespondView,
     TenancyProposeView,
+    TenancyDetailView,
     MyTenanciesView,
     TenancyStillLivingConfirmView,
     TenancyExtensionCreateView,

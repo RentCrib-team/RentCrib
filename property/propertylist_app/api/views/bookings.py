@@ -32,6 +32,7 @@ from propertylist_app.api.serializers import (
     BookingPreflightRequestSerializer,
     BookingPreflightResponseSerializer,
     BookingRescheduleSerializer,
+    CreateViewingBookingSerializer,
 )
 from ..serializers import BookingCreateRequestSerializer, BookingResponseEnvelopeSerializer
 from .common import ok_response, _pagination_meta, _wrap_response_success, error_response
@@ -123,15 +124,7 @@ def create_booking(request):
 
 # propertylist_app/api/views/bookings.py
 @extend_schema(
-    request={
-        "type": "object",
-        "properties": {
-            "slot_id": {"type": "integer"},
-            "room_id": {"type": "integer"},
-            "start": {"type": "string", "format": "date-time"},
-        },
-        "required": [],
-    },
+    request=CreateViewingBookingSerializer,
     responses={
         200: {
             "type": "object",
