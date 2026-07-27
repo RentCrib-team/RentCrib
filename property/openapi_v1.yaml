@@ -1293,25 +1293,15 @@ paths:
       - bookings
       requestBody:
         content:
-          type:
+          application/json:
             schema:
-              type: object
-              additionalProperties: {}
-              description: Unspecified request body
-          properties:
+              $ref: '#/components/schemas/CreateViewingBooking'
+          application/x-www-form-urlencoded:
             schema:
-              slot_id:
-                type: integer
-              room_id:
-                type: integer
-              start:
-                type: string
-                format: date-time
-          required:
+              $ref: '#/components/schemas/CreateViewingBooking'
+          multipart/form-data:
             schema:
-              type: object
-              additionalProperties: {}
-              description: Unspecified request body
+              $ref: '#/components/schemas/CreateViewingBooking'
       security:
       - jwtAuth: []
       responses:
@@ -4285,6 +4275,35 @@ paths:
                 required:
                 - ok
                 - data
+          description: ''
+  /api/v1/tenancies/{tenancy_id}/:
+    get:
+      operationId: tenancies_retrieve
+      description: Return one tenancy belonging to the authenticated landlord or tenant.
+      parameters:
+      - in: path
+        name: tenancy_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - tenancies
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyDetailOkResponse'
+          description: ''
+        '401':
+          description: Authentication required.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailResponse'
           description: ''
   /api/v1/tenancies/{tenancy_id}/extensions/:
     post:
@@ -7307,6 +7326,16 @@ components:
       required:
       - data
       - ok
+    CreateViewingBooking:
+      type: object
+      properties:
+        slot_id:
+          type: integer
+        room_id:
+          type: integer
+        start:
+          type: string
+          format: date-time
     DashboardOverviewData:
       type: object
       properties:
@@ -8457,6 +8486,43 @@ components:
       properties:
         marketing_consent:
           type: boolean
+        theme:
+          enum:
+          - system
+          - light
+          - dark
+          type: string
+          description: |-
+            * `system` - System default
+            * `light` - Light
+            * `dark` - Dark
+          x-spec-enum-id: 26d45b5d8de5ebe4
+        date_format:
+          enum:
+          - DD/MM/YYYY
+          - MM/DD/YYYY
+          - YYYY-MM-DD
+          type: string
+          description: |-
+            * `DD/MM/YYYY` - DD/MM/YYYY
+            * `MM/DD/YYYY` - MM/DD/YYYY
+            * `YYYY-MM-DD` - YYYY-MM-DD
+          x-spec-enum-id: 7ebeab0d414e4561
+        time_format:
+          enum:
+          - 12h
+          - 24h
+          type: string
+          description: |-
+            * `12h` - 12-hour
+            * `24h` - 24-hour
+          x-spec-enum-id: 894a8d05df2732b5
+        notify_email:
+          type: boolean
+        notify_push:
+          type: boolean
+        notify_sms:
+          type: boolean
         notify_rentout_updates:
           type: boolean
         notify_reminders:
@@ -8464,6 +8530,16 @@ components:
         notify_messages:
           type: boolean
         notify_confirmations:
+          type: boolean
+        notify_weekly_reports:
+          type: boolean
+        notify_monthly_reports:
+          type: boolean
+        notify_system_alerts:
+          type: boolean
+        notify_user_reports:
+          type: boolean
+        notify_payment_alerts:
           type: boolean
     NotificationPreferencesOkResponse:
       type: object
@@ -8866,6 +8942,43 @@ components:
       properties:
         marketing_consent:
           type: boolean
+        theme:
+          enum:
+          - system
+          - light
+          - dark
+          type: string
+          description: |-
+            * `system` - System default
+            * `light` - Light
+            * `dark` - Dark
+          x-spec-enum-id: 26d45b5d8de5ebe4
+        date_format:
+          enum:
+          - DD/MM/YYYY
+          - MM/DD/YYYY
+          - YYYY-MM-DD
+          type: string
+          description: |-
+            * `DD/MM/YYYY` - DD/MM/YYYY
+            * `MM/DD/YYYY` - MM/DD/YYYY
+            * `YYYY-MM-DD` - YYYY-MM-DD
+          x-spec-enum-id: 7ebeab0d414e4561
+        time_format:
+          enum:
+          - 12h
+          - 24h
+          type: string
+          description: |-
+            * `12h` - 12-hour
+            * `24h` - 24-hour
+          x-spec-enum-id: 894a8d05df2732b5
+        notify_email:
+          type: boolean
+        notify_push:
+          type: boolean
+        notify_sms:
+          type: boolean
         notify_rentout_updates:
           type: boolean
         notify_reminders:
@@ -8873,6 +8986,16 @@ components:
         notify_messages:
           type: boolean
         notify_confirmations:
+          type: boolean
+        notify_weekly_reports:
+          type: boolean
+        notify_monthly_reports:
+          type: boolean
+        notify_system_alerts:
+          type: boolean
+        notify_user_reports:
+          type: boolean
+        notify_payment_alerts:
           type: boolean
     PatchedPrivacyPreferences:
       type: object
@@ -8991,10 +9114,6 @@ components:
             type: string
             format: uri
           nullable: true
-          readOnly: true
-        preview_image:
-          type: string
-          format: uri
           readOnly: true
         image_status:
           type: string
@@ -9644,6 +9763,9 @@ components:
           readOnly: true
         marketing_consent:
           type: boolean
+        preferred_timezone:
+          type: string
+          maxLength: 64
         notify_rentout_updates:
           type: boolean
         notify_reminders:
@@ -10160,10 +10282,6 @@ components:
             type: string
             format: uri
           nullable: true
-          readOnly: true
-        preview_image:
-          type: string
-          format: uri
           readOnly: true
         image_status:
           type: string
@@ -10707,7 +10825,6 @@ components:
       - owner_name
       - owner_username
       - paid_until
-      - preview_image
       - price_per_month
       - property_owner
       - property_type
@@ -10891,10 +11008,6 @@ components:
             * `rejected` - Rejected
           x-spec-enum-id: de3702061fc1d433
           readOnly: true
-        preview_image:
-          type: string
-          format: uri
-          nullable: true
       required:
       - id
       - image
@@ -11338,6 +11451,20 @@ components:
             * `cancelled` - Cancelled
           x-spec-enum-id: bed60eff9785955c
           readOnly: true
+        can_agree:
+          type: boolean
+          readOnly: true
+        can_edit:
+          type: boolean
+          readOnly: true
+        available_actions:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        tenancy_action_reason:
+          type: string
+          readOnly: true
         review_open_at:
           type: string
           format: date-time
@@ -11373,6 +11500,9 @@ components:
           format: date-time
           readOnly: true
       required:
+      - available_actions
+      - can_agree
+      - can_edit
       - can_leave_review
       - created_at
       - duration_months
@@ -11390,10 +11520,24 @@ components:
       - status
       - still_living_check_at
       - still_living_confirmed_at
+      - tenancy_action_reason
       - tenant
       - tenant_confirmed_at
       - tenant_name
       - updated_at
+    TenancyDetailOkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+          nullable: true
+        data:
+          $ref: '#/components/schemas/TenancyDetail'
+      required:
+      - data
+      - ok
     TenancyExtensionCreate:
       type: object
       properties:
@@ -11859,6 +12003,9 @@ components:
           readOnly: true
         marketing_consent:
           type: boolean
+        preferred_timezone:
+          type: string
+          maxLength: 64
         notify_rentout_updates:
           type: boolean
         notify_reminders:

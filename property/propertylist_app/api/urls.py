@@ -25,7 +25,7 @@ from propertylist_app.api.views import (
     UserReviewsView,UserReviewSummaryView, ReviewCreateView, ReviewListView, ReviewDetailView,
 
     # Tenancy (rental confirmation)
-    TenancyRespondView,TenancyProposeView, MyTenanciesView,TenancyStillLivingConfirmView,TenancyExtensionCreateView,TenancyExtensionRespondView,
+    TenancyRespondView, TenancyProposeView, TenancyDetailView, MyTenanciesView, TenancyStillLivingConfirmView, TenancyExtensionCreateView, TenancyExtensionRespondView,
 
    # Tenancy-based reviews
     TenancyReviewCreateView,
@@ -133,8 +133,9 @@ urlpatterns = [
 
     # Tenancy (rental confirmation)
     path("tenancies/propose/", TenancyProposeView.as_view(), name="tenancy-propose"),
-    path("tenancies/<int:tenancy_id>/respond/", TenancyRespondView.as_view(), name="tenancy-respond"),
     path("tenancies/mine/", MyTenanciesView.as_view(), name="my-tenancies"),
+    path("tenancies/<int:tenancy_id>/", TenancyDetailView.as_view(), name="tenancy-detail"),
+    path("tenancies/<int:tenancy_id>/respond/", TenancyRespondView.as_view(), name="tenancy-respond"),
 
     path("tenancies/<int:tenancy_id>/still-living/confirm/",TenancyStillLivingConfirmView.as_view(),name="tenancy-still-living-confirm",),
     path("tenancies/<int:tenancy_id>/extensions/",TenancyExtensionCreateView.as_view(),name="tenancy-extension-create",),
