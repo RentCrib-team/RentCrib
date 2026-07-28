@@ -390,6 +390,11 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "v1",
     "DESCRIPTION": "Backend API for RentOut property platform.",
     "SERVE_INCLUDE_SCHEMA": False,
+    
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
+    
     "SCHEMA_PATH_PREFIX": r"/api/v1",
     "SERVERS": [
         *(
