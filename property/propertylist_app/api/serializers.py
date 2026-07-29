@@ -2185,12 +2185,15 @@ class RoomPreviewSerializer(serializers.Serializer):
                     "image": display_url,
                     "url": display_url,
                     "original_image": original_url,
-                   
                     "status": img.status,
+                    "moderation_state": get_room_image_moderation_state(img),
+                    "user_message": get_room_image_user_message(img),
+                    "can_replace": (
+                        img.status != RoomImage.STATUS_APPROVED
+                    ),
                     "is_main": index == 0,
                 }
             )
-
         legacy_image = getattr(obj, "image", None)
 
         if not photos and legacy_image:
@@ -3126,7 +3129,90 @@ class ContactMessageSerializer(serializers.ModelSerializer):
 
 
 
+def get_room_image_moderation_state(image) -> str:
+    """
+    Return a frontend-facing moderation state for one room photo.
 
+    This is separate from the database status because a pending photo
+    may either still be checking, need manual review, or require retry.
+    """
+    reason = getattr(image, "moderation_reason", None)
+
+    if image.status == RoomImage.STATUS_APPROVED:
+        return "approved"
+
+    if image.status == RoomImage.STATUS_REJECTED:
+        return "rejected"
+
+    if reason == RoomImage.MODERATION_AWAITING_CHECK:
+        return "checking"
+
+    if reason in {
+        RoomImage.MODERATION_TIMEOUT,
+        RoomImage.MODERATION_SERVICE_UNAVAILABLE,
+        RoomImage.MODERATION_VALIDATION_FAILED,
+    }:
+        return "retry_required"
+
+    return "manual_review"
+
+
+def get_room_image_user_message(image) -> str:
+    """
+    Return a safe message suitable for landlords.
+
+    Provider names, raw errors and internal moderation notes must not be
+    exposed through the public API.
+    """
+    state = get_room_image_moderation_state(image)
+    reason = getattr(image, "moderation_reason", None)
+
+    if state == "approved":
+        return "Photo approved."
+
+    if reason == RoomImage.MODERATION_AWAITING_CHECK:
+        return "We are checking this photo."
+
+    if reason == RoomImage.MODERATION_UNSAFE_CONTENT:
+        return (
+            "This photo may contain inappropriate content and requires "
+            "review."
+        )
+
+    if reason == RoomImage.MODERATION_NOT_PROPERTY_PHOTO:
+        return (
+            "This does not appear to be a property photo. Please replace "
+            "it with a clear photo of the room or property."
+        )
+
+    if reason == RoomImage.MODERATION_LOW_CONFIDENCE:
+        return (
+            "We could not clearly verify this as a property photo. Please "
+            "upload a clearer photo or wait for review."
+        )
+
+    if reason == RoomImage.MODERATION_VALIDATION_FAILED:
+        return (
+            "This file could not be processed as a valid photo. Please "
+            "replace it with a supported image."
+        )
+
+    if reason == RoomImage.MODERATION_TIMEOUT:
+        return (
+            "We could not finish checking this photo. Please replace it "
+            "and try again."
+        )
+
+    if reason == RoomImage.MODERATION_SERVICE_UNAVAILABLE:
+        return (
+            "We could not process this photo because of a temporary "
+            "system issue. Please replace it and try again."
+        )
+
+    if image.status == RoomImage.STATUS_REJECTED:
+        return "This photo was not accepted. Please replace it."
+
+    return "This photo requires review."
 
 
 
@@ -3137,8 +3223,12 @@ class ContactMessageSerializer(serializers.ModelSerializer):
 # Room Images / Messages / Bookings / Slots / Payments / Reports
 # --------------------
 class RoomImageSerializer(serializers.ModelSerializer):
-    # Keep upload handling safe, but return frontend-ready absolute image URL.
+    # Return a frontend-ready absolute image URL.
     image = serializers.SerializerMethodField()
+
+    moderation_state = serializers.SerializerMethodField()
+    user_message = serializers.SerializerMethodField()
+    can_replace = serializers.SerializerMethodField()
 
     class Meta:
         model = RoomImage
@@ -3147,9 +3237,17 @@ class RoomImageSerializer(serializers.ModelSerializer):
             "room",
             "image",
             "status",
-           
+            "moderation_state",
+            "user_message",
+            "can_replace",
         ]
-        read_only_fields = ["room", "status"]
+        read_only_fields = [
+            "room",
+            "status",
+            "moderation_state",
+            "user_message",
+            "can_replace",
+        ]
 
     def get_image(self, obj):
         """
@@ -3162,14 +3260,12 @@ class RoomImageSerializer(serializers.ModelSerializer):
             - visible only to the listing owner.
             - hidden from public users.
         """
-
         if not obj.image:
             return None
 
         request = self.context.get("request")
 
-        # Approved images are public
-        if obj.status == "approved":
+        if obj.status == RoomImage.STATUS_APPROVED:
             try:
                 url = obj.image.url
             except (ValueError, AttributeError):
@@ -3180,8 +3276,6 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
             return url
 
-        # Pending/rejected images:
-        # only the landlord who owns the room can see them
         if request and request.user.is_authenticated:
             if obj.room.property_owner_id == request.user.id:
                 try:
@@ -3193,6 +3287,17 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
         return None
 
+    def get_moderation_state(self, obj):
+        return get_room_image_moderation_state(obj)
+
+    def get_user_message(self, obj):
+        return get_room_image_user_message(obj)
+
+    def get_can_replace(self, obj):
+        return obj.status != RoomImage.STATUS_APPROVED
+    
+    
+    
 class AvatarUploadResponseSerializer(serializers.Serializer):
     avatar = serializers.URLField(allow_null=True)
 
