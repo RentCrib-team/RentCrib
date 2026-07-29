@@ -470,13 +470,11 @@ Reject if it mainly shows:
 - unrelated object
 - random outdoor scene not clearly linked to a property
 
-Return JSON only in this exact shape:
-{
-  "is_property_photo": true,
-  "category": "bedroom",
-  "confidence": 90,
-  "reason": "short reason"
-}
+Classify the image using the required response schema.
+
+Keep category brief, confidence between 0 and 100, and reason to one
+short sentence.
+
 """.strip()
 
         payload = {
@@ -497,7 +495,49 @@ Return JSON only in this exact shape:
             ],
             "generationConfig": {
                 "temperature": 0,
-                "maxOutputTokens": 500,
+                "maxOutputTokens": 2048,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": {
+                    "type": "object",
+                    "properties": {
+                        "is_property_photo": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether the image clearly shows a residential "
+                                "property or part of one."
+                            ),
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": (
+                                "Short image category such as bedroom, kitchen, "
+                                "bathroom, exterior, person, vehicle, document, "
+                                "or unrelated outdoor scene."
+                            ),
+                        },
+                        "confidence": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "description": (
+                                "Confidence score from 0 to 100."
+                            ),
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": (
+                                "One short sentence explaining the decision."
+                            ),
+                        },
+                    },
+                    "required": [
+                        "is_property_photo",
+                        "category",
+                        "confidence",
+                        "reason",
+                    ],
+                    "additionalProperties": False,
+                },
             },
         }
 
@@ -537,9 +577,16 @@ Return JSON only in this exact shape:
                     "Gemini returned no moderation candidates."
                 ),
             )
+            
+            
+            
+        candidate = candidates[0]
+        finish_reason = str(
+            candidate.get("finishReason") or "UNKNOWN"
+        ).strip()    
 
         parts = (
-            candidates[0]
+            candidate
             .get("content", {})
             .get("parts", [])
         )
@@ -558,8 +605,10 @@ Return JSON only in this exact shape:
                 approved=False,
                 reason="service_unavailable",
                 notes=(
-                    "Gemini returned a response that could not "
-                    "be parsed as moderation JSON."
+                    "Gemini returned an incomplete or invalid structured "
+                    "moderation response. "
+                    f"Finish reason: {finish_reason}; "
+                    f"response length: {len(text)} characters."
                 ),
             )
 
