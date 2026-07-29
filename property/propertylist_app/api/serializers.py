@@ -3148,6 +3148,12 @@ def get_room_image_moderation_state(image) -> str:
         return "checking"
 
     if reason in {
+        RoomImage.MODERATION_NOT_PROPERTY_PHOTO,
+        RoomImage.MODERATION_UNSAFE_CONTENT,
+    }:
+        return "rejected"
+
+    if reason in {
         RoomImage.MODERATION_TIMEOUT,
         RoomImage.MODERATION_SERVICE_UNAVAILABLE,
         RoomImage.MODERATION_VALIDATION_FAILED,
@@ -3174,16 +3180,10 @@ def get_room_image_user_message(image) -> str:
         return "We are checking this photo."
 
     if reason == RoomImage.MODERATION_UNSAFE_CONTENT:
-        return (
-            "This photo may contain inappropriate content and requires "
-            "review."
-        )
+        return "This photo is inappropriate and cannot be used."
 
     if reason == RoomImage.MODERATION_NOT_PROPERTY_PHOTO:
-        return (
-            "This does not appear to be a property photo. Please replace "
-            "it with a clear photo of the room or property."
-        )
+        return "This is not a property photo. Please replace it."
 
     if reason == RoomImage.MODERATION_LOW_CONFIDENCE:
         return (
@@ -3213,8 +3213,6 @@ def get_room_image_user_message(image) -> str:
         return "This photo was not accepted. Please replace it."
 
     return "This photo requires review."
-
-
 
 
 
