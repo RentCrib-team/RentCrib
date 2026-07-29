@@ -5,13 +5,89 @@ import os
 from pathlib import Path
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
+from pillow_heif import register_heif_opener
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
+
+register_heif_opener()
 BREAKPOINTS = (640, 1280)  # small, medium
+
+
+MODERATION_JPEG_MAX_DIMENSION = 4096
+MODERATION_JPEG_QUALITY = 90
+
+
+def _normalise_image_for_moderation(uploaded_file):
+    """
+    Decode an uploaded image and create a safe JPEG copy for AI moderation.
+
+    The original uploaded file is not modified or replaced. Vision and
+    Gemini receive the normalised JPEG bytes so they do not need to
+    support the original format, including AVIF, HEIC, or HEIF.
+
+    Returns:
+        ContentFile containing JPEG bytes with content_type=image/jpeg.
+    """
+    try:
+        uploaded_file.seek(0)
+
+        with Image.open(uploaded_file) as source:
+            # Correct phone-camera rotation using EXIF orientation.
+            image = ImageOps.exif_transpose(source)
+
+            # Ensure all source image data is decoded before the original
+            # uploaded stream is reset or closed.
+            image.load()
+
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            elif image.mode == "L":
+                image = image.convert("RGB")
+
+            width, height = image.size
+
+            if max(width, height) > MODERATION_JPEG_MAX_DIMENSION:
+                image.thumbnail(
+                    (
+                        MODERATION_JPEG_MAX_DIMENSION,
+                        MODERATION_JPEG_MAX_DIMENSION,
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+
+            output = io.BytesIO()
+
+            image.save(
+                output,
+                format="JPEG",
+                quality=MODERATION_JPEG_QUALITY,
+                optimize=True,
+            )
+
+            output.seek(0)
+
+            normalised_file = ContentFile(
+                output.read(),
+                name="moderation-image.jpg",
+            )
+
+            normalised_file.content_type = "image/jpeg"
+            normalised_file.seek(0)
+
+            return normalised_file
+
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+
+
+
 
 
 def _moderation_result(
@@ -362,10 +438,7 @@ def _gemini_property_photo_allows(uploaded_file) -> dict:
             uploaded_file.read()
         ).decode("utf-8")
 
-        mime_type = (
-            getattr(uploaded_file, "content_type", "")
-            or "image/jpeg"
-        )
+        mime_type = "image/jpeg"
 
         prompt = """
 You are moderating images for a UK room/property rental marketplace.
@@ -477,7 +550,7 @@ Return JSON only in this exact shape:
             if "text" in part:
                 text += part.get("text") or ""
 
-        print("GEMINI RAW RESPONSE:", repr(text))
+        
         result = _extract_json_object(text)
 
         if not result:
@@ -617,6 +690,10 @@ def should_auto_approve_upload(uploaded_file) -> dict:
     """
     Run the complete image moderation workflow.
 
+    The uploaded file first passes local validation. A normalised JPEG
+    copy is then sent to Google Vision and Gemini, regardless of whether
+    the original was JPEG, PNG, WEBP or AVIF.
+
     Returns:
         {
             "approved": bool,
@@ -634,15 +711,35 @@ def should_auto_approve_upload(uploaded_file) -> dict:
     if not basic_result["approved"]:
         return basic_result
 
+    try:
+        moderation_file = _normalise_image_for_moderation(
+            uploaded_file
+        )
+    except Exception as exc:
+        return _moderation_result(
+            approved=False,
+            reason="validation_failed",
+            notes=(
+                "The uploaded image could not be normalised for "
+                "moderation. "
+                f"{exc.__class__.__name__}: {exc}"
+            ),
+        )
+
     vision_result = _google_vision_safesearch_allows(
-        uploaded_file
+        moderation_file
     )
 
     if not vision_result["approved"]:
         return vision_result
 
+    try:
+        moderation_file.seek(0)
+    except Exception:
+        pass
+
     gemini_result = _gemini_property_photo_allows(
-        uploaded_file
+        moderation_file
     )
 
     if not gemini_result["approved"]:
@@ -661,7 +758,6 @@ def should_auto_approve_upload(uploaded_file) -> dict:
         reason="auto_approved",
         notes=notes,
     )
-
 
 def _ensure_rgb(img: Image.Image) -> Image.Image:
     if img.mode in ("RGBA", "P"):

@@ -739,7 +739,15 @@ class RoomPhotoUploadView(APIView):
             )
 
         # Extension validation
-        allowed_exts = {"jpg", "jpeg", "png", "webp"}
+        allowed_exts = {
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "avif",
+            "heic",
+            "heif",
+        }
         name_lower = (file_obj.name or "").lower()
         ext = name_lower.rsplit(".", 1)[-1] if "." in name_lower else ""
 
@@ -749,7 +757,7 @@ class RoomPhotoUploadView(APIView):
                     "ok": False,
                     "message": "Validation error.",
                     "errors": {
-                        "image": ["Only JPG, JPEG, PNG, or WEBP files are allowed."]
+                        "image": ["Only JPG, JPEG, PNG, WEBP, AVIF, HEIC, or HEIF files are allowed."]
                     },
                 },
                 status=status.HTTP_400_BAD_REQUEST,

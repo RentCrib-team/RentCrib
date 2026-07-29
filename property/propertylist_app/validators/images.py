@@ -1,8 +1,21 @@
 ﻿from PIL import Image
+from pillow_heif import register_heif_opener
 
 from django.core.exceptions import ValidationError
 
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+register_heif_opener()
+
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/avif",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+    "image/heif-sequence",
+}
 MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_IMAGE_PIXELS = 20_000_000
 MAX_WIDTH = 8000
@@ -85,6 +98,8 @@ def validate_listing_photos(files, *, max_count=10, max_mb=10):
         size = getattr(f, "size", 0) or 0
         if size <= 0 or size > max_bytes:
             raise ValidationError(f"Photo too large (max {max_mb}MB).")
+        _validate_image_content(f)
+        
     return files
 
 def assert_no_duplicate_files(files):
