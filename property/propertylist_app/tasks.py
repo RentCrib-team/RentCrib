@@ -146,7 +146,7 @@ def _queue_email(*, user, template_key: str, context: dict | None = None) -> Non
 # -------------------------------------------------------------------
 # Tenancy notifications (INBOX ONLY – stable)
 # -------------------------------------------------------------------
-@shared_task
+
 @shared_task
 def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     Tenancy = apps.get_model("propertylist_app", "Tenancy")
