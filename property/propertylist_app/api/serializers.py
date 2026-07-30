@@ -3394,6 +3394,7 @@ class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.StringRelatedField(read_only=True)
     is_read = serializers.SerializerMethodField()
     read_at = serializers.SerializerMethodField()
+    available_actions = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -3404,21 +3405,59 @@ class MessageSerializer(serializers.ModelSerializer):
             "body",
             "message_type",
             "metadata",
+            "available_actions",
             "created",
             "updated",
             "is_read",
             "read_at",
         ]
         read_only_fields = [
-            "thread",
-            "sender",
-            "message_type",
-            "metadata",
-            "created",
-            "updated",
-            "is_read",
-            "read_at",
-        ]
+                "thread",
+                "sender",
+                "message_type",
+                "metadata",
+                "available_actions",
+                "created",
+                "updated",
+                "is_read",
+                "read_at",
+            ]
+        
+        
+    @extend_schema_field(
+    serializers.ListField(
+        child=serializers.CharField(),
+    )
+    )
+    def get_available_actions(self, obj):
+        if obj.message_type not in {
+            Message.TYPE_TENANCY_PROPOSAL,
+            Message.TYPE_TENANCY_UPDATED,
+        }:
+            return []
+
+        metadata = obj.metadata or {}
+        tenancy_id = metadata.get("tenancy_id")
+
+        if not tenancy_id:
+            return []
+
+        try:
+            tenancy = (
+                Tenancy.objects
+                .select_related("landlord", "tenant", "room")
+                .get(id=tenancy_id)
+            )
+        except Tenancy.DoesNotExist:
+            return []
+
+        serializer = TenancyDetailSerializer(
+            tenancy,
+            context=self.context,
+        )
+
+        return serializer.data.get("available_actions", [])    
+            
 
     def get_is_read(self, obj):
         request = self.context.get("request")
