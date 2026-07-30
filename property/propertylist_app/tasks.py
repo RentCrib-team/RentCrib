@@ -4,6 +4,7 @@ from django.db.models import Exists, OuterRef, Q
 from django.apps import apps
 from django.conf import settings
 
+from propertylist_app.services.tenancy_chat import post_tenancy_event
 
 from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.services.deep_links import build_absolute_url
@@ -146,27 +147,66 @@ def _queue_email(*, user, template_key: str, context: dict | None = None) -> Non
 # Tenancy notifications (INBOX ONLY – stable)
 # -------------------------------------------------------------------
 @shared_task
+@shared_task
 def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     Tenancy = apps.get_model("propertylist_app", "Tenancy")
     Notification = apps.get_model("propertylist_app", "Notification")
     UserProfile = apps.get_model("propertylist_app", "UserProfile")
 
+    supported_events = {
+        "proposed",
+        "updated",
+        "confirmed",
+        "cancelled",
+    }
+
+    if event not in supported_events:
+        return 0
+
     tenancy = (
         Tenancy.objects
-        .select_related("room", "landlord", "tenant")
+        .select_related(
+            "room",
+            "landlord",
+            "tenant",
+            "proposed_by",
+        )
         .filter(id=tenancy_id)
         .first()
     )
+
     if not tenancy:
         return 0
 
     room_title = getattr(tenancy.room, "title", "your room")
-    tenancy_deep_link = f"/app/tenancies/{tenancy.id}"
-    tenancy_cta_url = build_absolute_url(tenancy_deep_link)
+
+    # For a new proposal or counter-proposal, proposed_by is the person
+    # who submitted the current tenancy terms.
+    if event in {"proposed", "updated"}:
+        sender = tenancy.proposed_by
+
+    # Confirmation or cancellation is performed by the person reviewing
+    # the current proposal, which is the opposite party to proposed_by.
+    elif tenancy.proposed_by_id == tenancy.tenant_id:
+        sender = tenancy.landlord
+    else:
+        sender = tenancy.tenant
+
+    if sender is None:
+        return 0
+
+    thread, message = post_tenancy_event(
+        tenancy=tenancy,
+        event_type=event,
+        sender=sender,
+    )
+
+    thread_deep_link = f"/app/threads/{thread.id}"
+    thread_cta_url = build_absolute_url(thread_deep_link)
 
     def _maybe_queue(user, template_key: str):
-        # confirmations preference (tenancy lifecycle is a "confirmation" style event)
         profile, _ = UserProfile.objects.get_or_create(user=user)
+
         if not getattr(profile, "notify_confirmations", True):
             return
 
@@ -174,72 +214,113 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             user=user,
             template_key=template_key,
             context={
-                "user": {"first_name": user.first_name},
+                "user": {
+                    "first_name": user.first_name,
+                },
                 "tenancy_id": tenancy.id,
+                "thread_id": thread.id,
+                "message_id": message.id,
                 "room_title": room_title,
-                "deep_link": tenancy_deep_link,
-                "cta_url": tenancy_cta_url,
+                "deep_link": thread_deep_link,
+                "cta_url": thread_cta_url,
+            },
+        )
+
+    def _create_notification(
+        *,
+        user,
+        notification_type: str,
+        title: str,
+        body: str,
+    ):
+        Notification.objects.get_or_create(
+            user=user,
+            type=notification_type,
+            target_type="message",
+            target_id=message.id,
+            defaults={
+                "thread": thread,
+                "message": message,
+                "title": title,
+                "body": body,
             },
         )
 
     if event == "proposed":
         target_user = (
             tenancy.landlord
-            if tenancy.proposed_by_id == tenancy.tenant_id
+            if sender.id == tenancy.tenant_id
             else tenancy.tenant
         )
-        Notification.objects.create(
+
+        _create_notification(
             user=target_user,
-            type="tenancy_proposed",
+            notification_type="tenancy_proposed",
             title="Tenancy proposal",
-            body=f"A tenancy proposal was created for: {room_title}. Please respond.",
-            target_type="tenancy",
-            target_id=tenancy.id,
+            body=(
+                f"A tenancy proposal was created for: "
+                f"{room_title}. Please respond."
+            ),
         )
-        _maybe_queue(target_user, "tenancy.proposed")
+
+        _maybe_queue(
+            target_user,
+            "tenancy.proposed",
+        )
+
         return 1
 
     if event == "confirmed":
-        for u in (tenancy.landlord, tenancy.tenant):
-            Notification.objects.create(
-                user=u,
-                type="tenancy_confirmed",
+        for user in (tenancy.landlord, tenancy.tenant):
+            _create_notification(
+                user=user,
+                notification_type="tenancy_confirmed",
                 title="Tenancy confirmed",
                 body=f"Tenancy confirmed for: {room_title}.",
-                target_type="tenancy",
-                target_id=tenancy.id,
             )
-            _maybe_queue(u, "tenancy.confirmed")
+
+            _maybe_queue(
+                user,
+                "tenancy.confirmed",
+            )
+
         return 2
 
     if event == "cancelled":
-        for u in (tenancy.landlord, tenancy.tenant):
-            Notification.objects.create(
-                user=u,
-                type="tenancy_cancelled",
+        for user in (tenancy.landlord, tenancy.tenant):
+            _create_notification(
+                user=user,
+                notification_type="tenancy_cancelled",
                 title="Tenancy cancelled",
                 body=f"Tenancy cancelled for: {room_title}.",
-                target_type="tenancy",
-                target_id=tenancy.id,
             )
-            _maybe_queue(u, "tenancy.cancelled")
+
+            _maybe_queue(
+                user,
+                "tenancy.cancelled",
+            )
+
         return 2
 
     # updated
     target_user = (
         tenancy.landlord
-        if tenancy.proposed_by_id == tenancy.tenant_id
+        if sender.id == tenancy.tenant_id
         else tenancy.tenant
     )
-    Notification.objects.create(
-            user=target_user,
-            type="tenancy_updated",
-            title="Tenancy updated",
-            body=f"Tenancy proposal updated for: {room_title}.",
-            target_type="tenancy",
-            target_id=tenancy.id,
-        )
-    _maybe_queue(target_user, "tenancy.updated")
+
+    _create_notification(
+        user=target_user,
+        notification_type="tenancy_updated",
+        title="Tenancy updated",
+        body=f"Tenancy proposal updated for: {room_title}.",
+    )
+
+    _maybe_queue(
+        target_user,
+        "tenancy.updated",
+    )
+
     return 1
 
 

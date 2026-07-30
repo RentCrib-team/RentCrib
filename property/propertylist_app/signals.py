@@ -121,6 +121,7 @@ def booking_created_queue_emails(
 ) -> None:
     if not created:
         return
+    
 
     room = instance.room
     owner = getattr(room, "property_owner", None)
@@ -188,6 +189,9 @@ def message_created_create_notifications(
     **kwargs,
 ) -> None:
     if not created:
+        return
+    
+    if instance.message_type != Message.TYPE_TEXT:
         return
 
     thread: MessageThread = instance.thread

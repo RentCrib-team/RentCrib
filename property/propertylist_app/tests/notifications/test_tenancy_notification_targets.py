@@ -38,5 +38,7 @@ def test_task_send_tenancy_notification_sets_target_fields():
     notif = Notification.objects.filter(type="tenancy_proposed").first()
 
     assert notif is not None
-    assert notif.target_type == "tenancy"
-    assert notif.target_id == tenancy.id
+    assert notif.target_type == "message"
+    assert notif.target_id == notif.message_id
+    assert notif.thread_id is not None
+    assert notif.message_id is not None

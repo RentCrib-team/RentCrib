@@ -1465,9 +1465,45 @@ class MessageThreadState(models.Model):
 # Message
 # -------
 class Message(models.Model):
-    thread = models.ForeignKey(MessageThread, on_delete=models.CASCADE, related_name="messages")
-    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_messages")
+    TYPE_TEXT = "text"
+    TYPE_TENANCY_PROPOSAL = "tenancy_proposal"
+    TYPE_TENANCY_UPDATED = "tenancy_updated"
+    TYPE_TENANCY_CONFIRMED = "tenancy_confirmed"
+    TYPE_TENANCY_CANCELLED = "tenancy_cancelled"
+
+    TYPE_CHOICES = (
+        (TYPE_TEXT, "Text"),
+        (TYPE_TENANCY_PROPOSAL, "Tenancy proposal"),
+        (TYPE_TENANCY_UPDATED, "Tenancy updated"),
+        (TYPE_TENANCY_CONFIRMED, "Tenancy confirmed"),
+        (TYPE_TENANCY_CANCELLED, "Tenancy cancelled"),
+    )
+
+    thread = models.ForeignKey(
+        MessageThread,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="sent_messages",
+    )
+
     body = models.TextField()
+
+    message_type = models.CharField(
+        max_length=32,
+        choices=TYPE_CHOICES,
+        default=TYPE_TEXT,
+        db_index=True,
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True, db_index=True)
 
@@ -1477,7 +1513,6 @@ class Message(models.Model):
             models.Index(fields=["thread", "created"]),
             models.Index(fields=["thread", "updated"]),
         ]
-
 
 class MessageRead(models.Model):
     message = models.ForeignKey("Message", on_delete=models.CASCADE, related_name="reads")
