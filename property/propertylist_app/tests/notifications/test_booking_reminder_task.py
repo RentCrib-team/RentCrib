@@ -55,10 +55,10 @@ def test_notify_upcoming_bookings_creates_notification_when_in_window_and_opted_
     profile.notify_reminders = True
     profile.save(update_fields=["notify_reminders"])
 
-    start = timezone.now() + timedelta(hours=2)
+    start = timezone.now() + timedelta(minutes=4)
     _mk_booking(user, room, start=start)
 
-    notify_upcoming_bookings(24)
+    notify_upcoming_bookings(5)
 
     assert Notification.objects.filter(user=user, type="booking_reminder").count() == 1
 
@@ -79,10 +79,10 @@ def test_notify_upcoming_bookings_skips_when_notify_reminders_off():
     profile.notify_reminders = False
     profile.save(update_fields=["notify_reminders"])
 
-    start = timezone.now() + timedelta(hours=2)
+    start = timezone.now() + timedelta(minutes=4)
     _mk_booking(user, room, start=start)
 
-    notify_upcoming_bookings(24)
+    notify_upcoming_bookings(5)
 
     assert Notification.objects.filter(user=user, type="booking_reminder").count() == 0
 
@@ -103,10 +103,10 @@ def test_notify_upcoming_bookings_skips_cancelled_bookings():
     profile.notify_reminders = True
     profile.save(update_fields=["notify_reminders"])
 
-    start = timezone.now() + timedelta(hours=2)
+    start = timezone.now() + timedelta(minutes=4)
     _mk_booking(user, room, start=start, cancelled=True)
 
-    notify_upcoming_bookings(24)
+    notify_upcoming_bookings(5)
 
     assert Notification.objects.filter(user=user, type="booking_reminder").count() == 0
 
@@ -127,10 +127,10 @@ def test_notify_upcoming_bookings_skips_deleted_bookings():
     profile.notify_reminders = True
     profile.save(update_fields=["notify_reminders"])
 
-    start = timezone.now() + timedelta(hours=2)
+    start = timezone.now() + timedelta(minutes=4)
     _mk_booking(user, room, start=start, deleted=True)
 
-    notify_upcoming_bookings(24)
+    notify_upcoming_bookings(5)
 
     assert Notification.objects.filter(user=user, type="booking_reminder").count() == 0
 
@@ -151,10 +151,10 @@ def test_notify_upcoming_bookings_no_duplicates_on_repeat_runs():
     profile.notify_reminders = True
     profile.save(update_fields=["notify_reminders"])
 
-    start = timezone.now() + timedelta(hours=2)
+    start = timezone.now() + timedelta(minutes=4)
     _mk_booking(user, room, start=start)
 
-    notify_upcoming_bookings(24)
-    notify_upcoming_bookings(24)
+    notify_upcoming_bookings(5)
+    notify_upcoming_bookings(5)
 
     assert Notification.objects.filter(user=user, type="booking_reminder").count() == 1

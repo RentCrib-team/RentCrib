@@ -54,6 +54,7 @@ from propertylist_app.validators import (
 )
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.permissions import IsAdminOrReadOnly, IsOwnerOrReadOnly
+from propertylist_app.api.throttling import RoomCreateThrottle
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import standard_response_serializer,standard_paginated_response_serializer
 from propertylist_app.api.serializers import (
@@ -219,7 +220,7 @@ class RoomListGV(CachedAnonymousGETMixin, generics.ListAPIView):
       
       
 class RoomAV(APIView):
-    throttle_classes = [AnonRateThrottle]
+    throttle_classes = [AnonRateThrottle, RoomCreateThrottle]
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 
@@ -453,16 +454,27 @@ class RoomDetailAV(APIView):
         ser.save()
 
         if action == "preview":
-            total_photos = RoomImage.objects.filter(room=room).count()
+            approved_photo_count = (
+                RoomImage.objects
+                .filter(
+                    room=room,
+                    status="approved",
+                )
+                .exclude(image="")
+                .count()
+            )
 
-            if total_photos < 3:
+            if approved_photo_count < 3:
                 return Response(
                     {
                         "ok": False,
-                        "message": "Please upload at least 3 photos before previewing your listing.",
+                        "message": (
+                            "Please upload at least 3 approved photos "
+                            "before previewing your listing."
+                        ),
                         "errors": {
                             "photos_min_required": 3,
-                            "photos_current": total_photos,
+                            "photos_current": approved_photo_count,
                         },
                     },
                     status=status.HTTP_400_BAD_REQUEST,
@@ -657,14 +669,30 @@ class RoomPhotoUploadView(APIView):
         description="List approved room photos. Returns ok_response envelope.",
     )
     def get(self, request, pk):
-        """Return only approved images for a room (for grids on Step 4/5, room cards, etc.)."""
+        """
+        Return room photos based on the requester.
+
+        - The room owner can retrieve all uploaded photos, including pending
+        and rejected photos, so the frontend can display moderation status.
+        - Public users and other authenticated users receive approved photos only.
+        """
         room = get_object_or_404(Room, pk=pk)
-        photos = RoomImage.objects.approved().filter(room=room)
+
+        is_owner = (
+            request.user.is_authenticated
+            and room.property_owner_id == request.user.id
+        )
+
+        if is_owner:
+            photos = RoomImage.objects.filter(room=room).order_by("id")
+        else:
+            photos = RoomImage.objects.approved().filter(room=room).order_by("id")
+
         data = RoomImageSerializer(
-                    photos,
-                    many=True,
-                    context={"request": request},
-                    ).data
+            photos,
+            many=True,
+            context={"request": request},
+        ).data
 
         return ok_response(data, status_code=status.HTTP_200_OK)
 
@@ -711,7 +739,15 @@ class RoomPhotoUploadView(APIView):
             )
 
         # Extension validation
-        allowed_exts = {"jpg", "jpeg", "png", "webp"}
+        allowed_exts = {
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "avif",
+            "heic",
+            "heif",
+        }
         name_lower = (file_obj.name or "").lower()
         ext = name_lower.rsplit(".", 1)[-1] if "." in name_lower else ""
 
@@ -721,7 +757,7 @@ class RoomPhotoUploadView(APIView):
                     "ok": False,
                     "message": "Validation error.",
                     "errors": {
-                        "image": ["Only JPG, JPEG, PNG, or WEBP files are allowed."]
+                        "image": ["Only JPG, JPEG, PNG, WEBP, AVIF, HEIC, or HEIF files are allowed."]
                     },
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -748,22 +784,111 @@ class RoomPhotoUploadView(APIView):
         except Exception:
             pass
 
-        #  SINGLE SOURCE OF TRUTH: create ONCE
+        # SINGLE SOURCE OF TRUTH: create the image only once.
         image = RoomImage.objects.create(
             room=room,
             image=file_obj,
-            status="pending",
+            status=RoomImage.STATUS_PENDING,
+            moderation_reason=(
+                RoomImage.MODERATION_AWAITING_CHECK
+            ),
+            moderation_notes="Awaiting automated moderation.",
         )
 
-        #  AI moderation (non-blocking, safe)
-        try:
-            file_obj.seek(0)
-            if should_auto_approve_upload(file_obj):
-                image.status = "approved"
-                image.save(update_fields=["status"])
-        except Exception:
-            pass
+        
 
+        # Run automated moderation and persist the complete outcome.
+        try:
+            import logging
+
+            from django.utils import timezone
+
+            file_obj.seek(0)
+
+            moderation_result = should_auto_approve_upload(
+                file_obj
+            )
+
+            # Backward compatibility for tests or temporary monkeypatches
+            # that still return True or False.
+            if isinstance(moderation_result, bool):
+                moderation_result = {
+                    "approved": moderation_result,
+                    "reason": (
+                        RoomImage.MODERATION_AUTO_APPROVED
+                        if moderation_result
+                        else RoomImage.MODERATION_MANUAL_REVIEW
+                    ),
+                    "notes": (
+                        "Automatically approved."
+                        if moderation_result
+                        else "Held for manual moderation review."
+                    ),
+                }
+
+            approved = bool(
+                moderation_result.get("approved")
+            )
+
+            image.status = (
+                RoomImage.STATUS_APPROVED
+                if approved
+                else RoomImage.STATUS_PENDING
+            )
+
+            image.moderation_reason = (
+                moderation_result.get("reason")
+                or (
+                    RoomImage.MODERATION_AUTO_APPROVED
+                    if approved
+                    else RoomImage.MODERATION_MANUAL_REVIEW
+                )
+            )
+
+            image.moderation_notes = (
+                moderation_result.get("notes")
+                or "Moderation completed without additional notes."
+            )
+
+            image.moderation_checked_at = timezone.now()
+
+            image.save(
+                update_fields=[
+                    "status",
+                    "moderation_reason",
+                    "moderation_notes",
+                    "moderation_checked_at",
+                ]
+            )
+
+        except Exception as exc:
+            import logging
+
+            from django.utils import timezone
+
+            logging.getLogger(__name__).exception(
+                "Automated moderation failed for RoomImage id=%s",
+                image.id,
+            )
+
+            image.status = RoomImage.STATUS_PENDING
+            image.moderation_reason = (
+                RoomImage.MODERATION_SERVICE_UNAVAILABLE
+            )
+            image.moderation_notes = (
+                "Unexpected moderation workflow failure. "
+                f"{exc.__class__.__name__}: {exc}"
+            )[:2000]
+            image.moderation_checked_at = timezone.now()
+
+            image.save(
+                update_fields=[
+                    "status",
+                    "moderation_reason",
+                    "moderation_notes",
+                    "moderation_checked_at",
+                ]
+            )
         # Response (serializer safe context)
         return ok_response(
             RoomImageSerializer(

@@ -32,6 +32,7 @@ from propertylist_app.api.serializers import (
     BookingPreflightRequestSerializer,
     BookingPreflightResponseSerializer,
     BookingRescheduleSerializer,
+    CreateViewingBookingSerializer,
 )
 from ..serializers import BookingCreateRequestSerializer, BookingResponseEnvelopeSerializer
 from .common import ok_response, _pagination_meta, _wrap_response_success, error_response
@@ -123,15 +124,7 @@ def create_booking(request):
 
 # propertylist_app/api/views/bookings.py
 @extend_schema(
-    request={
-        "type": "object",
-        "properties": {
-            "slot_id": {"type": "integer"},
-            "room_id": {"type": "integer"},
-            "start": {"type": "string", "format": "date-time"},
-        },
-        "required": [],
-    },
+    request=CreateViewingBookingSerializer,
     responses={
         200: {
             "type": "object",
@@ -417,6 +410,149 @@ class BookingListCreateView(generics.ListCreateAPIView):
             )
 
         serializer = self.get_serializer(queryset, many=True)
+        return Response(
+            {
+                "ok": True,
+                "message": None,
+                "data": serializer.data,
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class LandlordViewingsListView(generics.ListAPIView):
+    """
+    Return all viewing bookings for rooms owned by the authenticated landlord.
+    """
+
+    serializer_class = BookingSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardLimitOffsetPagination
+    throttle_classes = [UserRateThrottle]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["start", "end", "created_at", "id"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Booking.objects.none()
+
+        return (
+            Booking.objects
+            .filter(
+                room__property_owner=self.request.user,
+                is_deleted=False,
+            )
+            .select_related(
+                "room",
+                "user",
+                "slot",
+            )
+            .order_by("-created_at")
+        )
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="PaginatedLandlordViewingsListResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "data": BookingSerializer(many=True),
+                    "meta": inline_serializer(
+                        name="LandlordViewingsListMeta",
+                        fields={
+                            "count": serializers.IntegerField(),
+                            "next": serializers.CharField(
+                                required=False,
+                                allow_null=True,
+                            ),
+                            "previous": serializers.CharField(
+                                required=False,
+                                allow_null=True,
+                            ),
+                        },
+                    ),
+                    "count": serializers.IntegerField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "next": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "previous": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "results": BookingSerializer(
+                        many=True,
+                        required=False,
+                    ),
+                },
+            ),
+            401: OpenApiResponse(response=ErrorResponseSerializer),
+        },
+        parameters=[
+            OpenApiParameter(
+                name="limit",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Maximum number of landlord viewings to return.",
+            ),
+            OpenApiParameter(
+                name="offset",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Number of landlord viewings to skip.",
+            ),
+            OpenApiParameter(
+                name="ordering",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Sort by start, end, created_at, id, "
+                    "or their descending variants."
+                ),
+            ),
+        ],
+        description=(
+            "List all non-deleted viewing bookings across rooms owned by "
+            "the authenticated landlord."
+        ),
+    )
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            meta = _pagination_meta(self.paginator)
+
+            return Response(
+                {
+                    "ok": True,
+                    "message": None,
+                    "data": serializer.data,
+                    "meta": meta,
+                    "count": meta.get("count"),
+                    "next": meta.get("next"),
+                    "previous": meta.get("previous"),
+                    "results": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        serializer = self.get_serializer(queryset, many=True)
+
         return Response(
             {
                 "ok": True,

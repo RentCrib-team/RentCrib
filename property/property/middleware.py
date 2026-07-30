@@ -36,3 +36,53 @@ class RequestIDMiddleware:
         response["X-Response-Time-ms"] = str(duration_ms)
 
         return response
+    
+    
+    
+    
+class SecurityHeadersMiddleware:
+    """
+    Adds browser security headers to every Django response.
+
+    These headers provide defence-in-depth for API responses and browser-based
+    API documentation such as Swagger UI and ReDoc.
+    """
+
+    CONTENT_SECURITY_POLICY = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'"
+    )
+
+    PERMISSIONS_POLICY = (
+        "camera=(), "
+        "microphone=(), "
+        "geolocation=(), "
+        "payment=(), "
+        "usb=(), "
+        "interest-cohort=()"
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+
+        response.setdefault(
+            "Content-Security-Policy",
+            self.CONTENT_SECURITY_POLICY,
+        )
+        response.setdefault(
+            "Permissions-Policy",
+            self.PERMISSIONS_POLICY,
+        )
+
+        return response    

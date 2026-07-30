@@ -23,8 +23,10 @@ REQUIRED_MY_LISTINGS_ITEM_FIELDS = {
     "id",
     "title",
     "price_per_month",
-    "main_photo",
-    "photo_count",
+    "cover_image",
+    "other_images",
+
+    "image_status",
     "listing_state",
     "status",
     "paid_until",

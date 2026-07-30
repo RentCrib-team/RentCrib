@@ -388,10 +388,68 @@ class TenancyRespondView(APIView):
             response_message = "Tenancy updated successfully."
 
         return ok_response(
-            TenancyDetailSerializer(tenancy).data,
+            TenancyDetailSerializer(
+                tenancy,
+                context={"request": request},
+            ).data,
             message=response_message,
             status_code=status.HTTP_200_OK,
         )               
+        
+
+
+class TenancyDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="TenancyDetailOkResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "data": TenancyDetailSerializer(),
+                },
+            ),
+            401: OpenApiResponse(description="Authentication required."),
+            404: DetailResponseSerializer,
+        },
+        description=(
+            "Return one tenancy belonging to the authenticated landlord "
+            "or tenant."
+        ),
+    )
+    def get(self, request, tenancy_id):
+        Tenancy = apps.get_model("propertylist_app", "Tenancy")
+
+        tenancy = (
+            Tenancy.objects.select_related(
+                "room",
+                "landlord",
+                "tenant",
+                "tenant__profile",
+            )
+            .filter(
+                Q(landlord=request.user) | Q(tenant=request.user),
+                id=tenancy_id,
+            )
+            .first()
+        )
+
+        if not tenancy:
+            raise NotFound("Tenancy not found.")
+
+        return ok_response(
+            TenancyDetailSerializer(
+                tenancy,
+                context={"request": request},
+            ).data,
+            message="Tenancy retrieved successfully.",
+            status_code=status.HTTP_200_OK,
+        )        
         
         
         

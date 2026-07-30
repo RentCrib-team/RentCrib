@@ -54,3 +54,50 @@ class ContactFormTests(APITestCase):
         resp = self.client.post(self.url, data=payload, format="json")
 
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        
+        
+        
+    def test_contact_rejects_html_in_subject(self):
+        payload = {
+            "name": "Security Tester",
+            "email": "security@example.com",
+            "subject": "<img src=x onerror=alert(1)>",
+            "message": "Normal support message.",
+        }
+
+        resp = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("errors", resp.data)
+        self.assertIn("subject", resp.data["errors"])
+        self.assertEqual(ContactMessage.objects.count(), 0)
+
+    def test_contact_rejects_html_in_message(self):
+        payload = {
+            "name": "Security Tester",
+            "email": "security@example.com",
+            "subject": "Support request",
+            "message": "<script>alert(1)</script>",
+        }
+
+        resp = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("errors", resp.data)
+        self.assertIn("message", resp.data["errors"])
+        self.assertEqual(ContactMessage.objects.count(), 0)
+
+    def test_contact_rejects_dangerous_javascript_scheme(self):
+        payload = {
+            "name": "Security Tester",
+            "email": "security@example.com",
+            "subject": "javascript:alert(1)",
+            "message": "Normal support message.",
+        }
+
+        resp = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("errors", resp.data)
+        self.assertIn("subject", resp.data["errors"])
+        self.assertEqual(ContactMessage.objects.count(), 0)    

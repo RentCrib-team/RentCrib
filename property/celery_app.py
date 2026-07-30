@@ -26,14 +26,15 @@ app.conf.beat_schedule = {
         "task": "notifications.tasks.notify_listing_expiring",
         "schedule": crontab(hour=7, minute=0),
     },
-    "notify-upcoming-bookings-hourly": {
-        "task": "propertylist_app.services.tasks.notify_upcoming_bookings",
-        "schedule": crontab(minute=0),
-        "args": (24,),
+    
+    "notify-upcoming-bookings-every-minute": {
+    "task": "propertylist_app.services.tasks.notify_upcoming_bookings",
+    "schedule": crontab(minute="*"),
+    "args": (5,),
     },
-    "notify-completed-viewings-hourly": {
+    "notify-completed-viewings-every-minute": {
         "task": "propertylist_app.notifications.tasks.notify_completed_viewings",
-        "schedule": crontab(minute=0),
+        "schedule": crontab(minute="*"),
     },
 
     # Listings & accounts

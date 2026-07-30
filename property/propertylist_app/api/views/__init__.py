@@ -54,6 +54,7 @@ from .reviews import (
 from .tenancies import (
     TenancyRespondView,
     TenancyProposeView,
+    TenancyDetailView,
     MyTenanciesView,
     TenancyStillLivingConfirmView,
     TenancyExtensionCreateView,
@@ -80,6 +81,7 @@ from .messaging import (
 from .bookings import (
     create_booking,
     BookingListCreateView,
+    LandlordViewingsListView,
     BookingDetailView,
     BookingCancelView,
     BookingDeleteView,

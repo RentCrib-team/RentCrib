@@ -1,32 +1,78 @@
 ﻿import pytest
 from django.contrib.auth import get_user_model
-from propertylist_app.models import MessageThread, Message
+
+from notifications.models import (
+    NotificationTemplate,
+    OutboundNotification,
+)
+from propertylist_app.models import (
+    Message,
+    MessageThread,
+    Notification,
+)
 
 User = get_user_model()
 
-@pytest.mark.django_db(transaction=True)
-def test_message_post_save_signal_enqueues_email_task(monkeypatch, django_capture_on_commit_callbacks):
-    # 1) Patch the Celery task's .delay() so no real queue is used.
-    calls = {"count": 0, "args": None}
 
-    def fake_delay(message_id):
-        calls["count"] += 1
-        calls["args"] = (message_id,)
+@pytest.mark.django_db
+def test_message_post_save_signal_creates_notifications():
+    NotificationTemplate.objects.create(
+        key="message.new",
+        channel=NotificationTemplate.CHANNEL_EMAIL,
+        subject="New message",
+        body="You have a new message.",
+        is_active=True,
+    )
 
-    from propertylist_app import tasks
+    sender = User.objects.create_user(
+        username="alice",
+        email="alice@example.com",
+        password="x",
+    )
+    recipient = User.objects.create_user(
+        username="bob",
+        email="bob@example.com",
+        password="x",
+    )
 
-    monkeypatch.setattr(tasks.task_send_new_message_email, "delay", fake_delay)
-
-    # 2) Create a two-person thread.
-    u1 = User.objects.create_user(username="alice", email="a@example.com", password="x")
-    u2 = User.objects.create_user(username="bob", email="b@example.com", password="x")
     thread = MessageThread.objects.create()
-    thread.participants.set([u1, u2])
+    thread.participants.set([sender, recipient])
 
-    # 3) Create a message -> post_save signal registers an on_commit callback.
-    with django_capture_on_commit_callbacks(execute=True):
-        msg = Message.objects.create(thread=thread, sender=u1, body="Hi!")
+    message = Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="Hi!",
+    )
 
-    # 4) Assert that our fake .delay() was called exactly once after commit.
-    assert calls["count"] == 1, "Expected Celery task to be enqueued once"
-    assert calls["args"] == (msg.id,)
+    in_app_notification = Notification.objects.get(
+        user=recipient,
+        type=Notification.Type.MESSAGE,
+        thread=thread,
+        message=message,
+    )
+
+    assert in_app_notification.title == "New message"
+    assert in_app_notification.body == "Hi!"
+
+    outbound_notification = OutboundNotification.objects.get(
+        user=recipient,
+        channel=NotificationTemplate.CHANNEL_EMAIL,
+        template_key="message.new",
+    )
+
+    assert outbound_notification.status == OutboundNotification.STATUS_QUEUED
+    assert outbound_notification.context["thread_id"] == thread.id
+    assert outbound_notification.context["message_id"] == message.id
+    assert outbound_notification.context["sender"]["name"] == "alice"
+    assert outbound_notification.context["snippet"] == "Hi!"
+
+    assert not Notification.objects.filter(
+        user=sender,
+        type=Notification.Type.MESSAGE,
+        message=message,
+    ).exists()
+
+    assert not OutboundNotification.objects.filter(
+        user=sender,
+        template_key="message.new",
+    ).exists()

@@ -53,6 +53,7 @@ REST_FRAMEWORK = {
         # Baselines; tests narrow these when needed:
         "user": "10000/hour",
         "anon": "10000/hour",
+        "room-create": "10000/hour",
         "otp-verify": "10000/hour",
         "otp-resend": "10000/hour",
 

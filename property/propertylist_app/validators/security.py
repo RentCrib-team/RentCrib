@@ -117,6 +117,36 @@ def sanitize_plain_text(value: str, *, max_len: int | None = None) -> str:
     return value
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+_DANGEROUS_SCHEME_RE = re.compile(
+    r"^\s*(?:javascript|vbscript|data\s*:\s*text/html)\s*:",
+    re.IGNORECASE,
+)
+
+
+def validate_plain_text(value: str, *, max_len: int | None = None) -> str:
+    """
+    Validate plain-text fields.
+
+    Intended for fields that should never contain HTML, such as:
+      - listing titles
+      - occupations
+      - contact subjects/messages
+
+    Performs existing plain-text normalisation, then rejects HTML-like input.
+    """
+    value = sanitize_plain_text(value, max_len=max_len)
+
+    if _HTML_TAG_RE.search(value):
+        raise ValidationError("HTML is not allowed in this field.")
+
+    if _DANGEROUS_SCHEME_RE.search(value):
+        raise ValidationError("Unsafe content is not allowed in this field.")
+
+    return value
+
+
 def normalise_email(value: str) -> str:
     return (value or "").strip().lower()
 
@@ -170,13 +200,15 @@ def normalise_phone(value: str) -> str:
 
 def validate_listing_title(value: str) -> str:
     """Reasonable constraints on listing titles."""
-    value = (value or "").strip()
+    value = validate_plain_text(value)
+
     if not value:
         raise ValidationError("Title is required.")
     if len(value) < 5:
         raise ValidationError("Title is too short (min 5 characters).")
     if len(value) > 120:
         raise ValidationError("Title is too long (max 120 characters).")
+
     return value
 
 

@@ -3,9 +3,15 @@ User = get_user_model()
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 import re
+
+
+from datetime import timedelta
+
+
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.shortcuts import get_object_or_404
 from django.db import transaction
@@ -32,10 +38,10 @@ from propertylist_app.validators import (
     validate_listing_photos, sanitize_search_text, validate_numeric_range,
     validate_radius_miles, validate_pagination, validate_ordering,
     normalise_price, normalise_phone, normalise_name, normalise_email,
-    sanitize_plain_text,
+    sanitize_plain_text, validate_plain_text,
     assert_not_duplicate_listing, assert_no_duplicate_files,
     enforce_user_caps,
-)
+    )
 from propertylist_app.services.geo import geocode_postcode_cached
 
 from django.utils import timezone
@@ -406,16 +412,18 @@ class TenancyProposalSerializer(serializers.Serializer):
     duration_months = serializers.IntegerField(min_value=1, max_value=12)
 
     def _has_completed_viewing(self, *, room, user):
-        now = timezone.now()
+        completion_cutoff = timezone.now() - timedelta(minutes=10)
+
         return Booking.objects.filter(
             room=room,
             user=user,
             is_deleted=False,
             status=Booking.STATUS_ACTIVE,
             canceled_at__isnull=True,
-            end__lte=now,  # viewing completed
+            start__lte=completion_cutoff,
         ).exists()
-
+    
+    
     def validate(self, attrs):
         request = self.context["request"]
         user = request.user
@@ -482,48 +490,50 @@ class TenancyProposalSerializer(serializers.Serializer):
         landlord = validated_data["landlord"]
         tenant = validated_data["tenant"]
 
-        # proposer auto-confirms their side
+        existing_tenancy = (
+            Tenancy.objects
+            .select_for_update()
+            .filter(
+                room=room,
+                tenant=tenant,
+            )
+            .first()
+        )
+
+        if existing_tenancy is not None:
+            if user.id == landlord.id:
+                other_party = "tenant"
+            else:
+                other_party = "landlord"
+
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        (
+                            f"Your {other_party} has already created the tenancy "
+                            "information for this room. Please review the existing "
+                            "tenancy information instead."
+                        )
+                    ]
+                }
+            )
+
+        # The party submitting the original tenancy information
+        # automatically confirms their own side.
         landlord_confirmed_at = now if user.id == landlord.id else None
         tenant_confirmed_at = now if user.id == tenant.id else None
 
-        tenancy, created = Tenancy.objects.get_or_create(
+        tenancy = Tenancy.objects.create(
             room=room,
+            landlord=landlord,
             tenant=tenant,
-            defaults={
-                "landlord": landlord,
-                "proposed_by": user,
-                "move_in_date": validated_data["move_in_date"],
-                "duration_months": validated_data["duration_months"],
-                "landlord_confirmed_at": landlord_confirmed_at,
-                "tenant_confirmed_at": tenant_confirmed_at,
-                "status": Tenancy.STATUS_PROPOSED,
-            },
+            proposed_by=user,
+            move_in_date=validated_data["move_in_date"],
+            duration_months=validated_data["duration_months"],
+            landlord_confirmed_at=landlord_confirmed_at,
+            tenant_confirmed_at=tenant_confirmed_at,
+            status=Tenancy.STATUS_PROPOSED,
         )
-
-        if not created:
-            # â€œlast write winsâ€ update
-            tenancy.landlord = landlord  # keep consistent with room owner
-            tenancy.proposed_by = user
-            tenancy.move_in_date = validated_data["move_in_date"]
-            tenancy.duration_months = validated_data["duration_months"]
-
-            # reset confirmations: proposer confirmed, other cleared
-            if user.id == landlord.id:
-                tenancy.landlord_confirmed_at = now
-                tenancy.tenant_confirmed_at = None
-            else:
-                tenancy.tenant_confirmed_at = now
-                tenancy.landlord_confirmed_at = None
-
-            tenancy.status = Tenancy.STATUS_PROPOSED
-
-            # clear schedule fields (recomputed on final confirm)
-            tenancy.review_open_at = None
-            tenancy.review_deadline_at = None
-            tenancy.still_living_check_at = None
-            tenancy.still_living_confirmed_at = None
-
-            tenancy.save()
 
         return tenancy
 
@@ -557,14 +567,27 @@ class TenancyRespondSerializer(serializers.Serializer):
         action = attrs["action"]
 
         if action == "propose_changes":
-            if user.id != tenancy.tenant_id:
+            # Only the party reviewing the current proposal may edit it.
+            # The person who submitted the current proposal cannot edit
+            # their own tenancy information through the review endpoint.
+            if user.id == tenancy.proposed_by_id:
                 raise serializers.ValidationError(
-                    {"action": "Only the tenant can edit tenancy details at this stage."}
+                    {
+                        "action": (
+                            "You submitted the current tenancy information. "
+                            "The other party must review it before changes can be proposed."
+                        )
+                    }
                 )
 
             if tenancy.tenant_has_edited:
                 raise serializers.ValidationError(
-                    {"action": "You have already edited this tenancy once."}
+                    {
+                        "action": (
+                            "The one-time edit for this tenancy information "
+                            "has already been used."
+                        )
+                    }
                 )
 
 
@@ -619,22 +642,24 @@ class TenancyRespondSerializer(serializers.Serializer):
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
             ) - timedelta(days=7)
 
-        if action == "cancel":
-            tenancy.status = STATUS_CANCELLED
-            tenancy.save(update_fields=["status", "updated_at"] if hasattr(tenancy, "updated_at") else ["status"])
-            return tenancy
-
         if action == "propose_changes":
             tenancy.move_in_date = self.validated_data["move_in_date"]
             tenancy.duration_months = self.validated_data["duration_months"]
             tenancy.proposed_by = user
 
-            # reset confirmations
-            tenancy.landlord_confirmed_at = None
-            tenancy.tenant_confirmed_at = None
+            # The person submitting the amended terms confirms their own
+            # counter-proposal. The other party must review and agree.
+            if user.id == tenancy.landlord_id:
+                tenancy.landlord_confirmed_at = now
+                tenancy.tenant_confirmed_at = None
+            else:
+                tenancy.tenant_confirmed_at = now
+                tenancy.landlord_confirmed_at = None
+
             tenancy.status = STATUS_PROPOSED
 
-            # clear schedule-related fields (will be recomputed on confirm)
+            # Clear schedule-related fields. They will be recomputed when
+            # the other party agrees to the amended tenancy information.
             tenancy.review_open_at = None
             tenancy.review_deadline_at = None
             tenancy.still_living_check_at = None
@@ -678,23 +703,73 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
     can_leave_review = serializers.SerializerMethodField()
     review_button_reason = serializers.SerializerMethodField()
     profile_image = serializers.SerializerMethodField()
+    tenant_name = serializers.SerializerMethodField()
+    landlord_name = serializers.SerializerMethodField()
+
+    can_agree = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    available_actions = serializers.SerializerMethodField()
+    tenancy_action_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenancy
         fields = [
-            "id", "room", "landlord", "tenant", "profile_image", "proposed_by",
-            "move_in_date", "duration_months",
-            "landlord_confirmed_at", "tenant_confirmed_at",
-            "status",
-            "review_open_at", "review_deadline_at",
-            "can_leave_review", "review_button_reason",
-            "still_living_check_at", "still_living_confirmed_at",
-            "created_at", "updated_at",
-        ]
+                "id",
+                "room",
+                "landlord",
+                "landlord_name",
+                "tenant",
+                "tenant_name",
+                "profile_image",
+                "proposed_by",
+                "move_in_date",
+                "duration_months",
+                "landlord_confirmed_at",
+                "tenant_confirmed_at",
+                "status",
+                "can_agree",
+                "can_edit",
+                "available_actions",
+                "tenancy_action_reason",
+                "review_open_at",
+                "review_deadline_at",
+                "can_leave_review",
+                "review_button_reason",
+                "still_living_check_at",
+                "still_living_confirmed_at",
+                "created_at",
+                "updated_at",
+            ]
+                    
         read_only_fields = fields
         
         
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_tenant_name(self, obj):
+        tenant = getattr(obj, "tenant", None)
+
+        if tenant is None:
+            return None
+
+        full_name = tenant.get_full_name().strip()
+
+        return full_name or tenant.username
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_landlord_name(self, obj):
+        landlord = getattr(obj, "landlord", None)
+
+        if landlord is None:
+            return None
+
+        full_name = landlord.get_full_name().strip()
+
+        return full_name or landlord.username
         
+        
+        
+
     @extend_schema_field(OpenApiTypes.URI)
     def get_profile_image(self, obj):
         tenant = getattr(obj, "tenant", None)
@@ -713,39 +788,142 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
 
-        return url    
+        return url
+
+
+    
+    def _get_tenancy_action_permissions(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "You must be signed in to respond.",
+            }
+
+        if user.id not in {obj.landlord_id, obj.tenant_id}:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "You are not part of this tenancy.",
+            }
+
+        if obj.status != Tenancy.STATUS_PROPOSED:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "This tenancy information is no longer awaiting review.",
+            }
+
+        # The person who submitted the current terms must wait for
+        # the other party to review them.
+        if user.id == obj.proposed_by_id:
+            return {
+                "can_agree": False,
+                "can_edit": False,
+                "available_actions": [],
+                "reason": "Waiting for the other party to review the tenancy information.",
+            }
+
+        can_edit = not obj.tenant_has_edited
+
+        available_actions = ["confirm"]
+
+        if can_edit:
+            available_actions.append("propose_changes")
+
+        if can_edit:
+            reason = "You can agree to the tenancy information or edit it once."
+        else:
+            reason = (
+                "The one-time edit has already been used. "
+                "You can now agree to the tenancy information."
+            )
+
+        return {
+            "can_agree": True,
+            "can_edit": can_edit,
+            "available_actions": available_actions,
+            "reason": reason,
+        }
+
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_can_agree(self, obj):
+        return self._get_tenancy_action_permissions(obj)["can_agree"]
+
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_can_edit(self, obj):
+        return self._get_tenancy_action_permissions(obj)["can_edit"]
+
+
+    @extend_schema_field(
+        serializers.ListField(
+            child=serializers.CharField(),
+        )
+    )
+    def get_available_actions(self, obj):
+        return self._get_tenancy_action_permissions(obj)["available_actions"]
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_tenancy_action_reason(self, obj):
+        return self._get_tenancy_action_permissions(obj)["reason"]
+        
+        
+        
         
 
-    def get_can_leave_review(self, obj):
+
+    def _get_review_eligibility(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return False, "You must be signed in to leave a review."
+
+        if user.id == obj.tenant_id:
+            review_role = Review.ROLE_TENANT_TO_LANDLORD
+        elif user.id == obj.landlord_id:
+            review_role = Review.ROLE_LANDLORD_TO_TENANT
+        else:
+            return False, "You are not part of this tenancy."
+
+        if obj.status != "ended":
+            return False, "A review can only be left after the tenancy has ended."
+
+        if Review.objects.filter(
+            tenancy=obj,
+            role=review_role,
+        ).exists():
+            return False, "You have already submitted a review for this tenancy."
+
         now = timezone.now()
 
         if not obj.review_open_at:
-            return False
+            return False, "Review window is not open yet."
 
         if now < obj.review_open_at:
-            return False
+            return False, "Review will be available later."
 
         if obj.review_deadline_at and now > obj.review_deadline_at:
-            return False
+            return False, "Review window has closed."
 
-        return True
+        return True, "Review is available."
+
+    def get_can_leave_review(self, obj):
+        can_leave_review, _ = self._get_review_eligibility(obj)
+        return can_leave_review
 
     def get_review_button_reason(self, obj):
-        now = timezone.now()
-
-        if not obj.review_open_at:
-            return "Review window is not open yet."
-
-        if now < obj.review_open_at:
-            return "Review will be available later."
-
-        if obj.review_deadline_at and now > obj.review_deadline_at:
-            return "Review window has closed."
-
-        return "Review is available."
-
-
-
+        _, reason = self._get_review_eligibility(obj)
+        return reason
 
 class UserReviewSummarySerializer(serializers.Serializer):
     landlord_count = serializers.IntegerField()
@@ -762,6 +940,42 @@ class CreateViewingBookingSerializer(serializers.Serializer):
     slot_id = serializers.IntegerField(required=False)
     room_id = serializers.IntegerField(required=False)
     start = serializers.DateTimeField(required=False)
+
+
+
+
+class RoomPhotoResponseSerializer(serializers.Serializer):
+    """
+    Schema and response structure for a photo embedded in RoomSerializer.
+    """
+
+    id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    url = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+    original_image = serializers.URLField(
+        read_only=True,
+        allow_null=True,
+    )
+   
+    status = serializers.CharField(
+        read_only=True,
+    )
+    is_main = serializers.BooleanField(
+        read_only=True,
+    )
+
+
+
+
 
 
 
@@ -784,8 +998,9 @@ class RoomSerializer(serializers.ModelSerializer):
     owner_name = serializers.SerializerMethodField(read_only=True)
     owner_username = serializers.SerializerMethodField(read_only=True)
     owner_avatar = serializers.SerializerMethodField(read_only=True)
-    main_photo = serializers.SerializerMethodField(read_only=True)
-    photo_count = serializers.SerializerMethodField(read_only=True)
+    cover_image = serializers.SerializerMethodField(read_only=True)
+    other_images = serializers.SerializerMethodField(read_only=True)
+    image_status = serializers.SerializerMethodField(read_only=True)
     listing_state = serializers.SerializerMethodField(read_only=True)
     landlord_type = serializers.SerializerMethodField(read_only=True)
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
@@ -1111,44 +1326,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
         return url
 
-    @extend_schema_field(OpenApiTypes.STR)
-    def get_main_photo(self, obj) -> str:
-        request = self.context.get("request")
 
-        images_qs = obj.roomimage_set.filter(
-            status__in=["approved", "pending"]
-        ).order_by("id")
-
-        approved_photo = images_qs.first()
-
-        if approved_photo and approved_photo.image:
-            url = approved_photo.image.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-
-        legacy_image = getattr(obj, "image", None)
-
-        if legacy_image:
-            url = legacy_image.url
-            if request is not None:
-                return request.build_absolute_uri(url)
-            return url
-
-        return ""
-
-    @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj) -> int:
-        approved_count = obj.roomimage_set.filter(status="approved").count()
-        legacy_image = getattr(obj, "image", None)
-
-        if approved_count:
-            return approved_count
-
-        if legacy_image:
-            return 1
-
-        return 0
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1231,95 +1409,202 @@ class RoomSerializer(serializers.ModelSerializer):
 
 
     def _sync_availability_slots(self, room):
+        """
+        Convert landlord-selected viewing availability into consecutive
+        30-minute bookable slots.
+
+        Rules:
+        - Round the landlord's start time up to a 15-minute boundary.
+        - Round the landlord's end time down to a 15-minute boundary.
+        - Each viewing lasts exactly 30 minutes.
+        - Generate only complete slots which finish on or before the
+          rounded end time.
+        - Recurring modes generate slots for the next 30 calendar days.
+        - Custom mode uses only the landlord-selected dates.
+        - Existing future slots with active bookings are preserved.
+
+        Example:
+        17:19-21:23 becomes 17:30-21:15.
+
+        Generated slots:
+        17:30-18:00
+        18:00-18:30
+        18:30-19:00
+        19:00-19:30
+        19:30-20:00
+        20:00-20:30
+        20:30-21:00
+        """
+
+        def round_up_to_quarter(value):
             """
-            Convert landlord-selected viewing dates/times into real bookable slots.
+            Round upward to the next 00, 15, 30 or 45-minute boundary.
 
-            Example:
-            dates: ["2026-06-18"]
-            from: 07:00
-            to: 17:00
-
-            Creates:
-            07:00-07:30
-            07:30-08:00
-            etc.
-
-            Already-booked slots are not deleted.
+            A time already on a quarter-hour boundary remains unchanged.
             """
-            dates = room.view_available_custom_dates or []
-            start_time = room.availability_from_time
-            end_time = room.availability_to_time
+            total_minutes = (value.hour * 60) + value.minute
 
-            if room.view_available_days_mode != "custom":
-                return
+            if value.second or value.microsecond:
+                total_minutes += 1
 
-            if not dates or not start_time or not end_time:
-                return
+            return ((total_minutes + 14) // 15) * 15
 
-            slot_minutes = 30
-            desired_slots = []
+        def round_down_to_quarter(value):
+            """
+            Round downward to the previous 00, 15, 30 or 45-minute boundary.
+            """
+            total_minutes = (value.hour * 60) + value.minute
+            return (total_minutes // 15) * 15
 
-            for d in dates:
-                if isinstance(d, str):
-                    day = datetime.fromisoformat(d).date()
-                else:
-                    day = d
+        mode = room.view_available_days_mode
+        start_time = room.availability_from_time
+        end_time = room.availability_to_time
 
-                current = datetime.combine(day, start_time)
-                finish = datetime.combine(day, end_time)
+        valid_modes = {
+            "everyday",
+            "weekdays",
+            "weekends",
+            "custom",
+        }
 
-                if timezone.is_naive(current):
-                    current = timezone.make_aware(current)
+        if mode not in valid_modes:
+            return
 
-                if timezone.is_naive(finish):
-                    finish = timezone.make_aware(finish)
+        if not start_time or not end_time:
+            return
 
-                while current + timedelta(minutes=slot_minutes) <= finish:
-                    slot_end = current + timedelta(minutes=slot_minutes)
-                    desired_slots.append((current, slot_end))
-                    current = slot_end
+        slot_minutes = 30
+        today = timezone.localdate()
+        desired_dates = []
 
-            desired_set = set(desired_slots)
+        if mode == "custom":
+            for selected_date in room.view_available_custom_dates or []:
+                if isinstance(selected_date, str):
+                    try:
+                        selected_date = datetime.fromisoformat(
+                            selected_date
+                        ).date()
+                    except (TypeError, ValueError):
+                        continue
 
-            # Remove only future unbooked slots that are no longer part of landlord's selected availability.
-            future_slots = AvailabilitySlot.objects.filter(
-                room=room,
-                end__gt=timezone.now(),
-            )
+                if selected_date >= today:
+                    desired_dates.append(selected_date)
 
-            for slot in future_slots:
-                has_booking = Booking.objects.filter(
-                    slot=slot,
-                    canceled_at__isnull=True,
-                    is_deleted=False,
-                ).exists()
+        else:
+            # Generate today plus the following 29 calendar days.
+            for day_offset in range(30):
+                selected_date = today + timedelta(days=day_offset)
 
-                if has_booking:
+                if (
+                    mode == "weekdays"
+                    and selected_date.weekday() >= 5
+                ):
                     continue
 
-                if (slot.start, slot.end) not in desired_set:
-                    slot.delete()
+                if (
+                    mode == "weekends"
+                    and selected_date.weekday() < 5
+                ):
+                    continue
 
-            existing_set = set(
-                AvailabilitySlot.objects.filter(room=room).values_list("start", "end")
+                desired_dates.append(selected_date)
+
+        start_minutes = round_up_to_quarter(start_time)
+        end_minutes = round_down_to_quarter(end_time)
+
+        desired_slots = []
+        current_time = timezone.now()
+
+        for selected_date in desired_dates:
+            day_start = datetime.combine(selected_date, time.min)
+
+            rounded_start = day_start + timedelta(
+                minutes=start_minutes
             )
 
-            new_slots = [
-                AvailabilitySlot(
-                    room=room,
-                    start=start,
-                    end=end,
-                    max_bookings=1,
+            rounded_end = day_start + timedelta(
+                minutes=end_minutes
+            )
+
+            if timezone.is_naive(rounded_start):
+                rounded_start = timezone.make_aware(
+                    rounded_start,
+                    timezone.get_current_timezone(),
                 )
-                for start, end in desired_slots
-                if (start, end) not in existing_set
-            ]
 
-            AvailabilitySlot.objects.bulk_create(new_slots, ignore_conflicts=True)
+            if timezone.is_naive(rounded_end):
+                rounded_end = timezone.make_aware(
+                    rounded_end,
+                    timezone.get_current_timezone(),
+                )
 
+            current = rounded_start
 
+            while current + timedelta(minutes=slot_minutes) <= rounded_end:
+                slot_end = current + timedelta(
+                    minutes=slot_minutes
+                )
 
+                # Do not create a slot which has already ended.
+                if slot_end > current_time:
+                    desired_slots.append(
+                        (
+                            current,
+                            slot_end,
+                        )
+                    )
 
+                current = slot_end
+
+        desired_set = set(desired_slots)
+
+        # Remove only future unbooked slots which no longer match the
+        # landlord's current availability.
+        future_slots = AvailabilitySlot.objects.filter(
+            room=room,
+            end__gt=current_time,
+        )
+
+        for slot in future_slots:
+            has_active_booking = Booking.objects.filter(
+                slot=slot,
+                canceled_at__isnull=True,
+                is_deleted=False,
+            ).exists()
+
+            if has_active_booking:
+                continue
+
+            if (slot.start, slot.end) not in desired_set:
+                slot.delete()
+
+        existing_set = set(
+            AvailabilitySlot.objects.filter(
+                room=room
+            ).values_list(
+                "start",
+                "end",
+            )
+        )
+
+        new_slots = [
+            AvailabilitySlot(
+                room=room,
+                start=slot_start,
+                end=slot_end,
+                max_bookings=1,
+            )
+            for slot_start, slot_end in desired_slots
+            if (
+                slot_start,
+                slot_end,
+            ) not in existing_set
+        ]
+
+        AvailabilitySlot.objects.bulk_create(
+            new_slots,
+            ignore_conflicts=True,
+        )
     def create(self, validated_data):
         room = super().create(validated_data)
 
@@ -1613,50 +1898,156 @@ class RoomSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(url)
         return url
 
-    @extend_schema_field(OpenApiTypes.URI)
-    def get_main_photo(self, obj) -> str | None:
-        approved_images = getattr(obj, "prefetched_approved_images", None)
+    def _viewer_is_room_owner(self, obj) -> bool:
+        """
+        Return True only when the authenticated requester owns this room.
 
-        if approved_images is not None:
-            first_image = approved_images[0] if approved_images else None
-        else:
-            first_image = (
-                obj.roomimage_set.filter(status="approved")
-                .order_by("id")
-                .first()
-            )
+        Public seekers must only receive approved photos.
+        The room owner may also see pending and rejected photos so they can
+        understand the moderation state of every upload.
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
 
-        if first_image and first_image.image:
-            url = first_image.image.url
-        elif getattr(obj, "image", None):
-            url = obj.image.url
-        else:
+        return bool(
+            user
+            and user.is_authenticated
+            and obj.property_owner_id == user.id
+        )
+
+    def _room_images(self, obj):
+        """
+        Return all uploaded images so the serializer can calculate one
+        overall public image-verification status.
+        """
+        return list(
+            obj.roomimage_set.filter(
+                status__in=["approved", "pending", "rejected"]
+            ).order_by("id")
+        )
+
+    def _absolute_media_url(self, file_field) -> str | None:
+        """
+        Convert an ImageField into a frontend-ready absolute URL.
+        """
+        if not file_field:
+            return None
+
+        try:
+            url = file_field.url
+        except (ValueError, AttributeError):
             return None
 
         request = self.context.get("request")
+
         if request is not None:
             return request.build_absolute_uri(url)
+
         return url
 
-        request = self.context.get("request")
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+    def _image_payload(self, obj) -> dict:
+        """
+        Return the correct room image payload for the requester.
 
-    @extend_schema_field(OpenApiTypes.INT)
-    def get_photo_count(self, obj):
-        val = getattr(obj, "photo_count", None)
-        if val is not None:
-            return val
+        Owner:
+        - can see approved, pending and rejected uploads
+        - receives the first uploaded image as cover_image
+        - receives the remaining uploads as other_images
 
-        approved_images = getattr(obj, "prefetched_approved_images", None)
-        if approved_images is not None:
-            approved = len(approved_images)
+        Public:
+        - can only see approved images
+        - images remain hidden until at least 3 are approved
+        """
+        images = self._room_images(obj)
+
+        if not images:
+            legacy_url = self._absolute_media_url(
+                getattr(obj, "image", None)
+            )
+
+            if legacy_url:
+                return {
+                    "cover_image": legacy_url,
+                    "other_images": [],
+                    "image_status": "approved",
+                }
+
+            return {
+                "cover_image": None,
+                "other_images": None,
+                "image_status": None,
+            }
+
+        approved_count = sum(
+            1 for image in images if image.status == "approved"
+        )
+        pending_count = sum(
+            1 for image in images if image.status == "pending"
+        )
+
+        if approved_count >= 3:
+            image_status = "approved"
+        elif pending_count > 0:
+            image_status = "pending"
         else:
-            approved = obj.roomimage_set.filter(status="approved").count()
+            image_status = "rejected"
 
-        legacy = 1 if getattr(obj, "image", None) else 0
-        return approved + legacy
+        # The authenticated room owner can see every uploaded image,
+        # including pending and rejected uploads.
+        if self._viewer_is_room_owner(obj):
+            owner_urls = [
+                self._absolute_media_url(image.image)
+                for image in images
+                if image.image
+            ]
+            owner_urls = [url for url in owner_urls if url]
+
+            return {
+                "cover_image": owner_urls[0] if owner_urls else None,
+                "other_images": owner_urls[1:],
+                "image_status": image_status,
+            }
+
+        # Public users must not see images until the room has at least
+        # three approved photos.
+        if image_status != "approved":
+            return {
+                "cover_image": None,
+                "other_images": None,
+                "image_status": image_status,
+            }
+
+        approved_urls = [
+            self._absolute_media_url(image.image)
+            for image in images
+            if image.status == "approved" and image.image
+        ]
+        approved_urls = [url for url in approved_urls if url]
+
+        return {
+            "cover_image": approved_urls[0] if approved_urls else None,
+            "other_images": approved_urls[1:],
+            "image_status": "approved",
+        }
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_cover_image(self, obj) -> str | None:
+        return self._image_payload(obj)["cover_image"]
+
+    @extend_schema_field(
+        serializers.ListField(
+            child=serializers.URLField(),
+            allow_null=True,
+        )
+    )
+    def get_other_images(self, obj) -> list[str] | None:
+        return self._image_payload(obj)["other_images"]
+
+    
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_image_status(self, obj) -> str | None:
+        return self._image_payload(obj)["image_status"]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
@@ -1738,26 +2129,82 @@ class RoomPreviewSerializer(serializers.Serializer):
     def get_room(self, obj) -> Dict[str, Any]:
         return RoomSerializer(obj, context=self.context).data
 
-    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
+    @extend_schema_field(
+    RoomPhotoResponseSerializer(many=True)
+    )
     def get_photos(self, obj) -> List[Dict[str, Any]]:
-        # keep your existing logic exactly as-is
+        """
+        Return all owner-visible photos for the room preview endpoint.
+
+        Approved images use the original image.
+       
+        """
         request = self.context.get("request")
         photos = []
 
-        qs = obj.roomimage_set.filter(status__in=["approved", "pending"]).order_by("id")
-        for img in qs:
-            if not img.image:
-                continue
-            url = img.image.url
-            if request is not None:
-                url = request.build_absolute_uri(url)
-            photos.append({"id": img.id, "url": url, "status": img.status})
+        qs = obj.roomimage_set.filter(
+            status__in=["approved", "pending", "rejected"]
+        ).order_by("id")
 
-        if not photos and obj.image:
-            url = obj.image.url
+        for index, img in enumerate(qs):
+            original_url = None
+            
+
+            if img.image:
+                try:
+                    original_url = img.image.url
+                except (ValueError, AttributeError):
+                    original_url = None
+
+            
+
             if request is not None:
-                url = request.build_absolute_uri(url)
-            photos.append({"id": None, "url": url, "status": "legacy"})
+                if original_url:
+                    original_url = request.build_absolute_uri(original_url)
+
+            display_url = original_url
+
+            if not display_url:
+                continue
+
+            photos.append(
+                {
+                    "id": img.id,
+                    "image": display_url,
+                    "url": display_url,
+                    "original_image": original_url,
+                    "status": img.status,
+                    "moderation_state": get_room_image_moderation_state(img),
+                    "user_message": get_room_image_user_message(img),
+                    "can_replace": (
+                        img.status != RoomImage.STATUS_APPROVED
+                    ),
+                    "is_main": index == 0,
+                }
+            )
+        legacy_image = getattr(obj, "image", None)
+
+        if not photos and legacy_image:
+            try:
+                legacy_url = legacy_image.url
+            except (ValueError, AttributeError):
+                legacy_url = None
+
+            if legacy_url and request is not None:
+                legacy_url = request.build_absolute_uri(legacy_url)
+
+            if legacy_url:
+                photos.append(
+                    {
+                        "id": None,
+                        "image": legacy_url,
+                        "url": legacy_url,
+                        "original_image": legacy_url,
+                        
+                        "status": "legacy",
+                        "is_main": True,
+                    }
+                )
 
         return photos
 
@@ -1799,6 +2246,9 @@ class SearchFiltersSerializer(serializers.Serializer):
     def validate_postcode(self, value):
         value = sanitize_plain_text(value, max_len=20).upper()
         return normalize_uk_postcode(value)
+    
+ 
+    
 
     def validate_street(self, value):
         return sanitize_plain_text(value, max_len=120)
@@ -2216,6 +2666,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "phone_verified_at",
             "advertiser_verified",
             "marketing_consent",
+            "preferred_timezone",
             "notify_rentout_updates",
             "notify_reminders",
             "notify_messages",
@@ -2293,6 +2744,49 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return normalize_uk_postcode(value)
         except Exception:
             raise serializers.ValidationError("Invalid UK postcode.")
+        
+        
+    def validate_occupation(self, value):
+        if value is None:
+            return ""
+
+        value = validate_plain_text(value)
+
+        if not value:
+            return ""
+
+        return value
+
+    def validate_about_you(self, value):
+        if value is None:
+            return ""
+
+        value = validate_plain_text(value)
+
+        if not value:
+            return ""
+
+        return value    
+    
+    
+    def validate_preferred_timezone(self, value):
+        value = (value or "").strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Timezone is required."
+            )
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise serializers.ValidationError(
+                "Enter a valid IANA timezone, for example Europe/London."
+            )
+
+        return value
+        
+        
 
     def validate_date_of_birth(self, value):
         if not value:
@@ -2606,75 +3100,190 @@ class ContactMessageSerializer(serializers.ModelSerializer):
         return normalise_email(value)
 
     def validate_subject(self, value):
-        value = sanitize_plain_text(value, max_len=200)
+        value = validate_plain_text(value, max_len=200)
+
         if not value:
             raise serializers.ValidationError("Subject is required.")
+
         return value
 
     def validate_message(self, value):
-        value = sanitize_plain_text(value, max_len=5000)
+        value = validate_plain_text(value, max_len=5000)
+
         if not value:
             raise serializers.ValidationError("Message is required.")
+
         return value
+
+
+
+def get_room_image_moderation_state(image) -> str:
+    """
+    Return a frontend-facing moderation state for one room photo.
+
+    This is separate from the database status because a pending photo
+    may either still be checking, need manual review, or require retry.
+    """
+    reason = getattr(image, "moderation_reason", None)
+
+    if image.status == RoomImage.STATUS_APPROVED:
+        return "approved"
+
+    if image.status == RoomImage.STATUS_REJECTED:
+        return "rejected"
+
+    if reason == RoomImage.MODERATION_AWAITING_CHECK:
+        return "checking"
+
+    if reason in {
+        RoomImage.MODERATION_NOT_PROPERTY_PHOTO,
+        RoomImage.MODERATION_UNSAFE_CONTENT,
+    }:
+        return "rejected"
+
+    if reason in {
+        RoomImage.MODERATION_TIMEOUT,
+        RoomImage.MODERATION_SERVICE_UNAVAILABLE,
+        RoomImage.MODERATION_VALIDATION_FAILED,
+    }:
+        return "retry_required"
+
+    return "manual_review"
+
+
+def get_room_image_user_message(image) -> str:
+    """
+    Return a safe message suitable for landlords.
+
+    Provider names, raw errors and internal moderation notes must not be
+    exposed through the public API.
+    """
+    state = get_room_image_moderation_state(image)
+    reason = getattr(image, "moderation_reason", None)
+
+    if state == "approved":
+        return "Photo approved."
+
+    if reason == RoomImage.MODERATION_AWAITING_CHECK:
+        return "We are checking this photo."
+
+    if reason == RoomImage.MODERATION_UNSAFE_CONTENT:
+        return "This photo is inappropriate and cannot be used."
+
+    if reason == RoomImage.MODERATION_NOT_PROPERTY_PHOTO:
+        return "This is not a property photo. Please replace it."
+
+    if reason == RoomImage.MODERATION_LOW_CONFIDENCE:
+        return (
+            "We could not clearly verify this as a property photo. Please "
+            "upload a clearer photo or wait for review."
+        )
+
+    if reason == RoomImage.MODERATION_VALIDATION_FAILED:
+        return (
+            "This file could not be processed as a valid photo. Please "
+            "replace it with a supported image."
+        )
+
+    if reason == RoomImage.MODERATION_TIMEOUT:
+        return (
+            "We could not finish checking this photo. Please replace it "
+            "and try again."
+        )
+
+    if reason == RoomImage.MODERATION_SERVICE_UNAVAILABLE:
+        return (
+            "We could not process this photo because of a temporary "
+            "system issue. Please replace it and try again."
+        )
+
+    if image.status == RoomImage.STATUS_REJECTED:
+        return "This photo was not accepted. Please replace it."
+
+    return "This photo requires review."
+
+
 
 
 # --------------------
 # Room Images / Messages / Bookings / Slots / Payments / Reports
 # --------------------
 class RoomImageSerializer(serializers.ModelSerializer):
-    # Keep upload handling safe, but return frontend-ready absolute image URL.
+    # Return a frontend-ready absolute image URL.
     image = serializers.SerializerMethodField()
+
+    moderation_state = serializers.SerializerMethodField()
+    user_message = serializers.SerializerMethodField()
+    can_replace = serializers.SerializerMethodField()
 
     class Meta:
         model = RoomImage
-        fields = ["id", "room", "image", "status"]
-        read_only_fields = ["room", "status"]
+        fields = [
+            "id",
+            "room",
+            "image",
+            "status",
+            "moderation_state",
+            "user_message",
+            "can_replace",
+        ]
+        read_only_fields = [
+            "room",
+            "status",
+            "moderation_state",
+            "user_message",
+            "can_replace",
+        ]
 
     def get_image(self, obj):
+        """
+        Return image URL based on visibility rules.
+
+        Approved:
+            - visible to everyone.
+
+        Pending/rejected:
+            - visible only to the listing owner.
+            - hidden from public users.
+        """
         if not obj.image:
             return None
 
-        url = obj.image.url
         request = self.context.get("request")
 
-        if request is not None:
-            return request.build_absolute_uri(url)
+        if obj.status == RoomImage.STATUS_APPROVED:
+            try:
+                url = obj.image.url
+            except (ValueError, AttributeError):
+                return None
 
-        return url
+            if request is not None:
+                return request.build_absolute_uri(url)
 
-    # generate thumbnails after upload
-    def create(self, validated_data):
-            request = self.context.get("request")
+            return url
 
-            #  ALWAYS get room from context (NOT payload)
-            room = self.context.get("room")
-
-            if not room:
-                raise ValidationError("Room is required for image upload")
-
-            validated_data["room"] = room
-            validated_data["property_owner"] = room.property_owner
-            validated_data["category"] = room.category
-
-            obj = super().create(validated_data)
-
-            f = validated_data.get("image")
-            if f:
-                from django.utils.crypto import get_random_string
-                from propertylist_app.services.image import generate_thumbnails_and_return_paths
-
-                stem = get_random_string(12)
-                base_dir = "room_images/thumbs"
-
+        if request and request.user.is_authenticated:
+            if obj.room.property_owner_id == request.user.id:
                 try:
-                    generate_thumbnails_and_return_paths(f, base_dir, stem)
-                except Exception:
-                    pass
+                    url = obj.image.url
+                except (ValueError, AttributeError):
+                    return None
 
-            return obj
+                return request.build_absolute_uri(url)
 
+        return None
 
+    def get_moderation_state(self, obj):
+        return get_room_image_moderation_state(obj)
 
+    def get_user_message(self, obj):
+        return get_room_image_user_message(obj)
+
+    def get_can_replace(self, obj):
+        return obj.status != RoomImage.STATUS_APPROVED
+    
+    
+    
 class AvatarUploadResponseSerializer(serializers.Serializer):
     avatar = serializers.URLField(allow_null=True)
 
@@ -2773,11 +3382,70 @@ class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.StringRelatedField(read_only=True)
     is_read = serializers.SerializerMethodField()
     read_at = serializers.SerializerMethodField()
+    available_actions = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ["id", "thread", "sender", "body", "created", "is_read", "read_at"]
-        read_only_fields = ["thread", "sender", "created", "is_read", "read_at"]
+        fields = [
+            "id",
+            "thread",
+            "sender",
+            "body",
+            "message_type",
+            "metadata",
+            "available_actions",
+            "created",
+            "updated",
+            "is_read",
+            "read_at",
+        ]
+        read_only_fields = [
+                "thread",
+                "sender",
+                "message_type",
+                "metadata",
+                "available_actions",
+                "created",
+                "updated",
+                "is_read",
+                "read_at",
+            ]
+        
+        
+    @extend_schema_field(
+    serializers.ListField(
+        child=serializers.CharField(),
+    )
+    )
+    def get_available_actions(self, obj):
+        if obj.message_type not in {
+            Message.TYPE_TENANCY_PROPOSAL,
+            Message.TYPE_TENANCY_UPDATED,
+        }:
+            return []
+
+        metadata = obj.metadata or {}
+        tenancy_id = metadata.get("tenancy_id")
+
+        if not tenancy_id:
+            return []
+
+        try:
+            tenancy = (
+                Tenancy.objects
+                .select_related("landlord", "tenant", "room")
+                .get(id=tenancy_id)
+            )
+        except Tenancy.DoesNotExist:
+            return []
+
+        serializer = TenancyDetailSerializer(
+            tenancy,
+            context=self.context,
+        )
+
+        return serializer.data.get("available_actions", [])    
+            
 
     def get_is_read(self, obj):
         request = self.context.get("request")
@@ -3421,13 +4089,32 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = (
+            # Consent
             "marketing_consent",
+
+            # Display and regional preferences
+            "theme",
+            "date_format",
+            "time_format",
+
+            # Delivery channels
+            "notify_email",
+            "notify_push",
+            "notify_sms",
+
+            # Existing RentCrib notification categories
             "notify_rentout_updates",
             "notify_reminders",
             "notify_messages",
             "notify_confirmations",
-        )
 
+            # Admin dashboard reports and alerts
+            "notify_weekly_reports",
+            "notify_monthly_reports",
+            "notify_system_alerts",
+            "notify_user_reports",
+            "notify_payment_alerts",
+        )
 
 
 class BookingPreflightRequestSerializer(serializers.Serializer):

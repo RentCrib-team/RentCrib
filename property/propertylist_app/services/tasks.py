@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from celery import shared_task
-from propertylist_app.notifications.utils import build_frontend_inbox_link
+from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.models import Room, Message, Notification, UserProfile,Booking
 
 
@@ -87,23 +87,52 @@ def send_new_message_email(message_id: int) -> int:
 
 
 @shared_task
-def notify_upcoming_bookings(hours_ahead: int = 24):
-    now = timezone.now()
-    window_end = now + timedelta(hours=hours_ahead)
+def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
+    """
+    Queue an upcoming-viewing reminder shortly before the viewing starts.
 
-    qs = (
+    Temporary staging/testing rule:
+    - Reminder becomes eligible 5 minutes before booking.start.
+
+    Production rule later:
+    - Change the default to 24 hours:
+      minutes_ahead = 24 * 60
+
+    Creates only once per booking:
+      1) in-app notification
+      2) queued booking.reminder email
+    """
+    now = timezone.now()
+    window_end = now + timedelta(minutes=minutes_ahead)
+
+    bookings = (
         Booking.objects
-        .filter(is_deleted=False, canceled_at__isnull=True)
-        .filter(start__gte=now, start__lte=window_end)
+        .filter(
+            is_deleted=False,
+            canceled_at__isnull=True,
+            start__gte=now,
+            start__lte=window_end,
+        )
         .select_related("user", "room")
     )
 
-    for booking in qs:
+    template = (
+        NotificationTemplate.objects.filter(
+            key="booking.reminder",
+            is_active=True,
+            channel=NotificationTemplate.CHANNEL_EMAIL,
+        ).first()
+    )
+
+    processed = 0
+
+    for booking in bookings:
         user = getattr(booking, "user", None)
         if not user:
             continue
 
         profile, _ = UserProfile.objects.get_or_create(user=user)
+
         if not getattr(profile, "notify_reminders", True):
             continue
 
@@ -113,55 +142,61 @@ def notify_upcoming_bookings(hours_ahead: int = 24):
         start_local = timezone.localtime(booking.start)
         start_str = start_local.strftime("%d %b %Y, %H:%M")
 
-        title = "Upcoming booking"
-        body = f"Reminder: your booking for '{room_title}' starts on {start_str}. (booking_id={booking.id})"
-
-        # Create in-app notification ONCE
-        notif, created = Notification.objects.get_or_create(
-            user=user,
-            type="booking_reminder",
-            title=title,
-            body=body,
+        title = "Upcoming viewing"
+        body = (
+            f"Reminder: your viewing for '{room_title}' starts on "
+            f"{start_str}. (booking_id={booking.id})"
         )
 
-        # Email only when the notification is first created (prevents spam)
-        if created:
-            inbox_link = build_frontend_inbox_link(tab="notifications")
+        # 1. Create the in-app reminder once per booking.
+        already_in_app = Notification.objects.filter(
+            user=user,
+            type="booking_reminder",
+            body__icontains=f"(booking_id={booking.id})",
+        ).exists()
 
-            # If user email missing, skip safely
-            to_email = getattr(user, "email", "") or ""
-            if to_email:
-                subject = "RentOut reminder: your booking starts soon"
-                text = (
-                    f"{body}\n\n"
-                    f"Open in app: {inbox_link}\n"
+        if not already_in_app:
+            Notification.objects.create(
+                user=user,
+                type="booking_reminder",
+                title=title,
+                body=body,
+            )
+
+        # 2. Queue the email once per booking.
+        if template:
+            already_queued = OutboundNotification.objects.filter(
+                user=user,
+                template_key="booking.reminder",
+                channel=NotificationTemplate.CHANNEL_EMAIL,
+                context__booking_id=booking.id,
+            ).exists()
+
+            if not already_queued:
+                frontend_base_url = getattr(
+                    settings,
+                    "FRONTEND_BASE_URL",
+                    "http://localhost:3000",
+                ).rstrip("/")
+
+                OutboundNotification.objects.create(
+                    user=user,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key="booking.reminder",
+                    scheduled_for=now,
+                    context={
+                        "user": {
+                            "first_name": user.first_name,
+                        },
+                        "booking_id": booking.id,
+                        "room_title": room_title,
+                        "starts_at": start_str,
+                        "cta_url": f"{frontend_base_url}/inbox",
+                    },
                 )
 
-                # Simple HTML email with a button
-                html = f"""
-                <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                  <h2 style="margin: 0 0 12px;">Upcoming booking</h2>
-                  <p style="margin: 0 0 12px;">{body}</p>
-                  <p style="margin: 18px 0;">
-                    <a href="{inbox_link}"
-                       style="display:inline-block;padding:10px 14px;background:#356af0;color:#fff;text-decoration:none;border-radius:8px;">
-                      Open in RentOut
-                    </a>
-                  </p>
-                  <p style="color:#666;font-size:12px;margin-top:18px;">
-                    If you’re not signed in, you’ll be asked to sign in first.
-                  </p>
-                </div>
-                """
+        processed += 1
 
-                send_mail(
-                    subject=subject,
-                    message=text,
-                    from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
-                    recipient_list=[to_email],
-                    fail_silently=True,
-                    html_message=html,
-                )
-                
+    return processed
                 
                 

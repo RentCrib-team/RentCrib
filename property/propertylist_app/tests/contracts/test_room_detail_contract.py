@@ -143,7 +143,6 @@ def test_room_detail_contract_v1_shape_and_types():
         "listing_state",
         "location",
         "longitude",
-        "main_photo",
         "max_age",
         "max_occupants",
         "max_stay_months",
@@ -158,7 +157,10 @@ def test_room_detail_contract_v1_shape_and_types():
         "paid_until",
         "parking_available",
         "pets_allowed",
-        "photo_count",
+        "cover_image",
+        "other_images",
+        
+        "image_status",
         "preferred_flatmate_gender",
         "preferred_flatmate_language",
         "preferred_flatmate_lgbtqia",
@@ -196,3 +198,15 @@ def test_room_detail_contract_v1_shape_and_types():
     assert_is_bool(payload["is_available"], "is_available")
     assert_is_bool(payload["is_deleted"], "is_deleted")
     assert_is_bool(payload["is_shared_room"], "is_shared_room")
+    
+    
+    
+    
+    assert payload["cover_image"] is None or isinstance(payload["cover_image"], str)
+    assert payload["other_images"] is None or isinstance(payload["other_images"],list,)
+    
+    assert payload["image_status"] is None or payload["image_status"] in {
+        "pending",
+        "verified",
+        "rejected",
+    }

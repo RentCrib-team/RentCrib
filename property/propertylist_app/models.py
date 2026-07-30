@@ -692,7 +692,61 @@ class UserProfile(models.Model):
         default="en-GB",
     )
 
+    # Personal display and regional preferences.
+    # Store the IANA timezone name, for example: Europe/London.
+    preferred_timezone = models.CharField(
+        max_length=64,
+        default="Europe/London",
+    )
+
+    THEME_CHOICES = (
+        ("system", "System default"),
+        ("light", "Light"),
+        ("dark", "Dark"),
+    )
+    theme = models.CharField(
+        max_length=10,
+        choices=THEME_CHOICES,
+        default="system",
+    )
+
+    DATE_FORMAT_CHOICES = (
+        ("DD/MM/YYYY", "DD/MM/YYYY"),
+        ("MM/DD/YYYY", "MM/DD/YYYY"),
+        ("YYYY-MM-DD", "YYYY-MM-DD"),
+    )
+    date_format = models.CharField(
+        max_length=10,
+        choices=DATE_FORMAT_CHOICES,
+        default="DD/MM/YYYY",
+    )
+
+    TIME_FORMAT_CHOICES = (
+        ("12h", "12-hour"),
+        ("24h", "24-hour"),
+    )
+    time_format = models.CharField(
+        max_length=3,
+        choices=TIME_FORMAT_CHOICES,
+        default="24h",
+    )
+
+    # Notification delivery channels.
+    # These control how notifications may be delivered, while the existing
+    # notify_* fields below control which notification categories are enabled.
+    notify_email = models.BooleanField(default=True)
+    notify_push = models.BooleanField(default=True)
+    notify_sms = models.BooleanField(default=False)
+
+    # Admin account notification/report categories.
+    notify_weekly_reports = models.BooleanField(default=True)
+    notify_monthly_reports = models.BooleanField(default=True)
+    notify_system_alerts = models.BooleanField(default=True)
+    notify_user_reports = models.BooleanField(default=True)
+    notify_payment_alerts = models.BooleanField(default=True)
+
     notify_rentout_updates = models.BooleanField(default=True)
+    
     notify_reminders = models.BooleanField(default=True)
     notify_messages = models.BooleanField(default=True)
     notify_confirmations = models.BooleanField(default=True)
@@ -857,58 +911,116 @@ class RoomImageQuerySet(models.QuerySet):
     def approved(self):
         return self.filter(status="approved")
 
+    def pending(self):
+        return self.filter(status="pending")
+
+    def rejected(self):
+        return self.filter(status="rejected")
+
 
 class RoomImage(models.Model):
-    room = models.ForeignKey("Room", on_delete=models.PROTECT)
-    image = models.ImageField(upload_to="room_images/", null=True, blank=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    MODERATION_AWAITING_CHECK = "awaiting_check"
+    MODERATION_AUTO_APPROVED = "auto_approved"
+    MODERATION_MANUAL_REVIEW = "manual_review"
+    MODERATION_UNSAFE_CONTENT = "unsafe_content"
+    MODERATION_NOT_PROPERTY_PHOTO = "not_property_photo"
+    MODERATION_LOW_CONFIDENCE = "low_confidence"
+    MODERATION_TIMEOUT = "timeout"
+    MODERATION_SERVICE_UNAVAILABLE = "service_unavailable"
+    MODERATION_VALIDATION_FAILED = "validation_failed"
+
+    MODERATION_REASON_CHOICES = [
+        (
+            MODERATION_AWAITING_CHECK,
+            "Awaiting automated check",
+        ),
+        (
+            MODERATION_AUTO_APPROVED,
+            "Automatically approved",
+        ),
+        (
+            MODERATION_MANUAL_REVIEW,
+            "Manual review",
+        ),
+        (
+            MODERATION_UNSAFE_CONTENT,
+            "Unsafe content detected",
+        ),
+        (
+            MODERATION_NOT_PROPERTY_PHOTO,
+            "Not a property photo",
+        ),
+        (
+            MODERATION_LOW_CONFIDENCE,
+            "Low moderation confidence",
+        ),
+        (
+            MODERATION_TIMEOUT,
+            "Moderation service timeout",
+        ),
+        (
+            MODERATION_SERVICE_UNAVAILABLE,
+            "Moderation service unavailable",
+        ),
+        (
+            MODERATION_VALIDATION_FAILED,
+            "Basic image validation failed",
+        ),
+    ]
+
+    room = models.ForeignKey(
+        "Room",
+        on_delete=models.PROTECT,
+    )
+
+    image = models.ImageField(
+        upload_to="room_images/",
+        null=True,
+        blank=True,
+    )
+
+   
+
+    uploaded_at = models.DateTimeField(
+        auto_now_add=True,
+    )
 
     status = models.CharField(
         max_length=16,
-        choices=[
-            ("pending", "Pending"),
-            ("approved", "Approved"),
-            ("rejected", "Rejected"),
-        ],
-        default="pending",
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
         db_index=True,
     )
 
+    moderation_reason = models.CharField(
+        max_length=32,
+        choices=MODERATION_REASON_CHOICES,
+        default=MODERATION_AWAITING_CHECK,
+        db_index=True,
+    )
+
+    moderation_notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Internal moderation result or provider error details.",
+    )
+
+    moderation_checked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     objects = RoomImageQuerySet.as_manager()
-
-
-    def save(self, *args, **kwargs):
-            """
-            Reason:
-            Always call Django's real save so RoomImage rows are written to the database.
-
-            Auto-approval is handled by RoomPhotoUploadView during API upload.
-            Admin/shell-created images can remain pending unless manually approved.
-            """
-            super().save(*args, **kwargs)
-
-        # Only auto-approve on create, and only when still pending.
-        # if is_new and self.status == "pending" and self.image:
-        #     try:
-        #         from propertylist_app.services.image import should_auto_approve_upload
-
-        #         file_obj = getattr(self.image, "file", None)
-        #         if file_obj and should_auto_approve_upload(file_obj):
-        #             self.status = "approved"
-
-        #         # Important: reset pointer for Django storage save
-        #         if file_obj:
-        #             try:
-        #                 file_obj.seek(0)
-        #             except Exception:
-        #                 pass
-
-        #     except Exception:
-        #         # if anything goes wrong, leave as pending for manual moderation
-        #         pass
-
-        # super().save(*args, **kwargs)
-
 
 # -----------------
 # AvailabilitySlot
@@ -1056,7 +1168,8 @@ class Tenancy(models.Model):
     landlord_confirmed_at = models.DateTimeField(null=True, blank=True)
     tenant_confirmed_at = models.DateTimeField(null=True, blank=True)
 
-    # tenant is allowed to edit tenancy details only once before final confirmation
+    # One review-stage edit is allowed in total.
+    # The existing field name is retained for database compatibility.
     tenant_has_edited = models.BooleanField(default=False)
 
     
@@ -1352,9 +1465,45 @@ class MessageThreadState(models.Model):
 # Message
 # -------
 class Message(models.Model):
-    thread = models.ForeignKey(MessageThread, on_delete=models.CASCADE, related_name="messages")
-    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_messages")
+    TYPE_TEXT = "text"
+    TYPE_TENANCY_PROPOSAL = "tenancy_proposal"
+    TYPE_TENANCY_UPDATED = "tenancy_updated"
+    TYPE_TENANCY_CONFIRMED = "tenancy_confirmed"
+    TYPE_TENANCY_CANCELLED = "tenancy_cancelled"
+
+    TYPE_CHOICES = (
+        (TYPE_TEXT, "Text"),
+        (TYPE_TENANCY_PROPOSAL, "Tenancy proposal"),
+        (TYPE_TENANCY_UPDATED, "Tenancy updated"),
+        (TYPE_TENANCY_CONFIRMED, "Tenancy confirmed"),
+        (TYPE_TENANCY_CANCELLED, "Tenancy cancelled"),
+    )
+
+    thread = models.ForeignKey(
+        MessageThread,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="sent_messages",
+    )
+
     body = models.TextField()
+
+    message_type = models.CharField(
+        max_length=32,
+        choices=TYPE_CHOICES,
+        default=TYPE_TEXT,
+        db_index=True,
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True, db_index=True)
 
@@ -1364,7 +1513,6 @@ class Message(models.Model):
             models.Index(fields=["thread", "created"]),
             models.Index(fields=["thread", "updated"]),
         ]
-
 
 class MessageRead(models.Model):
     message = models.ForeignKey("Message", on_delete=models.CASCADE, related_name="reads")
@@ -1419,7 +1567,18 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=["user", "is_read", "created_at"]),
         ]
-
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "type", "target_type", "target_id"],
+                condition=Q(
+                    type="review_available",
+                    target_type="tenancy_review",
+                    target_id__isnull=False,
+                ),
+                name="uq_notification_review_per_user_tenancy",
+            ),
+        ]
+    
     def __str__(self):
         return f"Notif#{self.pk} to {getattr(self.user, 'username', self.user_id)} [{self.type}]"
 

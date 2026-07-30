@@ -114,21 +114,22 @@ class InboxListView(APIView):
         notif_qs = (
             Notification.objects
             .filter(user=user)
-            .order_by("-created_at")
-            .values("id", "type", "title", "body", "is_read", "created_at")
+            .order_by("-created_at")[:200]
         )
 
         notif_items = []
-        for n in notif_qs[:200]:
+        for notification in notif_qs:
+            notification_data = NotificationSerializer(notification).data
+
             notif_items.append(
                 {
                     "kind": "notification",
-                    "created_at": n["created_at"],
-                    "title": n.get("title") or "Notification",
-                    "preview": (n.get("body") or "")[:140],
-                    "is_read": bool(n.get("is_read")),
-                    "notification_id": n["id"],
-                    "deep_link": "/inbox?focus=notification&id=%s" % n["id"],
+                    "created_at": notification.created_at,
+                    "title": notification.title or "Notification",
+                    "preview": (notification.body or "")[:140],
+                    "is_read": notification.is_read,
+                    "notification_id": notification.id,
+                    "deep_link": notification_data["deep_link"],
                 }
             )
 
@@ -180,7 +181,7 @@ class InboxListView(APIView):
                     "preview": (getattr(last_msg, "body", "") or "")[:140],
                     "is_read": unread == 0,
                     "thread_id": t.id,
-                    "deep_link": "/inbox?focus=thread&id=%s" % t.id,
+                    "deep_link": f"/app/threads/{t.id}",
                 }
             )
 
