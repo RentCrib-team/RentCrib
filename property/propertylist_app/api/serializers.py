@@ -3397,8 +3397,28 @@ class MessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ["id", "thread", "sender", "body", "created", "is_read", "read_at"]
-        read_only_fields = ["thread", "sender", "created", "is_read", "read_at"]
+        fields = [
+            "id",
+            "thread",
+            "sender",
+            "body",
+            "message_type",
+            "metadata",
+            "created",
+            "updated",
+            "is_read",
+            "read_at",
+        ]
+        read_only_fields = [
+            "thread",
+            "sender",
+            "message_type",
+            "metadata",
+            "created",
+            "updated",
+            "is_read",
+            "read_at",
+        ]
 
     def get_is_read(self, obj):
         request = self.context.get("request")
