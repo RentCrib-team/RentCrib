@@ -18,11 +18,51 @@ EVENT_MESSAGE_TYPES = {
 
 
 EVENT_BODIES = {
-    "proposed": "A tenancy proposal has been created.",
     "updated": "The tenancy proposal has been updated.",
     "confirmed": "The tenancy has been confirmed.",
     "cancelled": "The tenancy proposal has been cancelled.",
 }
+
+
+def _get_sender_name(sender) -> str:
+    full_name = sender.get_full_name().strip()
+
+    if full_name:
+        return full_name
+
+    return sender.username
+
+
+def _format_tenancy_date(value) -> str:
+    if value is None:
+        return "Not provided"
+
+    return f"{value.day} {value.strftime('%B %Y')}"
+
+
+def _build_tenancy_message_body(
+    tenancy: Tenancy,
+    event_type: str,
+    sender,
+) -> str:
+    if event_type != "proposed":
+        return EVENT_BODIES[event_type]
+
+    sender_name = _get_sender_name(sender)
+    room_title = tenancy.room.title
+    move_in_date = _format_tenancy_date(tenancy.move_in_date)
+    duration = tenancy.duration_months
+    monthly_rent = tenancy.room.price_per_month
+
+    return (
+        f"{sender_name} has proposed a tenancy for {room_title}.\n\n"
+        "Please review the proposed tenancy details below before responding.\n\n"
+        f"Move-in date: {move_in_date}\n"
+        f"Duration: {duration} months\n"
+        f"Monthly rent: £{monthly_rent}\n\n"
+        "If everything is correct, agree to confirm the tenancy. "
+        "You may edit the details before confirming if anything needs to change."
+    )
 
 
 @transaction.atomic
@@ -65,7 +105,11 @@ def post_tenancy_event(
         )
 
     message_type = EVENT_MESSAGE_TYPES[event_type]
-    body = EVENT_BODIES[event_type]
+    body = _build_tenancy_message_body(
+        tenancy=tenancy,
+        event_type=event_type,
+        sender=sender,
+    )
 
     # A proposal uses its creation time. Later events use the time at
     # which the tenancy was last changed.
@@ -124,10 +168,21 @@ def post_tenancy_event(
         body=body,
         message_type=message_type,
         metadata={
-            "tenancy_id": tenancy.pk,
-            "event_type": event_type,
-            "event_key": event_key,
-        },
+          "tenancy_id": tenancy.pk,
+          "event_type": event_type,
+          "event_key": event_key,
+          "sender_name": _get_sender_name(sender),
+          "room_id": tenancy.room_id,
+          "room_title": tenancy.room.title,
+          "move_in_date": (
+              tenancy.move_in_date.isoformat()
+              if tenancy.move_in_date
+              else None
+          ),
+          "duration_months": tenancy.duration_months,
+          "monthly_rent": str(tenancy.room.price_per_month),
+          "status": tenancy.status,
+      },
     )
 
     return thread, message
