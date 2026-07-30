@@ -98,7 +98,7 @@ def test_room_custom_dates_generate_public_booking_slots():
         end_time="10:00",
     )
 
-    assert AvailabilitySlot.objects.filter(room=room).count() == 3
+    assert AvailabilitySlot.objects.filter(room=room).count() == 2
 
     client = APIClient()
     url = reverse("v1:room-slots-public", args=[room.id])
@@ -125,19 +125,16 @@ def test_room_custom_dates_generate_public_booking_slots():
     )
 
     assert slots_response.status_code == 200
-    assert len(slots_response.data.get("results", [])) == 3
+    assert len(slots_response.data.get("results", [])) == 2
 
 
 @pytest.mark.django_db
-def test_custom_availability_rounds_up_to_quarter_hour():
+def test_custom_availability_rounds_start_up_and_end_down():
     """
-    09:02-11:08 must become 09:15-11:15.
+    09:02-11:08 becomes a safe window of 09:15-11:00.
 
-    The resulting 30-minute slots are:
-    09:15-09:45
-    09:45-10:15
-    10:15-10:45
-    10:45-11:15
+    Only complete 30-minute slots finishing on or before 11:00
+    may be generated.
     """
     room = create_room(username="rounding_landlord")
 
@@ -157,16 +154,17 @@ def test_custom_availability_rounds_up_to_quarter_hour():
         ("09:15", "09:45"),
         ("09:45", "10:15"),
         ("10:15", "10:45"),
-        ("10:45", "11:15"),
     ]
 
 
 @pytest.mark.django_db
-def test_custom_availability_generates_seven_consecutive_slots():
+def test_custom_availability_generates_only_complete_slots():
     """
-    14:13-17:36 must become 14:15-17:45 and produce seven slots.
+    14:13-17:36 becomes a safe window of 14:15-17:30.
+
+    The final possible complete slot ends at 17:15.
     """
-    room = create_room(username="seven_slots_landlord")
+    room = create_room(username="complete_slots_landlord")
 
     viewing_date = (
         timezone.localdate() + timedelta(days=5)
@@ -187,9 +185,7 @@ def test_custom_availability_generates_seven_consecutive_slots():
         ("15:45", "16:15"),
         ("16:15", "16:45"),
         ("16:45", "17:15"),
-        ("17:15", "17:45"),
     ]
-
 
 @pytest.mark.django_db
 def test_everyday_mode_generates_slots_for_next_30_days():
@@ -204,7 +200,7 @@ def test_everyday_mode_generates_slots_for_next_30_days():
 
     slots = AvailabilitySlot.objects.filter(room=room)
 
-    # Each complete future day has three 30-minute slots.
+    # Each complete future day has two 30-minute slots.
     tomorrow = timezone.localdate() + timedelta(days=1)
     final_day = timezone.localdate() + timedelta(days=29)
 
@@ -226,7 +222,7 @@ def test_everyday_mode_generates_slots_for_next_30_days():
             slots.filter(
                 start__date=expected_date,
             ).count()
-             == 3
+             == 2
         )
 
 
@@ -349,11 +345,10 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         AvailabilitySlot.objects.filter(room=room).order_by("start")
     )
 
-    assert len(original_slots) == 3
+    assert len(original_slots) == 2
 
     booked_slot = original_slots[0]
     obsolete_unbooked_slot = original_slots[1]
-    retained_matching_slot = original_slots[2]
 
     Booking.objects.create(
         user=tenant,
@@ -371,26 +366,19 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         end_time="11:00",
     )
 
-    # Existing booked slot must remain.
+    # The existing booked slot must remain even though it is no longer
+    # part of the landlord's updated availability.
     assert AvailabilitySlot.objects.filter(
         pk=booked_slot.pk,
     ).exists()
 
-    # Existing unbooked slot which no longer matches must be removed.
+    # The old unbooked slot must be removed.
     assert not AvailabilitySlot.objects.filter(
         pk=obsolete_unbooked_slot.pk,
     ).exists()
 
-    # Existing unbooked slot which still matches must be retained.
-    assert AvailabilitySlot.objects.filter(
-        pk=retained_matching_slot.pk,
-    ).exists()
-
-    remaining_times = local_slot_times(room)
-
-    assert remaining_times == [
+    assert local_slot_times(room) == [
         ("09:00", "09:30"),
         ("10:00", "10:30"),
         ("10:30", "11:00"),
-        ("11:00", "11:30"),
     ]
