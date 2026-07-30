@@ -1555,114 +1555,230 @@ You can respond to this viewing request from your RentCrib account.
 
 {% block content %}
 
-<h2 style="
-    margin:0 0 24px;
-    font-family:Arial,sans-serif;
-    font-size:24px;
-    line-height:32px;
-    color:#1f2937;
-">
-    Your tenancy information has been updated
-</h2>
-
-<p style="margin:0 0 16px;">
-    Hi {{ user.first_name }},
-</p>
-
-<p style="margin:0 0 24px;">
-    Your tenancy information has been updated successfully.
-</p>
-
 <table
     role="presentation"
     width="100%"
     cellpadding="0"
     cellspacing="0"
     border="0"
-    style="
-        width:100%;
-        margin:0 0 24px;
-        border:1px solid #e5e7eb;
-        border-radius:12px;
-        background:#f8fafc;
-        font-family:Arial,sans-serif;
-    "
+    style="font-family:Arial,sans-serif;"
 >
     <tr>
-        <td style="padding:24px;">
+        <td>
 
             <p style="
-                margin:0 0 24px;
-                font-size:18px;
-                line-height:26px;
+                margin:0 0 10px;
+                font-size:12px;
+                line-height:18px;
+                font-weight:700;
+                letter-spacing:1px;
+                text-transform:uppercase;
+                color:#2563eb;
+            ">
+                Tenancy update
+            </p>
+
+            <h2 style="
+                margin:0 0 20px;
+                font-size:24px;
+                line-height:32px;
                 font-weight:700;
                 color:#111827;
             ">
-                {{ room_title }}
-            </p>
+                Your tenancy information has been updated
+            </h2>
 
             <p style="
-                margin:0 0 6px;
-                font-size:13px;
-                color:#6b7280;
-            ">
-                Move-in date
-            </p>
-
-            <p style="
-                margin:0 0 20px;
+                margin:0 0 12px;
                 font-size:16px;
-                font-weight:600;
-                color:#111827;
+                line-height:24px;
+                color:#374151;
             ">
-                {{ move_in_date }}
+                Hi {{ user.first_name }},
             </p>
 
             <p style="
-                margin:0 0 6px;
-                font-size:13px;
-                color:#6b7280;
-            ">
-                Monthly rent
-            </p>
-
-            <p style="
-                margin:0 0 20px;
+                margin:0 0 24px;
                 font-size:16px;
-                font-weight:600;
-                color:#111827;
+                line-height:24px;
+                color:#4b5563;
             ">
-                £{{ monthly_rent }} per month
+                The tenancy details below have been updated.
             </p>
 
+            <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="
+                    width:100%;
+                    border-collapse:separate;
+                    border-spacing:0;
+                    border:1px solid #dbe3ee;
+                    border-top:4px solid #2563eb;
+                    border-radius:10px;
+                    background:#ffffff;
+                "
+            >
+                <tr>
+                    <td style="padding:22px 24px 18px;">
+
+                        <p style="
+                            margin:0 0 6px;
+                            font-size:12px;
+                            line-height:18px;
+                            font-weight:700;
+                            letter-spacing:.5px;
+                            text-transform:uppercase;
+                            color:#6b7280;
+                        ">
+                            Property
+                        </p>
+
+                        <p style="
+                            margin:0;
+                            font-size:18px;
+                            line-height:26px;
+                            font-weight:700;
+                            color:#111827;
+                        ">
+                            {{ room_title }}
+                        </p>
+
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:0 24px;">
+                        <div style="
+                            height:1px;
+                            background:#e5e7eb;
+                            line-height:1px;
+                            font-size:1px;
+                        ">
+                            &nbsp;
+                        </div>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:18px 24px 8px;">
+
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="width:100%;"
+                        >
+                            <tr>
+                                <td style="
+                                    width:45%;
+                                    padding:8px 12px 14px 0;
+                                    vertical-align:top;
+                                    font-size:14px;
+                                    line-height:22px;
+                                    color:#6b7280;
+                                ">
+                                    Move-in date
+                                </td>
+
+                                <td style="
+                                    padding:8px 0 14px 12px;
+                                    vertical-align:top;
+                                    text-align:right;
+                                    font-size:15px;
+                                    line-height:22px;
+                                    font-weight:700;
+                                    color:#111827;
+                                ">
+                                    {{ move_in_date }}
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="
+                                    width:45%;
+                                    padding:14px 12px 14px 0;
+                                    border-top:1px solid #edf0f4;
+                                    vertical-align:top;
+                                    font-size:14px;
+                                    line-height:22px;
+                                    color:#6b7280;
+                                ">
+                                    Monthly rent
+                                </td>
+
+                                <td style="
+                                    padding:14px 0 14px 12px;
+                                    border-top:1px solid #edf0f4;
+                                    vertical-align:top;
+                                    text-align:right;
+                                    font-size:15px;
+                                    line-height:22px;
+                                    font-weight:700;
+                                    color:#111827;
+                                ">
+                                    £{{ monthly_rent }} per month
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td style="
+                                    width:45%;
+                                    padding:14px 12px 8px 0;
+                                    border-top:1px solid #edf0f4;
+                                    vertical-align:top;
+                                    font-size:14px;
+                                    line-height:22px;
+                                    color:#6b7280;
+                                ">
+                                    Tenancy duration
+                                </td>
+
+                                <td style="
+                                    padding:14px 0 8px 12px;
+                                    border-top:1px solid #edf0f4;
+                                    vertical-align:top;
+                                    text-align:right;
+                                    font-size:15px;
+                                    line-height:22px;
+                                    font-weight:700;
+                                    color:#111827;
+                                ">
+                                    {{ duration_months }} month{{ duration_months|pluralize }}
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+            </table>
+
             <p style="
-                margin:0 0 6px;
-                font-size:13px;
-                color:#6b7280;
+                margin:24px 0 8px;
+                font-size:15px;
+                line-height:23px;
+                color:#4b5563;
             ">
-                Tenancy duration
+                Please ensure these details match the tenancy information agreed between both parties.
             </p>
 
             <p style="
                 margin:0;
-                font-size:16px;
-                font-weight:600;
-                color:#111827;
+                font-size:15px;
+                line-height:23px;
+                color:#4b5563;
             ">
-                {{ duration_months }} month{{ duration_months|pluralize }}
+                Thank you for using RentCrib.
             </p>
 
         </td>
     </tr>
 </table>
-
-<p style="margin:0 0 16px;">
-    Please ensure these details match the tenancy information agreed between both parties.
-</p>
-
-<p style="margin:0;">
-    Thank you for using RentCrib.
-</p>
 
 {% endblock %}
 """,
