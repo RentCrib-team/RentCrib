@@ -1547,7 +1547,7 @@ You can respond to this viewing request from your RentCrib account.
 """,
 },
     
-    {
+   {
     "key": "tenancy.updated",
     "subject": "Tenancy information updated for {{ room_title }}",
     "body": """
@@ -1556,18 +1556,21 @@ You can respond to this viewing request from your RentCrib account.
 {% block content %}
 
 <h2 style="
+    margin:0 0 24px;
     font-family:Arial,sans-serif;
-    color:#333333;
+    font-size:24px;
+    line-height:32px;
+    color:#1f2937;
 ">
     Your tenancy information has been updated
 </h2>
 
-<p>
+<p style="margin:0 0 16px;">
     Hi {{ user.first_name }},
 </p>
 
-<p>
-    The following tenancy information has been updated:
+<p style="margin:0 0 24px;">
+    Your tenancy information has been updated successfully.
 </p>
 
 <table
@@ -1577,53 +1580,87 @@ You can respond to this viewing request from your RentCrib account.
     cellspacing="0"
     border="0"
     style="
-        margin:24px 0;
-        border-collapse:collapse;
+        width:100%;
+        margin:0 0 24px;
+        border:1px solid #e5e7eb;
+        border-radius:12px;
+        background:#f8fafc;
         font-family:Arial,sans-serif;
     "
 >
     <tr>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;">
-            <strong>Property</strong>
-        </td>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;text-align:right;">
-            {{ room_title }}
-        </td>
-    </tr>
+        <td style="padding:24px;">
 
-    <tr>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;">
-            <strong>Move-in date</strong>
-        </td>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;text-align:right;">
-            {{ move_in_date }}
-        </td>
-    </tr>
+            <p style="
+                margin:0 0 24px;
+                font-size:18px;
+                line-height:26px;
+                font-weight:700;
+                color:#111827;
+            ">
+                {{ room_title }}
+            </p>
 
-    <tr>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;">
-            <strong>Tenancy duration</strong>
-        </td>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;text-align:right;">
-            {{ duration_months }} month{{ duration_months|pluralize }}
-        </td>
-    </tr>
+            <p style="
+                margin:0 0 6px;
+                font-size:13px;
+                color:#6b7280;
+            ">
+                Move-in date
+            </p>
 
-    <tr>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;">
-            <strong>Monthly rent</strong>
-        </td>
-        <td style="padding:12px 0;border-bottom:1px solid #e4e9f0;text-align:right;">
-            £{{ monthly_rent }}
+            <p style="
+                margin:0 0 20px;
+                font-size:16px;
+                font-weight:600;
+                color:#111827;
+            ">
+                {{ move_in_date }}
+            </p>
+
+            <p style="
+                margin:0 0 6px;
+                font-size:13px;
+                color:#6b7280;
+            ">
+                Monthly rent
+            </p>
+
+            <p style="
+                margin:0 0 20px;
+                font-size:16px;
+                font-weight:600;
+                color:#111827;
+            ">
+                £{{ monthly_rent }} per month
+            </p>
+
+            <p style="
+                margin:0 0 6px;
+                font-size:13px;
+                color:#6b7280;
+            ">
+                Tenancy duration
+            </p>
+
+            <p style="
+                margin:0;
+                font-size:16px;
+                font-weight:600;
+                color:#111827;
+            ">
+                {{ duration_months }} month{{ duration_months|pluralize }}
+            </p>
+
         </td>
     </tr>
 </table>
 
-<p>
+<p style="margin:0 0 16px;">
     Please ensure these details match the tenancy information agreed between both parties.
 </p>
 
-<p>
+<p style="margin:0;">
     Thank you for using RentCrib.
 </p>
 
