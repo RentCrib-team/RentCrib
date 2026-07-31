@@ -221,9 +221,17 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 "thread_id": thread.id,
                 "message_id": message.id,
                 "room_title": room_title,
-                "move_in_date": tenancy.move_in_date,
+                "move_in_date": (
+                    tenancy.move_in_date.isoformat()
+                    if tenancy.move_in_date
+                    else None
+                ),
                 "duration_months": tenancy.duration_months,
-                "monthly_rent": tenancy.room.price_per_month,
+                "monthly_rent": (
+                    str(tenancy.room.price_per_month)
+                    if tenancy.room.price_per_month is not None
+                    else None
+                ),
                 "deep_link": thread_deep_link,
                 "cta_url": thread_cta_url,
             },

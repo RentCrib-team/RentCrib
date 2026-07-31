@@ -54,12 +54,25 @@ app.conf.beat_schedule = {
     },
 
     # Tenancy sweeps
-    "tenancy-prompts-sweep-daily-03:20": {
-        "task": "propertylist_app.tasks.task_tenancy_prompts_sweep",
-        "schedule": crontab(hour=3, minute=20),
-    },
+    # "tenancy-prompts-sweep-daily-03:20": {
+    #     "task": "propertylist_app.tasks.task_tenancy_prompts_sweep",
+    #     "schedule": crontab(hour=3, minute=20),
+    # },
+    # "refresh-tenancy-status-and-review-windows-daily": {
+    #     "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
+    #     "schedule": 60 * 60 * 24,
+    # },
+    
+    
+    # Tenancy sweeps
     "refresh-tenancy-status-and-review-windows-daily": {
         "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
         "schedule": 60 * 60 * 24,
     },
+        
+    
+    
 }
+
+
+
