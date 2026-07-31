@@ -80,10 +80,11 @@ def test_sweep_notifies_only_unconfirmed_side_then_stops_when_both_confirm(user_
     res = client.patch(_confirm_url(tenancy.id), data={}, format="json")
     assert res.status_code == 200
 
-    # 3) next sweep -> should only notify LANDLORD (tenant already confirmed)
+    # 3) next sweep -> no duplicate reminder is created.
+    # The landlord already received the one allowed reminder.
     task_tenancy_prompts_sweep()
     after_tenant_confirm = Notification.objects.filter(type="tenancy_still_living_check").count()
-    assert after_tenant_confirm == mid + 1
+    assert after_tenant_confirm == mid
 
     # 4) landlord confirms
     client = APIClient()

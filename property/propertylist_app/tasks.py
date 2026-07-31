@@ -459,30 +459,33 @@ def task_tenancy_prompts_sweep() -> int:
         )
 
         def _notify_user(user):
-            notification, created = Notification.objects.get_or_create(
+            reminder_exists = Notification.objects.filter(
                 user=user,
                 type="tenancy_still_living_check",
                 target_type="still_living_check",
                 target_id=tenancy.id,
-                defaults={
-                    "title": title,
-                    "body": body,
-                },
+            ).exists()
+
+            if reminder_exists:
+                return 0
+
+            Notification.objects.create(
+                user=user,
+                type="tenancy_still_living_check",
+                target_type="still_living_check",
+                target_id=tenancy.id,
+                title=title,
+                body=body,
             )
 
-            # Queue the email only when the inbox reminder is first created.
-            # This prevents every Celery sweep from sending another email.
-            if created:
-                _maybe_queue_reminder(
-                    user,
-                    "tenancy.still_living_check",
-                    deep_link=deep_link,
-                    room_title=tenancy.room.title,
-                )
+            _maybe_queue_reminder(
+                user,
+                "tenancy.still_living_check",
+                deep_link=deep_link,
+                room_title=tenancy.room.title,
+            )
 
-                return 1
-
-            return 0
+            return 1
 
         if not landlord_done:
             count += _notify_user(tenancy.landlord)
