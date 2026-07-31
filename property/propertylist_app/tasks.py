@@ -397,66 +397,93 @@ def task_tenancy_prompts_sweep() -> int:
     
     count = 0
     
+        # -------------------------------------------------
+    # 1) tenancy ending reminder
     # -------------------------------------------------
-    # 1) still living check -> notifications
-    # -------------------------------------------------
-    # still living check
-    due_checks = Tenancy.objects.filter(
-        status__in=[Tenancy.STATUS_CONFIRMED, Tenancy.STATUS_ACTIVE],
-        still_living_check_at__isnull=False,
-        still_living_check_at__lte=now,
-        still_living_confirmed_at__isnull=True,
+    due_checks = (
+        Tenancy.objects
+        .select_related("room", "landlord", "tenant")
+        .filter(
+            status__in=[
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            ],
+            still_living_check_at__isnull=False,
+            still_living_check_at__lte=now,
+            still_living_confirmed_at__isnull=True,
+        )
     )
 
-    for t in due_checks:
-        landlord_done = bool(getattr(t, "still_living_landlord_confirmed_at", None))
-        tenant_done = bool(getattr(t, "still_living_tenant_confirmed_at", None))
+    for tenancy in due_checks:
+        landlord_done = bool(
+            getattr(
+                tenancy,
+                "still_living_landlord_confirmed_at",
+                None,
+            )
+        )
+        tenant_done = bool(
+            getattr(
+                tenancy,
+                "still_living_tenant_confirmed_at",
+                None,
+            )
+        )
 
-        # if both confirmed, close it out and stop prompting
+        # Both parties have completed the check.
         if landlord_done and tenant_done:
-            if getattr(t, "still_living_confirmed_at", None) is None:
-                t.still_living_confirmed_at = now
-                t.save(update_fields=["still_living_confirmed_at"])
+            tenancy.still_living_confirmed_at = now
+            tenancy.save(
+                update_fields=["still_living_confirmed_at"]
+            )
             continue
 
-        # notify only the side(s) that have NOT confirmed
-        if not landlord_done:
-            Notification.objects.create(
-                user=t.landlord,
+        deep_link = (
+            f"/app/tenancies/{tenancy.id}"
+            "?tab=still-living"
+        )
+
+        title = "Your tenancy is ending soon"
+        body = (
+            f"Your tenancy for {tenancy.room.title} is due to end soon. "
+            "Update the tenancy information if you are continuing. "
+            "If you are moving out, no action is required."
+        )
+
+        def _notify_user(user):
+            notification, created = Notification.objects.get_or_create(
+                user=user,
                 type="tenancy_still_living_check",
-                title="Tenancy check",
-                body=f"Is the tenant still living at {t.room.title}?",
                 target_type="still_living_check",
-                target_id=t.id
+                target_id=tenancy.id,
+                defaults={
+                    "title": title,
+                    "body": body,
+                },
             )
-            _maybe_queue_reminder(
-                t.landlord,
-                "tenancy.still_living_check",
-                deep_link=f"/app/tenancies/{t.id}",
-                room_title=t.room.title,
-            )
-            
-            count += 1
+
+            # Queue the email only when the inbox reminder is first created.
+            # This prevents every Celery sweep from sending another email.
+            if created:
+                _maybe_queue_reminder(
+                    user,
+                    "tenancy.still_living_check",
+                    deep_link=deep_link,
+                    room_title=tenancy.room.title,
+                )
+
+                return 1
+
+            return 0
+
+        if not landlord_done:
+            count += _notify_user(tenancy.landlord)
 
         if not tenant_done:
-            Notification.objects.create(
-                user=t.tenant,
-                type="tenancy_still_living_check",
-                title="Tenancy check",
-                body=f"Is the tenant still living at {t.room.title}?",
-                target_type="still_living_check",
-                target_id=t.id,
-            )
-            _maybe_queue_reminder(
-                t.tenant,
-                "tenancy.still_living_check",
-                deep_link=f"/app/tenancies/{t.id}",
-                room_title=t.room.title,
-            )
+            count += _notify_user(tenancy.tenant)
             
             
-            count += 1
-
+            
     # -------------------------------------------------
     # 2) reviews open -> notifications (if any side missing)
     # -------------------------------------------------

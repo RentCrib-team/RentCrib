@@ -1938,57 +1938,54 @@ You can respond to this viewing request from your RentCrib account.
     # -------------------------
     # Tenancy prompts
     # -------------------------
-    {
-        "key": "tenancy.still_living_check",
-        "subject": "Tenancy information check for {{ room_title }}",
-        "body": """
-        {% extends "emails/base.html" %}
+{
+    "key": "tenancy.still_living_check",
+    "subject": "Your tenancy for {{ room_title }} is ending soon",
+    "body": """
+    {% extends "emails/base.html" %}
 
     {% block content %}
 
     <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
+        font-family:Arial,sans-serif;
+        color:#333333;
     ">
-    Tenancy information check
+        Your tenancy is ending soon
     </h2>
 
     <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy information check
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
+        Hi {{ user.first_name }},
     </p>
 
     <p>
-    Please confirm whether this tenancy is still active.
+        Your tenancy for:
     </p>
 
     <p>
-    <strong>{{ room_title }}</strong>
+        <strong>{{ room_title }}</strong>
     </p>
 
     <p>
-    We periodically ask both landlords and tenants to confirm active tenancy information so RentCrib records remain accurate and reviews become available at the right time.
+        is due to end soon.
     </p>
 
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Confirm tenancy status" %}
+    <p>
+        If you plan to continue staying, please update your tenancy information.
+    </p>
 
     <p>
-    Thank you for using RentCrib.
+        If you are moving out, no action is required.
+    </p>
+
+    {% include "emails/components/button.html" with button_url=cta_url button_text="Update tenancy" %}
+
+    <p>
+        Thank you for using RentCrib.
     </p>
 
     {% endblock %}
     """,
-    },
+},
     {
         "key": "tenancy.review_available",
         "subject": "You can now leave a review for {{ room_title }}",
