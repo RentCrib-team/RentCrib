@@ -1547,54 +1547,302 @@ You can respond to this viewing request from your RentCrib account.
 """,
 },
     
-    {
-        "key": "tenancy.updated",
-        "subject": "Tenancy information updated for {{ room_title }}",
-        "body": """
-    {% extends "emails/base.html" %}
+  {
+    "key": "tenancy.updated",
+    "subject": "Tenancy information updated for {{ room_title }}",
+    "body": """
+{% extends "emails/base.html" %}
 
-    {% block content %}
+{% block content %}
 
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Your tenancy information has been updated
-    </h2>
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+    <tr>
+        <td align="center">
 
-    <p>
-    Hi {{ user.first_name }},
-    </p>
+            <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="
+                    width:100%;
+                    max-width:620px;
+                    background:#ffffff;
+                    border:1px solid #e1e7ef;
+                    border-radius:5px;
+                "
+            >
+                <tr>
+                    <td style="padding:34px 34px 32px;">
 
-    <p>
-    The tenancy information recorded for:
-    </p>
+                        <p style="
+                            margin:0 0 16px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:12px;
+                            line-height:1.4;
+                            font-weight:700;
+                            letter-spacing:1.4px;
+                            text-transform:uppercase;
+                            text-align:center;
+                            color:#357af0;
+                        ">
+                            Tenancy update
+                        </p>
 
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
+                        <h1 style="
+                            margin:0;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:28px;
+                            line-height:1.3;
+                            font-weight:700;
+                            letter-spacing:-0.4px;
+                            text-align:center;
+                            color:#172033;
+                        ">
+                            Your tenancy information has been updated
+                        </h1>
 
-    <p>
-    has been updated.
-    </p>
+                        <p style="
+                            margin:10px 0 30px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:15px;
+                            line-height:1.6;
+                            text-align:center;
+                            color:#6b7689;
+                        ">
+                            The latest tenancy details are shown below.
+                        </p>
 
-    <p>
-    Please review the latest details and ensure they match the tenancy agreement you agreed with the other party outside RentCrib.
-    </p>
+                        <p style="
+                            margin:0 0 16px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:16px;
+                            line-height:1.7;
+                            color:#4f5b70;
+                        ">
+                            Hi {{ user.first_name|default:"there" }},
+                        </p>
 
-    <p>
-    RentCrib stores this information to help both parties keep track of their tenancy journey.
-    </p>
+                        <p style="
+                            margin:0 0 26px;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:16px;
+                            line-height:1.7;
+                            color:#4f5b70;
+                        ">
+                            The tenancy information recorded for this property has been updated.
+                        </p>
 
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Review tenancy information" %}
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="
+                                width:100%;
+                                border-collapse:separate;
+                                background:#f7f9fc;
+                                border:1px solid #dfe6ef;
+                                border-radius:4px;
+                            "
+                        >
+                            <tr>
+                                <td style="padding:20px 22px;">
 
-    <p>
-    Thank you for using RentCrib.
-    </p>
+                                    <p style="
+                                        margin:0 0 6px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:11px;
+                                        line-height:1.4;
+                                        font-weight:700;
+                                        letter-spacing:0.8px;
+                                        text-transform:uppercase;
+                                        color:#7a8497;
+                                    ">
+                                        Tenancy details
+                                    </p>
 
-    {% endblock %}
-    """,
-    },
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:17px;
+                                        line-height:1.5;
+                                        font-weight:700;
+                                        color:#172033;
+                                    ">
+                                        {{ room_title }}
+                                    </p>
+
+                                    <table
+                                        role="presentation"
+                                        width="100%"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                        style="
+                                            width:100%;
+                                            margin-top:16px;
+                                            border-collapse:collapse;
+                                        "
+                                    >
+                                        <tr>
+                                            <td style="
+                                                padding:14px 12px 14px 0;
+                                                border-top:1px solid #e4e9f0;
+                                                font-family:Arial, Helvetica, sans-serif;
+                                                font-size:14px;
+                                                line-height:1.5;
+                                                color:#566176;
+                                            ">
+                                                Move-in date
+                                            </td>
+
+                                            <td align="right" style="
+                                                padding:14px 0 14px 12px;
+                                                border-top:1px solid #e4e9f0;
+                                                font-family:Arial, Helvetica, sans-serif;
+                                                font-size:14px;
+                                                line-height:1.5;
+                                                font-weight:700;
+                                                color:#172033;
+                                            ">
+                                                {{ move_in_date }}
+                                            </td>
+                                        </tr>
+
+                                        <tr>
+                                            <td style="
+                                                padding:14px 12px 14px 0;
+                                                border-top:1px solid #e4e9f0;
+                                                font-family:Arial, Helvetica, sans-serif;
+                                                font-size:14px;
+                                                line-height:1.5;
+                                                color:#566176;
+                                            ">
+                                                Monthly rent
+                                            </td>
+
+                                            <td align="right" style="
+                                                padding:14px 0 14px 12px;
+                                                border-top:1px solid #e4e9f0;
+                                                font-family:Arial, Helvetica, sans-serif;
+                                                font-size:14px;
+                                                line-height:1.5;
+                                                font-weight:700;
+                                                color:#172033;
+                                            ">
+                                                £{{ monthly_rent }} per month
+                                            </td>
+                                        </tr>
+
+                                        <tr>
+                                            <td style="
+                                                padding:14px 12px 0 0;
+                                                border-top:1px solid #e4e9f0;
+                                                font-family:Arial, Helvetica, sans-serif;
+                                                font-size:14px;
+                                                line-height:1.5;
+                                                color:#566176;
+                                            ">
+                                                Tenancy duration
+                                            </td>
+
+                                            <td align="right" style="
+                                                padding:14px 0 0 12px;
+                                                border-top:1px solid #e4e9f0;
+                                                font-family:Arial, Helvetica, sans-serif;
+                                                font-size:14px;
+                                                line-height:1.5;
+                                                font-weight:700;
+                                                color:#172033;
+                                            ">
+                                                {{ duration_months }} month{{ duration_months|pluralize }}
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="
+                                width:100%;
+                                margin-top:20px;
+                                border-collapse:separate;
+                                background:#f4f8ff;
+                                border:1px solid #dce8fb;
+                                border-left:4px solid #357af0;
+                                border-radius:4px;
+                            "
+                        >
+                            <tr>
+                                <td style="padding:16px 18px;">
+
+                                    <p style="
+                                        margin:0 0 5px;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:14px;
+                                        line-height:1.5;
+                                        font-weight:700;
+                                        color:#172033;
+                                    ">
+                                        Important to know
+                                    </p>
+
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:14px;
+                                        line-height:1.65;
+                                        color:#566176;
+                                    ">
+                                        Please ensure these details match the tenancy information agreed between both parties. RentCrib records this information to help both parties keep track of their tenancy.
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        <p style="
+                            margin:24px 0 0;
+                            font-family:Arial, Helvetica, sans-serif;
+                            font-size:13px;
+                            line-height:1.65;
+                            text-align:center;
+                            color:#8892a3;
+                        ">
+                            No action is required if these details are correct.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
     {
         "key": "tenancy.confirmed",
         "subject": "Tenancy information confirmed for {{ room_title }}",
@@ -1690,57 +1938,54 @@ You can respond to this viewing request from your RentCrib account.
     # -------------------------
     # Tenancy prompts
     # -------------------------
-    {
-        "key": "tenancy.still_living_check",
-        "subject": "Tenancy information check for {{ room_title }}",
-        "body": """
-        {% extends "emails/base.html" %}
+{
+    "key": "tenancy.still_living_check",
+    "subject": "Your tenancy for {{ room_title }} is ending soon",
+    "body": """
+    {% extends "emails/base.html" %}
 
     {% block content %}
 
     <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
+        font-family:Arial,sans-serif;
+        color:#333333;
     ">
-    Tenancy information check
+        Your tenancy is ending soon
     </h2>
 
     <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy information check
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
+        Hi {{ user.first_name }},
     </p>
 
     <p>
-    Please confirm whether this tenancy is still active.
+        Your tenancy for:
     </p>
 
     <p>
-    <strong>{{ room_title }}</strong>
+        <strong>{{ room_title }}</strong>
     </p>
 
     <p>
-    We periodically ask both landlords and tenants to confirm active tenancy information so RentCrib records remain accurate and reviews become available at the right time.
+        is due to end soon.
     </p>
 
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Confirm tenancy status" %}
+    <p>
+        If you plan to continue staying, please update your tenancy information.
+    </p>
 
     <p>
-    Thank you for using RentCrib.
+        If you are moving out, no action is required.
+    </p>
+
+    {% include "emails/components/button.html" with button_url=cta_url button_text="Update tenancy" %}
+
+    <p>
+        Thank you for using RentCrib.
     </p>
 
     {% endblock %}
     """,
-    },
+},
     {
         "key": "tenancy.review_available",
         "subject": "You can now leave a review for {{ room_title }}",

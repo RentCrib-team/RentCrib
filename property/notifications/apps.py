@@ -64,6 +64,33 @@ def ensure_notification_periodic_tasks(**kwargs) -> None:
         },
     )
 
+    PeriodicTask.objects.update_or_create(
+        name="tenancy-prompts-sweep-every-minute",
+        defaults={
+            "task": "propertylist_app.tasks.task_tenancy_prompts_sweep",
+            "crontab": every_minute,
+            "interval": None,
+            "enabled": True,
+            "one_off": False,
+            "queue": "celery",
+            "routing_key": "celery",
+            "exchange": None,
+            "args": "[]",
+            "kwargs": "{}",
+            "description": (
+                "Checks every minute for due tenancy reminders "
+                "and review-window transitions."
+            ),
+        },
+    )
+
+    # Remove the obsolete disabled schedule from previous deployments.
+    PeriodicTask.objects.filter(
+        name="tenancy_prompts_sweep (1m)"
+    ).delete()
+
+
+
 
 
     # OPTIONAL: keep/repair your daily listing expiry task (if you want it here too)
@@ -84,7 +111,7 @@ def ensure_notification_periodic_tasks(**kwargs) -> None:
     #     },
     # )
 
-    # Make beat reload schedule immediately
+    # Tell django-celery-beat to reload its database schedule.
     PeriodicTasks.objects.update_or_create(
         ident=1,
         defaults={"last_update": timezone.now()},
@@ -96,4 +123,7 @@ class NotificationsConfig(AppConfig):
     name = "notifications"
 
     def ready(self) -> None:
-        post_migrate.connect(ensure_notification_periodic_tasks, sender=self)
+        post_migrate.connect(
+            ensure_notification_periodic_tasks,
+            sender=self,
+        )
