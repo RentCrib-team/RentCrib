@@ -626,15 +626,23 @@ class TenancyRespondSerializer(serializers.Serializer):
             # Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
             tenancy.review_open_at = timezone.make_aware(
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
-            ) + timedelta(minutes=30)
+            ) + timedelta(minutes=10)
 
             # optional deadline: end + 60 days (safe default)
             tenancy.review_deadline_at = tenancy.review_open_at + timedelta(days=60)
 
-            # still living check: end - 7 days
-            tenancy.still_living_check_at = timezone.make_aware(
-                timezone.datetime.combine(end_date, timezone.datetime.min.time())
-            ) - timedelta(days=7)
+            # # still living check: end - 7 days
+            # tenancy.still_living_check_at = timezone.make_aware(
+            #     timezone.datetime.combine(end_date, timezone.datetime.min.time())
+            # ) - timedelta(days=7)
+            
+            
+            # Temporary QA rule:
+            # Send the tenancy check 10 minutes after both parties confirm.
+            # Production rule will be tenancy end minus 14 days.
+            tenancy.still_living_check_at = now + timedelta(minutes=10)
+            
+            
 
         if action == "propose_changes":
             tenancy.move_in_date = self.validated_data["move_in_date"]
