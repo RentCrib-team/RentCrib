@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Exists, OuterRef, Q
 from django.apps import apps
 from django.conf import settings
-
+from datetime import timedelta
 from propertylist_app.services.tenancy_chat import post_tenancy_event
 
 from notifications.models import NotificationTemplate, OutboundNotification
@@ -487,11 +487,45 @@ def task_tenancy_prompts_sweep() -> int:
 
             return 1
 
+        landlord_notification_created = 0
+        tenant_notification_created = 0
+
         if not landlord_done:
-            count += _notify_user(tenancy.landlord)
+            landlord_notification_created = _notify_user(
+                tenancy.landlord
+            )
+            count += landlord_notification_created
 
         if not tenant_done:
-            count += _notify_user(tenancy.tenant)
+            tenant_notification_created = _notify_user(
+                tenancy.tenant
+            )
+            count += tenant_notification_created
+
+        # TEMPORARY QA RULE:
+        # When neither party has updated the tenancy information,
+        # open the review window 10 minutes after the ending reminder
+        # is first created. Production must revert to end date + 7 days.
+        reminder_created = bool(
+            landlord_notification_created
+            or tenant_notification_created
+        )
+
+        if (
+            not landlord_done
+            and not tenant_done
+            and reminder_created
+        ):
+            tenancy.review_open_at = now + timedelta(minutes=10)
+            tenancy.review_deadline_at = (
+                tenancy.review_open_at + timedelta(days=30)
+            )
+            tenancy.save(
+                update_fields=[
+                    "review_open_at",
+                    "review_deadline_at",
+                ]
+            )
             
             
             
