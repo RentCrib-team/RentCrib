@@ -1935,218 +1935,26 @@ You can respond to this viewing request from your RentCrib account.
     {% endblock %}
     """,
     },
-    # -------------------------
-    # Tenancy prompts
-    # -------------------------
-{
-    "key": "tenancy.still_living_check",
-    "subject": "Your tenancy for {{ room_title }} is ending soon",
-    "body": """
-    {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-        font-family:Arial,sans-serif;
-        color:#333333;
-    ">
-        Your tenancy is ending soon
-    </h2>
-
-    <p>
-        Hi {{ user.first_name }},
-    </p>
-
-    <p>
-        Your tenancy for:
-    </p>
-
-    <p>
-        <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-        is due to end soon.
-    </p>
-
-    <p>
-        If you plan to continue staying, please update your tenancy information.
-    </p>
-
-    <p>
-        If you are moving out, no action is required.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Update tenancy" %}
-
-    <p>
-        Thank you for using RentCrib.
-    </p>
-
-    {% endblock %}
-    """,
-},
-
-{
-    "key": "tenancy.still_living_check_landlord",
-    "subject": "The tenancy for {{ room_title }} is ending soon",
-    "body": """
-    {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <table
-        role="presentation"
-        width="100%"
-        cellpadding="0"
-        cellspacing="0"
-        border="0"
-        style="
-            width:100%;
-            border-collapse:collapse;
-        "
-    >
-        <tr>
-            <td align="center" style="padding:0;">
-
-                <table
-                    role="presentation"
-                    width="100%"
-                    cellpadding="0"
-                    cellspacing="0"
-                    border="0"
-                    style="
-                        width:100%;
-                        max-width:620px;
-                        border-collapse:separate;
-                        background-color:#ffffff;
-                        border:1px solid #dfe5ee;
-                        border-radius:5px;
-                    "
-                >
-                    <tr>
-                        <td style="padding:34px 34px 32px;">
-
-                            <p style="
-                                margin:0 0 16px;
-                                font-family:Arial, Helvetica, sans-serif;
-                                font-size:12px;
-                                line-height:1.4;
-                                font-weight:700;
-                                letter-spacing:1.4px;
-                                text-transform:uppercase;
-                                text-align:center;
-                                color:#357af0;
-                            ">
-                                TENANCY UPDATE
-                            </p>
-
-                            <h1 style="
-                                margin:0;
-                                font-family:Arial, Helvetica, sans-serif;
-                                font-size:28px;
-                                line-height:1.3;
-                                font-weight:700;
-                                letter-spacing:-0.4px;
-                                text-align:center;
-                                color:#172033;
-                            ">
-                                The tenancy is ending soon
-                            </h1>
-
-                            <p style="
-                                margin:10px 0 30px;
-                                font-family:Arial, Helvetica, sans-serif;
-                                font-size:15px;
-                                line-height:1.6;
-                                text-align:center;
-                                color:#5f6b7a;
-                            ">
-                                Review the tenancy information and update it if the tenant will remain in the property.
-                            </p>
-
-                            <p>
-                                Hi {{ user.first_name }},
-                            </p>
-
-                            <p>
-                                The recorded tenancy for:
-                            </p>
-
-                            <p>
-                                <strong>{{ room_title }}</strong>
-                            </p>
-
-                            <p>
-                                is due to end soon.
-                            </p>
-
-                            <p>
-                                If the tenancy is continuing, please update the tenancy information with the new details.
-                            </p>
-
-                            <p>
-                                If the tenant is moving out when the tenancy ends, no action is required.
-                            </p>
-
-                            {% include "emails/components/button.html" with button_url=cta_url button_text="Review tenancy" %}
-
-                            <p>
-                                Thank you for using RentCrib.
-                            </p>
-
-                        </td>
-                    </tr>
-                </table>
-
-            </td>
-        </tr>
-    </table>
-
-    {% endblock %}
-    """,
-},
-
-
+    {
+        "key": "tenancy.still_living_check",
+        "subject": "Your tenancy for {{ room_title }} is ending soon",
+        "body": """
+{% include "emails/tenancy/ending_tenant.html" %}
+""",
+    },
+    {
+        "key": "tenancy.still_living_check_landlord",
+        "subject": "The tenancy for {{ room_title }} is ending soon",
+        "body": """
+{% include "emails/tenancy/ending_landlord.html" %}
+""",
+    },
     {
         "key": "tenancy.review_available",
         "subject": "You can now leave a review for {{ room_title }}",
         "body": """
-        {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Your review is now available
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <p>
-    You can now leave a review linked to:
-    </p>
-
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-    Reviews help keep RentCrib fair and useful for both tenants and landlords.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Leave a review" %}
-
-    <p>
-    Thank you for being part of the RentCrib community.
-    </p>
-
-    {% endblock %}
-    """,
+{% include "emails/tenancy/review_available.html" %}
+""",
     },
 
     # -------------------------
