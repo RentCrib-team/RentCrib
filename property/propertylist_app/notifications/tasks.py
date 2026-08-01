@@ -18,7 +18,6 @@ from propertylist_app.models import (
     Booking,
     Notification,
     Room,
-    Tenancy,
     UserProfile,
 )
 from propertylist_app.notifications.utils import create_in_app_notification_if_allowed
@@ -299,41 +298,13 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                         "booking_id": booking.id,
                         "room_title": room_title,
                         "ended_at": start_str,
-                        "cta_url": _inbox_link(),
+                        "cta_url": f"{_frontend_base_url()}/my-bookings/{booking.id}",
                     },
                 )
                 timer_one_created = True
 
 
-                    
-
-        # TEMPORARY QA CHAIN:
-        # Timer 2 becomes due 10 minutes after Timer 1 is first created.
-        #
-        # Production must revert to:
-        # still_living_check_at = 7 days before the tenancy end date.
-        if timer_one_created:
-            tenancy = (
-                Tenancy.objects
-                .filter(
-                    room=booking.room,
-                    tenant=user,
-                    status__in=[
-                        Tenancy.STATUS_CONFIRMED,
-                        Tenancy.STATUS_ACTIVE,
-                    ],
-                )
-                .first()
-            )
-
-            if tenancy is not None:
-                tenancy.still_living_check_at = (
-                    now + timedelta(minutes=10)
-                )
-                tenancy.save(
-                    update_fields=["still_living_check_at"]
-                )
-
+                
         processed += 1
 
     return processed

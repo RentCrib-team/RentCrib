@@ -1065,7 +1065,7 @@ You can respond to this viewing request from your RentCrib account.
         font-weight:700;
         color:#172033;
     ">
-    What happens next?
+    Ready to update the tenancy?
     </p>
 
     <p style="
@@ -1075,7 +1075,7 @@ You can respond to this viewing request from your RentCrib account.
         line-height:1.65;
         color:#566176;
     ">
-    You can continue the conversation with the landlord through your RentCrib inbox.
+    If you rented this room, open the completed booking and submit the tenancy information for the landlord to review.
     </p>
 
     </td>
@@ -1111,7 +1111,7 @@ You can respond to this viewing request from your RentCrib account.
             border-radius:4px;
         "
     >
-    Open inbox
+    Update tenancy information
     </a>
     </td>
     </tr>

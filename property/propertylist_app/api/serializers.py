@@ -637,9 +637,11 @@ class TenancyRespondSerializer(serializers.Serializer):
             # ) - timedelta(days=7)
             
             
-            # Temporary QA rule:
-            # Send the tenancy check 10 minutes after both parties confirm.
-            # Production rule will be tenancy end minus 14 days.
+            # TEMPORARY QA RULE:
+            # Timer 2 becomes due 10 minutes after both parties confirm
+            # the tenancy information.
+            #
+            # Production must revert to 7 days before the tenancy end date.
             tenancy.still_living_check_at = now + timedelta(minutes=10)
             
             

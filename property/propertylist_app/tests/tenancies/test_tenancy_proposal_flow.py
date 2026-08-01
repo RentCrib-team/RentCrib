@@ -175,15 +175,19 @@ def test_propose_changes_resets_confirmations_and_updates_dates():
     tenancy_id = payload["id"]
 
     # tenant proposes changes
+        # Tenant confirms. This is the second confirmation, so Timer 2
+    # must become due approximately 10 minutes from now for QA.
+    before_confirmation = timezone.now()
+
     resp2 = tenant_client.post(
         f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
-        data={
-            "action": "propose_changes",
-            "move_in_date": str(date.today() + timedelta(days=14)),
-            "duration_months": 12,
-        },
+        data={"action": "confirm"},
         format="json",
     )
+
+    after_confirmation = timezone.now()
+    
+    
     assert resp2.status_code == 200, resp2.data
 
     tenancy = Tenancy.objects.get(id=tenancy_id)
@@ -458,12 +462,18 @@ def test_both_confirm_locks_schedule_and_sets_review_dates():
     payload = resp.data.get("data", resp.data)
     tenancy_id = payload["id"]
 
-    # tenant confirms
+    # Tenant confirms. This is the second confirmation, so Timer 2
+    # must become due approximately 10 minutes from now for QA.
+    before_confirmation = timezone.now()
+
     resp2 = tenant_client.post(
         f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
         data={"action": "confirm"},
         format="json",
     )
+
+    after_confirmation = timezone.now()
+
     assert resp2.status_code == 200, resp2.data
 
     tenancy = Tenancy.objects.get(id=tenancy_id)
@@ -475,6 +485,15 @@ def test_both_confirm_locks_schedule_and_sets_review_dates():
 
     assert tenancy.review_open_at is not None
     assert tenancy.still_living_check_at is not None
+    
+    expected_earliest = before_confirmation + timedelta(minutes=10)
+    expected_latest = after_confirmation + timedelta(minutes=10)
+
+    assert (
+        expected_earliest
+        <= tenancy.still_living_check_at
+        <= expected_latest
+    )
 
 
 def test_second_party_cannot_overwrite_existing_proposal_through_propose_endpoint():

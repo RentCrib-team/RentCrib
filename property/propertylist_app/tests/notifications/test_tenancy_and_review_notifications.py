@@ -192,8 +192,7 @@ def test_still_living_check_triggers_notification_for_both_users(user_factory, r
     assert user_ids == {landlord.id, tenant.id}
 
 
-
-def test_timer_one_schedules_timer_two_ten_minutes_later(
+def test_timer_one_does_not_schedule_timer_two(
     user_factory,
     room_factory,
 ):
@@ -201,22 +200,26 @@ def test_timer_one_schedules_timer_two_ten_minutes_later(
         "propertylist_app",
         "Tenancy",
     )
-    Notification = __import__("django.apps").apps.apps.get_model(
-        "propertylist_app",
-        "Notification",
+    NotificationTemplate = __import__("django.apps").apps.apps.get_model(
+        "notifications",
+        "NotificationTemplate",
+    )
+    OutboundNotification = __import__("django.apps").apps.apps.get_model(
+        "notifications",
+        "OutboundNotification",
     )
 
-    landlord = user_factory(username="timer_chain_landlord")
-    tenant = user_factory(username="timer_chain_tenant")
+    landlord = user_factory(username="timer_one_landlord")
+    tenant = user_factory(username="timer_one_tenant")
     room = room_factory(property_owner=landlord)
-
-    now = timezone.now()
 
     booking = _make_booking(
         tenant,
         room,
         days_ago=0,
     )
+
+    now = timezone.now()
 
     # Timer 1 becomes eligible 10 minutes after booking.start.
     booking.start = now - timedelta(minutes=10, seconds=5)
@@ -231,36 +234,33 @@ def test_timer_one_schedules_timer_two_ten_minutes_later(
         status=Tenancy.STATUS_ACTIVE,
     )
 
-    # Give it an unrelated future value so the test proves that
-    # Timer 1 replaces it with Timer 1 time + 10 minutes.
-    tenancy.still_living_check_at = now + timedelta(days=30)
+    original_timer_two = now + timedelta(days=30)
+    tenancy.still_living_check_at = original_timer_two
     tenancy.save(update_fields=["still_living_check_at"])
 
-    before_task = timezone.now()
+    NotificationTemplate.objects.create(
+        key="booking.completed",
+        channel="email",
+        subject="Viewing completed",
+        body="Open: {{ cta_url }}",
+        is_active=True,
+    )
 
     notify_completed_viewings()
 
-    after_task = timezone.now()
-
     tenancy.refresh_from_db()
 
-    timer_one_exists = Notification.objects.filter(
+    # Timer 1 must not start or move Timer 2.
+    assert tenancy.still_living_check_at == original_timer_two
+
+    timer_one_email = OutboundNotification.objects.get(
         user=tenant,
-        type="booking_completed",
-        body__icontains=f"(booking_id={booking.id})",
-    ).exists()
+        template_key="booking.completed",
+        context__booking_id=booking.id,
+    )
 
-    assert timer_one_exists is True
+    assert timer_one_email.context["cta_url"].endswith(
+        f"/my-bookings/{booking.id}"
+    )
 
-    expected_earliest = before_task + timedelta(minutes=10)
-    expected_latest = after_task + timedelta(minutes=10)
 
-    assert expected_earliest <= tenancy.still_living_check_at <= expected_latest
-    
-    first_timer_two_time = tenancy.still_living_check_at
-
-    notify_completed_viewings()
-
-    tenancy.refresh_from_db()
-
-    assert tenancy.still_living_check_at == first_timer_two_time
