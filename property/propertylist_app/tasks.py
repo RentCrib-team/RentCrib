@@ -9,6 +9,7 @@ from propertylist_app.services.tenancy_chat import post_tenancy_event
 from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.services.deep_links import build_absolute_url
 from propertylist_app.models import UserProfile, Room, Review
+
 from propertylist_app.services.tasks import (
     send_new_message_email,
     expire_paid_listings,
@@ -458,7 +459,7 @@ def task_tenancy_prompts_sweep() -> int:
             "If you are moving out, no action is required."
         )
 
-        def _notify_user(user):
+        def _notify_user(user, template_key):
             reminder_exists = Notification.objects.filter(
                 user=user,
                 type="tenancy_still_living_check",
@@ -480,7 +481,7 @@ def task_tenancy_prompts_sweep() -> int:
 
             _maybe_queue_reminder(
                 user,
-                "tenancy.still_living_check",
+                template_key,
                 deep_link=deep_link,
                 room_title=tenancy.room.title,
             )
@@ -492,13 +493,15 @@ def task_tenancy_prompts_sweep() -> int:
 
         if not landlord_done:
             landlord_notification_created = _notify_user(
-                tenancy.landlord
+                tenancy.landlord,
+                "tenancy.still_living_check_landlord",
             )
             count += landlord_notification_created
 
         if not tenant_done:
             tenant_notification_created = _notify_user(
-                tenancy.tenant
+                tenancy.tenant,
+                "tenancy.still_living_check",
             )
             count += tenant_notification_created
 

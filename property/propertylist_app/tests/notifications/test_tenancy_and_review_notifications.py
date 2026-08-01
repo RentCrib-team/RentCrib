@@ -10,6 +10,7 @@ from propertylist_app.tasks import (
     task_tenancy_prompts_sweep,
 )
 
+from propertylist_app.notifications.tasks import notify_completed_viewings
 pytestmark = pytest.mark.django_db
 
 
@@ -189,3 +190,77 @@ def test_still_living_check_triggers_notification_for_both_users(user_factory, r
     qs = Notification.objects.filter(type="tenancy_still_living_check").order_by("-id")[:2]
     user_ids = {n.user_id for n in qs}
     assert user_ids == {landlord.id, tenant.id}
+
+
+
+def test_timer_one_schedules_timer_two_ten_minutes_later(
+    user_factory,
+    room_factory,
+):
+    Tenancy = __import__("django.apps").apps.apps.get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    Notification = __import__("django.apps").apps.apps.get_model(
+        "propertylist_app",
+        "Notification",
+    )
+
+    landlord = user_factory(username="timer_chain_landlord")
+    tenant = user_factory(username="timer_chain_tenant")
+    room = room_factory(property_owner=landlord)
+
+    now = timezone.now()
+
+    booking = _make_booking(
+        tenant,
+        room,
+        days_ago=0,
+    )
+
+    # Timer 1 becomes eligible 10 minutes after booking.start.
+    booking.start = now - timedelta(minutes=10, seconds=5)
+    booking.end = booking.start + timedelta(minutes=30)
+    booking.save(update_fields=["start", "end"])
+
+    tenancy = _make_tenancy(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    # Give it an unrelated future value so the test proves that
+    # Timer 1 replaces it with Timer 1 time + 10 minutes.
+    tenancy.still_living_check_at = now + timedelta(days=30)
+    tenancy.save(update_fields=["still_living_check_at"])
+
+    before_task = timezone.now()
+
+    notify_completed_viewings()
+
+    after_task = timezone.now()
+
+    tenancy.refresh_from_db()
+
+    timer_one_exists = Notification.objects.filter(
+        user=tenant,
+        type="booking_completed",
+        body__icontains=f"(booking_id={booking.id})",
+    ).exists()
+
+    assert timer_one_exists is True
+
+    expected_earliest = before_task + timedelta(minutes=10)
+    expected_latest = after_task + timedelta(minutes=10)
+
+    assert expected_earliest <= tenancy.still_living_check_at <= expected_latest
+    
+    first_timer_two_time = tenancy.still_living_check_at
+
+    notify_completed_viewings()
+
+    tenancy.refresh_from_db()
+
+    assert tenancy.still_living_check_at == first_timer_two_time

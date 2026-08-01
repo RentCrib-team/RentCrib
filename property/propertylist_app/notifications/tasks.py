@@ -14,7 +14,13 @@ from notifications.models import (
     OutboundNotification,
 )
 from notifications.services import send_mail
-from propertylist_app.models import Booking, Notification, Room, UserProfile
+from propertylist_app.models import (
+    Booking,
+    Notification,
+    Room,
+    Tenancy,
+    UserProfile,
+)
 from propertylist_app.notifications.utils import create_in_app_notification_if_allowed
 
 
@@ -252,6 +258,8 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
             f"{start_str}. (booking_id={booking.id})"
         )
 
+
+        timer_one_created = False
         # ---------- 1) IN-APP (dedupe by booking_id) ----------
         already_in_app = Notification.objects.filter(
             user=user,
@@ -267,6 +275,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 body=body,
                 preference_field="notify_confirmations",
             )
+            timer_one_created = True
 
         # ---------- 2) EMAIL QUEUE (dedupe by booking_id) ----------
         if template:
@@ -293,7 +302,41 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                         "cta_url": _inbox_link(),
                     },
                 )
+                timer_one_created = True
+
+
+                    
+
+        # TEMPORARY QA CHAIN:
+        # Timer 2 becomes due 10 minutes after Timer 1 is first created.
+        #
+        # Production must revert to:
+        # still_living_check_at = 7 days before the tenancy end date.
+        if timer_one_created:
+            tenancy = (
+                Tenancy.objects
+                .filter(
+                    room=booking.room,
+                    tenant=user,
+                    status__in=[
+                        Tenancy.STATUS_CONFIRMED,
+                        Tenancy.STATUS_ACTIVE,
+                    ],
+                )
+                .first()
+            )
+
+            if tenancy is not None:
+                tenancy.still_living_check_at = (
+                    now + timedelta(minutes=10)
+                )
+                tenancy.save(
+                    update_fields=["still_living_check_at"]
+                )
 
         processed += 1
 
     return processed
+
+
+     

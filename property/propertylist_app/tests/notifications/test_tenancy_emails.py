@@ -69,6 +69,14 @@ def test_still_living_check_queues_email_for_missing_side():
         body="Open: {{ cta_url }}",
         is_active=True,
     )
+    
+    NotificationTemplate.objects.create(
+        key="tenancy.still_living_check_landlord",
+        channel="email",
+        subject="x",
+        body="Open: {{ cta_url }}",
+        is_active=True,
+    )
 
     landlord = User.objects.create_user(username="land2", email="l2@example.com", password="x")
     tenant = User.objects.create_user(username="ten2", email="t2@example.com", password="x")
@@ -102,7 +110,7 @@ def test_still_living_check_queues_email_for_missing_side():
 
     assert OutboundNotification.objects.filter(
         user=landlord,
-        template_key="tenancy.still_living_check",
+        template_key="tenancy.still_living_check_landlord",
     ).exists()
     assert OutboundNotification.objects.filter(
         user=tenant,
