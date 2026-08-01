@@ -174,19 +174,18 @@ def test_propose_changes_resets_confirmations_and_updates_dates():
     payload = resp.data.get("data", resp.data)
     tenancy_id = payload["id"]
 
-    # tenant proposes changes
-        # Tenant confirms. This is the second confirmation, so Timer 2
-    # must become due approximately 10 minutes from now for QA.
-    before_confirmation = timezone.now()
-
+    # Tenant proposes amended tenancy terms.
     resp2 = tenant_client.post(
         f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
-        data={"action": "confirm"},
+        data={
+            "action": "propose_changes",
+            "move_in_date": str(
+                date.today() + timedelta(days=14)
+            ),
+            "duration_months": 12,
+        },
         format="json",
     )
-
-    after_confirmation = timezone.now()
-    
     
     assert resp2.status_code == 200, resp2.data
 

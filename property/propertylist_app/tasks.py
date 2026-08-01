@@ -387,6 +387,100 @@ def task_tenancy_prompts_sweep() -> int:
     now = timezone.now()
     
     UserProfile = apps.get_model("propertylist_app", "UserProfile")
+    
+    Message = apps.get_model("propertylist_app", "Message")
+
+    def _tenancy_thread_deep_link(tenancy):
+        """
+        Return the existing inbox thread created for this tenancy.
+
+        Tenancy proposal, update and confirmation messages store the
+        tenancy ID inside Message.metadata.
+        """
+        tenancy_message = (
+            Message.objects
+            .select_related("thread")
+            .filter(metadata__tenancy_id=tenancy.id)
+            .order_by("-created")
+            .first()
+        )
+
+        if tenancy_message and tenancy_message.thread_id:
+            return f"/app/threads/{tenancy_message.thread_id}"
+
+        # Safe fallback for older tenancy records that may not yet have
+        # an inbox-thread message.
+        return f"/app/tenancies/{tenancy.id}"
+    
+    
+    
+    def _post_tenancy_prompt_message(
+        tenancy,
+        *,
+        event_type: str,
+        body: str,
+        available_action: str,
+    ):
+        """
+        Add one system-style tenancy prompt to the existing tenancy
+        conversation.
+
+        The event key prevents Celery retries and repeated sweeps from
+        creating duplicate thread messages.
+        """
+        tenancy_message = (
+            Message.objects
+            .select_related("thread")
+            .filter(metadata__tenancy_id=tenancy.id)
+            .order_by("-created")
+            .first()
+        )
+
+        if not tenancy_message or not tenancy_message.thread_id:
+            return None, None
+
+        event_key = f"tenancy:{tenancy.id}:{event_type}"
+
+        existing_message = (
+            Message.objects
+            .select_related("thread")
+            .filter(metadata__event_key=event_key)
+            .first()
+        )
+
+        if existing_message:
+            return existing_message.thread, existing_message
+
+        sender = tenancy.proposed_by
+
+        if sender is None or sender.id not in {
+            tenancy.landlord_id,
+            tenancy.tenant_id,
+        }:
+            sender = tenancy.landlord
+
+        message = Message.objects.create(
+            thread=tenancy_message.thread,
+            sender=sender,
+            body=body,
+            message_type=Message.TYPE_TEXT,
+            metadata={
+                "tenancy_id": tenancy.id,
+                "room_id": tenancy.room_id,
+                "room_title": tenancy.room.title,
+                "event_type": event_type,
+                "event_key": event_key,
+                "system_event": True,
+                "available_actions": [available_action],
+            },
+        )
+
+        return tenancy_message.thread, message
+    
+    
+    
+    
+    
 
     def _maybe_queue_reminder(user, template_key: str, *, deep_link: str, room_title: str):
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -447,10 +541,7 @@ def task_tenancy_prompts_sweep() -> int:
             )
             continue
 
-        deep_link = (
-            f"/app/tenancies/{tenancy.id}"
-            "?tab=still-living"
-        )
+        deep_link = _tenancy_thread_deep_link(tenancy)
 
         title = "Your tenancy is ending soon"
         body = (
@@ -458,6 +549,22 @@ def task_tenancy_prompts_sweep() -> int:
             "Update the tenancy information if you are continuing. "
             "If you are moving out, no action is required."
         )
+        
+        prompt_thread, prompt_message = _post_tenancy_prompt_message(
+            tenancy,
+            event_type="still_living_check",
+            body=(
+                "Your tenancy is ending soon.\n\n"
+                "If the tenancy is continuing, update the tenancy "
+                "information. If you are moving out, no action is required."
+            ),
+            available_action="update_tenancy",
+        )
+
+        if prompt_thread is not None:
+            deep_link = f"/app/threads/{prompt_thread.id}"
+        
+        
 
         def _notify_user(user, template_key):
             reminder_exists = Notification.objects.filter(
@@ -475,6 +582,8 @@ def task_tenancy_prompts_sweep() -> int:
                 type="tenancy_still_living_check",
                 target_type="still_living_check",
                 target_id=tenancy.id,
+                thread=prompt_thread,
+                message=prompt_message,
                 title=title,
                 body=body,
             )
@@ -535,26 +644,49 @@ def task_tenancy_prompts_sweep() -> int:
     # -------------------------------------------------
     # 2) reviews open -> notifications (if any side missing)
     # -------------------------------------------------
+    
     due_reviews = Tenancy.objects.filter(
-        status__in=[Tenancy.STATUS_CONFIRMED, Tenancy.STATUS_ACTIVE, Tenancy.STATUS_ENDED],
+        status=Tenancy.STATUS_ENDED,
         review_open_at__isnull=False,
         review_open_at__lte=now,
     )
-
+    
     for t in due_reviews:
         tenant_done = Review.objects.filter(
             tenancy=t,
             role=Review.ROLE_TENANT_TO_LANDLORD,
         ).exists()
+
         landlord_done = Review.objects.filter(
             tenancy=t,
             role=Review.ROLE_LANDLORD_TO_TENANT,
         ).exists()
 
+        # Both parties have already reviewed.
         if tenant_done and landlord_done:
             continue
 
-        # notify only the side(s) that have NOT reviewed yet
+        # Add one review-available message to the existing tenancy thread.
+        # Repeated Celery runs reuse the same message.
+        prompt_thread, prompt_message = _post_tenancy_prompt_message(
+            t,
+            event_type="review_available",
+            body=(
+                "Your review window is now open.\n\n"
+                "You can now leave a review for this tenancy."
+            ),
+            available_action="leave_review",
+        )
+
+        # Email and in-app notification should open the exact tenancy thread.
+        # Older tenancies without a thread use the safe fallback.
+        review_deep_link = (
+            f"/app/threads/{prompt_thread.id}"
+            if prompt_thread is not None
+            else _tenancy_thread_deep_link(t)
+        )
+
+        # Notify the landlord only if the landlord has not reviewed.
         if not landlord_done:
             _, notification_created = Notification.objects.get_or_create(
                 user=t.landlord,
@@ -562,8 +694,13 @@ def task_tenancy_prompts_sweep() -> int:
                 target_type="tenancy_review",
                 target_id=t.id,
                 defaults={
+                    "thread": prompt_thread,
+                    "message": prompt_message,
                     "title": "Review available",
-                    "body": f"You can now leave a review for {t.room.title}.",
+                    "body": (
+                        f"You can now leave a review for "
+                        f"{t.room.title}."
+                    ),
                 },
             )
 
@@ -571,11 +708,12 @@ def task_tenancy_prompts_sweep() -> int:
                 _maybe_queue_reminder(
                     t.landlord,
                     "tenancy.review_available",
-                    deep_link=f"/app/tenancies/{t.id}/review",
+                    deep_link=review_deep_link,
                     room_title=t.room.title,
                 )
                 count += 1
 
+        # Notify the tenant only if the tenant has not reviewed.
         if not tenant_done:
             _, notification_created = Notification.objects.get_or_create(
                 user=t.tenant,
@@ -583,8 +721,13 @@ def task_tenancy_prompts_sweep() -> int:
                 target_type="tenancy_review",
                 target_id=t.id,
                 defaults={
+                    "thread": prompt_thread,
+                    "message": prompt_message,
                     "title": "Review available",
-                    "body": f"You can now leave a review for {t.room.title}.",
+                    "body": (
+                        f"You can now leave a review for "
+                        f"{t.room.title}."
+                    ),
                 },
             )
 
@@ -592,11 +735,10 @@ def task_tenancy_prompts_sweep() -> int:
                 _maybe_queue_reminder(
                     t.tenant,
                     "tenancy.review_available",
-                    deep_link=f"/app/tenancies/{t.id}/review",
+                    deep_link=review_deep_link,
                     room_title=t.room.title,
                 )
                 count += 1
-
     # -------------------------------------------------
     # 3) REVEAL + RATING UPDATE (your schema)
     #

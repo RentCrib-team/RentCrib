@@ -282,12 +282,10 @@ class ReviewCreateSerializer(serializers.Serializer):
         if user.id not in {tenancy.tenant_id, tenancy.landlord_id}:
             raise serializers.ValidationError("You are not allowed to review this tenancy.")
 
-        if tenancy.status not in {
-            Tenancy.STATUS_CONFIRMED,
-            Tenancy.STATUS_ACTIVE,
-            Tenancy.STATUS_ENDED,
-        }:
-            raise serializers.ValidationError("Tenancy is not confirmed yet.")
+        if tenancy.status != Tenancy.STATUS_ENDED:
+            raise serializers.ValidationError(
+                "A review can only be left after the tenancy has ended."
+            )
 
         if not tenancy.review_open_at:
             raise serializers.ValidationError("Tenancy review schedule is not ready yet.")
@@ -3434,19 +3432,72 @@ class MessageSerializer(serializers.ModelSerializer):
             ]
         
         
+    
     @extend_schema_field(
-    serializers.ListField(
-        child=serializers.CharField(),
-    )
+        serializers.ListField(
+            child=serializers.CharField(),
+        )
     )
     def get_available_actions(self, obj):
+        metadata = obj.metadata or {}
+        event_type = metadata.get("event_type")
+
+        # Timer 2 thread message.
+        if event_type == "still_living_check":
+            tenancy_id = metadata.get("tenancy_id")
+
+            if not tenancy_id:
+                return []
+
+            try:
+                tenancy = Tenancy.objects.get(id=tenancy_id)
+            except Tenancy.DoesNotExist:
+                return []
+
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+
+            if (
+                not user
+                or not user.is_authenticated
+                or user.id not in {
+                    tenancy.landlord_id,
+                    tenancy.tenant_id,
+                }
+            ):
+                return []
+
+            return ["update_tenancy"]
+
+        # Timer 3 thread message.
+        if event_type == "review_available":
+            tenancy_id = metadata.get("tenancy_id")
+
+            if not tenancy_id:
+                return []
+
+            try:
+                tenancy = Tenancy.objects.get(id=tenancy_id)
+            except Tenancy.DoesNotExist:
+                return []
+
+            serializer = TenancyDetailSerializer(
+                tenancy,
+                context=self.context,
+            )
+
+            if serializer.data.get("can_leave_review"):
+                return ["leave_review"]
+
+            return []
+
+        # Existing tenancy proposal/update actions.
         if obj.message_type not in {
             Message.TYPE_TENANCY_PROPOSAL,
             Message.TYPE_TENANCY_UPDATED,
         }:
             return []
 
-        metadata = obj.metadata or {}
         tenancy_id = metadata.get("tenancy_id")
 
         if not tenancy_id:
@@ -3466,7 +3517,7 @@ class MessageSerializer(serializers.ModelSerializer):
             context=self.context,
         )
 
-        return serializer.data.get("available_actions", [])    
+        return serializer.data.get("available_actions", [])
             
 
     def get_is_read(self, obj):
