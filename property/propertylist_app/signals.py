@@ -193,6 +193,11 @@ def message_created_create_notifications(
     
     if instance.message_type != Message.TYPE_TEXT:
         return
+    
+    metadata = instance.metadata or {}
+
+    if metadata.get("system_event") is True:
+        return
 
     thread: MessageThread = instance.thread
 
