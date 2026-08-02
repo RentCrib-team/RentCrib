@@ -8,7 +8,12 @@ from propertylist_app.services.tenancy_chat import post_tenancy_event
 
 from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.services.deep_links import build_absolute_url
-from propertylist_app.models import UserProfile, Room, Review
+from propertylist_app.models import (
+    UserProfile,
+    Room,
+    Review,
+    MessageThreadState,
+)
 
 from propertylist_app.services.tasks import (
     send_new_message_email,
@@ -245,6 +250,23 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         title: str,
         body: str,
     ):
+        # Important tenancy actions must return the conversation to Inbox.
+        thread_state, _ = MessageThreadState.objects.get_or_create(
+            user=user,
+            thread=thread,
+        )
+
+        if thread_state.in_bin or thread_state.label:
+            thread_state.in_bin = False
+            thread_state.label = ""
+            thread_state.save(
+                update_fields=[
+                    "in_bin",
+                    "label",
+                    "updated_at",
+                ]
+            )
+
         Notification.objects.get_or_create(
             user=user,
             type=notification_type,
