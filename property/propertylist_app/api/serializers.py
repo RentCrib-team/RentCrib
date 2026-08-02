@@ -406,14 +406,15 @@ class TenancyProposalSerializer(serializers.Serializer):
     duration_months = serializers.IntegerField(min_value=1, max_value=12)
 
     def _has_completed_viewing(self, *, room, user):
-        now = timezone.now()
+        completion_cutoff = timezone.now() - timedelta(minutes=10)
+
         return Booking.objects.filter(
             room=room,
             user=user,
             is_deleted=False,
             status=Booking.STATUS_ACTIVE,
             canceled_at__isnull=True,
-            end__lte=now,  # viewing completed
+            start__lte=completion_cutoff,
         ).exists()
 
     def validate(self, attrs):
