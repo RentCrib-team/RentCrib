@@ -639,6 +639,24 @@ def task_tenancy_prompts_sweep() -> int:
                 ]
             )
             
+    
+    
+    # TEMPORARY QA RULE:
+    # If neither party updates the tenancy after the ending reminder,
+    # the tenancy ends automatically when the 10-minute review window opens.
+    Tenancy.objects.filter(
+        status__in=[
+            Tenancy.STATUS_CONFIRMED,
+            Tenancy.STATUS_ACTIVE,
+        ],
+        review_open_at__isnull=False,
+        review_open_at__lte=now,
+        still_living_confirmed_at__isnull=True,
+    ).update(
+        status=Tenancy.STATUS_ENDED,
+    ) 
+     
+     
             
             
     # -------------------------------------------------
