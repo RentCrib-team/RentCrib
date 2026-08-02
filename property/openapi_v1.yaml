@@ -535,11 +535,22 @@ paths:
   /api/v1/auth/logout/:
     post:
       operationId: auth_logout_create
-      description: Logout current user. Returns ok_response envelope.
+      description: Invalidate the submitted refresh token. A valid access token is
+        not required.
       tags:
       - auth
-      security:
-      - jwtAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+        required: true
       responses:
         '200':
           content:
@@ -547,8 +558,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/LogoutOkResponse'
           description: ''
-        '401':
-          description: Authentication required.
+        '400':
+          description: Missing, invalid, expired, blacklisted, or inactive-user refresh
+            token.
   /api/v1/auth/password-reset/:
     post:
       operationId: auth_password_reset_create
@@ -8148,6 +8160,13 @@ components:
       required:
       - data
       - ok
+    LogoutRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+      required:
+      - refresh
     Message:
       type: object
       properties:
@@ -8162,7 +8181,34 @@ components:
           readOnly: true
         body:
           type: string
+        message_type:
+          enum:
+          - text
+          - tenancy_proposal
+          - tenancy_updated
+          - tenancy_confirmed
+          - tenancy_cancelled
+          type: string
+          description: |-
+            * `text` - Text
+            * `tenancy_proposal` - Tenancy proposal
+            * `tenancy_updated` - Tenancy updated
+            * `tenancy_confirmed` - Tenancy confirmed
+            * `tenancy_cancelled` - Tenancy cancelled
+          x-spec-enum-id: f7633d6dcefa42a5
+          readOnly: true
+        metadata:
+          readOnly: true
+        available_actions:
+          type: array
+          items:
+            type: string
+          readOnly: true
         created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
           type: string
           format: date-time
           readOnly: true
@@ -8173,13 +8219,17 @@ components:
           type: string
           readOnly: true
       required:
+      - available_actions
       - body
       - created
       - id
       - is_read
+      - message_type
+      - metadata
       - read_at
       - sender
       - thread
+      - updated
     MessageCreate:
       type: object
       properties:
@@ -11008,11 +11058,23 @@ components:
             * `rejected` - Rejected
           x-spec-enum-id: de3702061fc1d433
           readOnly: true
+        moderation_state:
+          type: string
+          readOnly: true
+        user_message:
+          type: string
+          readOnly: true
+        can_replace:
+          type: string
+          readOnly: true
       required:
+      - can_replace
       - id
       - image
+      - moderation_state
       - room
       - status
+      - user_message
     RoomListAltDeleteResponse:
       type: object
       properties:

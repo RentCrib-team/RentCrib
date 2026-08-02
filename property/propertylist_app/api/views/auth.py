@@ -52,6 +52,7 @@ from propertylist_app.services.security import (
     register_login_failure,
 )
 from propertylist_app.validators import ensure_idempotency, normalise_email
+from propertylist_app.api.permissions import HasValidRefreshToken
 from propertylist_app.api.throttling import (
     LoginScopedThrottle,
     PasswordResetScopedThrottle,
@@ -1183,42 +1184,51 @@ class AccountReactivateView(APIView):
 
 
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasValidRefreshToken]
     versioning_class = None
 
     @extend_schema(
-        request=None,
+        request=inline_serializer(
+            name="LogoutRequest",
+            fields={
+                "refresh": serializers.CharField(),
+            },
+        ),
         responses={
             200: inline_serializer(
                 name="LogoutOkResponse",
                 fields={
                     "ok": serializers.BooleanField(),
-                    "message": serializers.CharField(required=False, allow_null=True),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
                     "data": inline_serializer(
                         name="LogoutData",
-                        fields={"detail": serializers.CharField()},
+                        fields={
+                            "detail": serializers.CharField(),
+                        },
                     ),
                 },
             ),
-            401: OpenApiResponse(description="Authentication required."),
+            400: OpenApiResponse(
+                description="Missing, invalid, expired, blacklisted, or inactive-user refresh token."
+            ),
         },
-        description="Logout current user. Returns ok_response envelope.",
+        auth=[],
+        description=(
+            "Invalidate the submitted refresh token. "
+            "A valid access token is not required."
+        ),
     )
     def post(self, request):
-        refresh = (request.data.get("refresh") or "").strip()
-        if not refresh:
-            # Reason: allow global error handler to format consistently
-            raise ValidationError({"refresh": "Refresh token is required."})
+        refresh_token = request.validated_refresh_token
+        refresh_token.blacklist()
 
-        try:
-            RefreshToken(refresh).blacklist()
-        except Exception:
-            # Reason: treat invalid/expired/already-blacklisted the same for security + consistency
-            raise ValidationError({"refresh": "Invalid or expired refresh token."})
-
-        # Reason: A3/C1 consistent success envelope
-        return ok_response({"detail": "Logged out."}, status_code=status.HTTP_200_OK)
-
+        return ok_response(
+            {"detail": "Logged out."},
+            status_code=status.HTTP_200_OK,
+        )
 
 class TokenRefreshView(APIView):
     permission_classes = [AllowAny]
