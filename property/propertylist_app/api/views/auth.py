@@ -59,6 +59,7 @@ from propertylist_app.api.throttling import (
     PasswordResetConfirmScopedThrottle,
     RegisterAnonThrottle,
     RegisterScopedThrottle,
+    TokenRefreshScopedThrottle,
 )
 from propertylist_app.api.schema_serializers import (
     ErrorResponseSerializer,
@@ -620,14 +621,34 @@ class GoogleRegisterView(APIView):
                 code="bad_request",
             )
 
+        first_name = (idinfo.get("given_name") or "").strip()
+        last_name = (idinfo.get("family_name") or "").strip()
+
         User = get_user_model()
 
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
                 "username": generate_unique_username_from_email(email),
+                "first_name": first_name,
+                "last_name": last_name,
             },
         )
+
+        # Backfill missing names for existing Google users, but never overwrite
+        # names the user has already entered or changed on RentCrib.
+        name_fields_to_update = []
+
+        if not user.first_name and first_name:
+            user.first_name = first_name
+            name_fields_to_update.append("first_name")
+
+        if not user.last_name and last_name:
+            user.last_name = last_name
+            name_fields_to_update.append("last_name")
+
+        if name_fields_to_update:
+            user.save(update_fields=name_fields_to_update)
 
         profile = mark_profile_email_verified(user)
 
@@ -1217,8 +1238,10 @@ class LogoutView(APIView):
         },
         auth=[],
         description=(
-            "Invalidate the submitted refresh token. "
-            "A valid access token is not required."
+            "Revoke the supplied refresh token and terminate the session. "
+            "Logout authenticates using the submitted refresh token rather than "
+            "the short-lived access token so users can always sign out even after "
+            "the access token has expired."
         ),
     )
     def post(self, request):
@@ -1233,6 +1256,8 @@ class LogoutView(APIView):
 class TokenRefreshView(APIView):
     permission_classes = [AllowAny]
     versioning_class = None
+    throttle_classes = [TokenRefreshScopedThrottle]
+    throttle_scope = "token-refresh"
 
     @extend_schema(
         request=TokenRefreshRequestSerializer,
