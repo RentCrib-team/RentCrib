@@ -2026,284 +2026,47 @@ You can respond to this viewing request from your RentCrib account.
   
   
   
-    {
+        {
         "key": "tenancy.confirmed",
-        "subject": "Tenancy information confirmed for {{ room_title }}",
+        "subject": "Tenancy confirmed for {{ room_title }}",
         "body": """
-        {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Your tenancy information has been confirmed
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <p>
-    The tenancy information recorded for:
-    </p>
-
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-    has been confirmed.
-    </p>
-
-    <p>
-    Please ensure the details match the tenancy agreement you agreed with the other party outside RentCrib.
-    </p>
-
-    <p>
-    RentCrib stores this information to help both parties keep track of their tenancy journey.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy information" %}
-
-    <p>
-    Thank you for using RentCrib.
-    </p>
-
-    {% endblock %}
-    """,
+{% include "emails/tenancy/confirmed.html" %}
+""",
     },
-    {
+        {
         "key": "tenancy.cancelled",
         "subject": "Tenancy information cancelled for {{ room_title }}",
         "body": """
-        {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy information cancelled
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <p>
-    The tenancy information recorded for:
-    </p>
-
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-    has been cancelled.
-    </p>
-
-    <p>
-    RentCrib stores tenancy information to help both parties keep track of the details they agreed outside RentCrib.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy information" %}
-
-    <p>
-    Thank you for using RentCrib.
-    </p>
-
-    {% endblock %}
-    """,
+{% include "emails/tenancy/cancelled.html" %}
+""",
     },
     
-    
-        {
+           {
         "key": "tenancy.expired_unverified",
         "subject": "Your tenancy request for {{ room_title }} has expired",
         "body": """
-{% extends "emails/base.html" %}
-
-{% block content %}
-
-<h2 style="font-family:Arial,sans-serif;color:#333333;">
-    Your tenancy request has expired
-</h2>
-
-<p>
-    Hi {{ user.first_name|default:"there" }},
-</p>
-
-<p>
-    The landlord did not verify the tenancy information you submitted for:
-</p>
-
-<p>
-    <strong>{{ room_title }}</strong>
-</p>
-
-<p>
-    within the required time, so the request has expired.
-</p>
-
-<p>
-    The room listing remained available while the request was awaiting
-    verification.
-</p>
-
-<p>
-    If you have rented this room, please contact the landlord and ask them
-    to submit or confirm the tenancy information.
-</p>
-
-{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
-
-<p>
-    Thank you for using RentCrib.
-</p>
-
-{% endblock %}
+{% include "emails/tenancy/expired_unverified.html" %}
 """,
     },
-    {
+      {
         "key": "tenancy.expired_unverified_landlord",
         "subject": "Unverified tenancy request expired for {{ room_title }}",
         "body": """
-{% extends "emails/base.html" %}
-
-{% block content %}
-
-<h2 style="font-family:Arial,sans-serif;color:#333333;">
-    An unverified tenancy request has expired
-</h2>
-
-<p>
-    Hi {{ user.first_name|default:"there" }},
-</p>
-
-<p>
-    The tenancy information submitted by
-    <strong>{{ tenant_name }}</strong>
-    for:
-</p>
-
-<p>
-    <strong>{{ room_title }}</strong>
-</p>
-
-<p>
-    was not verified within the required time and has now expired.
-</p>
-
-<p>
-    The room listing availability was not changed.
-</p>
-
-<p>
-    If you rented the room to this tenant, you can submit the correct tenancy
-    information from your listing.
-</p>
-
-{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
-
-<p>
-    Thank you for using RentCrib.
-</p>
-
-{% endblock %}
+{% include "emails/tenancy/expired_unverified_landlord.html" %}
 """,
     },
-    
-    
-    
-        {
+            {
         "key": "tenancy.rejected_unverified",
         "subject": "Your tenancy information for {{ room_title }} was not confirmed",
         "body": """
-{% extends "emails/base.html" %}
-
-{% block content %}
-
-<h2 style="font-family:Arial,sans-serif;color:#333333;">
-    Your tenancy information was not confirmed
-</h2>
-
-<p>
-    Hi {{ user.first_name|default:"there" }},
-</p>
-
-<p>
-    {{ landlord_name }} has confirmed that they did not rent:
-</p>
-
-<p>
-    <strong>{{ room_title }}</strong>
-</p>
-
-<p>
-    to you.
-</p>
-
-<p>
-    The tenancy information you submitted has therefore been cancelled.
-    The room listing remains available.
-</p>
-
-<p>
-    If you believe this is a mistake, please contact the landlord directly.
-</p>
-
-{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
-
-<p>
-    Thank you for using RentCrib.
-</p>
-
-{% endblock %}
+{% include "emails/tenancy/rejected_unverified.html" %}
 """,
     },
-    {
+        {
         "key": "tenancy.rejected_unverified_landlord",
         "subject": "Tenancy claim rejected for {{ room_title }}",
         "body": """
-{% extends "emails/base.html" %}
-
-{% block content %}
-
-<h2 style="font-family:Arial,sans-serif;color:#333333;">
-    Tenancy claim rejected
-</h2>
-
-<p>
-    Hi {{ user.first_name|default:"there" }},
-</p>
-
-<p>
-    You confirmed that you did not rent:
-</p>
-
-<p>
-    <strong>{{ room_title }}</strong>
-</p>
-
-<p>
-    to <strong>{{ tenant_name }}</strong>.
-</p>
-
-<p>
-    Their tenancy claim has been cancelled. The room listing availability
-    was not changed.
-</p>
-
-{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
-
-<p>
-    Thank you for using RentCrib.
-</p>
-
-{% endblock %}
+{% include "emails/tenancy/rejected_unverified_landlord.html" %}
 """,
     },
     
@@ -2336,129 +2099,26 @@ You can respond to this viewing request from your RentCrib account.
     # -------------------------
     # Tenancy extension
     # -------------------------
-   {
+       {
         "key": "tenancy.extension.proposed",
         "subject": "Tenancy extension request received for {{ room_title }}",
         "body": """
-        {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy extension request received
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <p>
-    A tenancy extension request has been submitted for:
-    </p>
-
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-    Please review the updated tenancy information and respond when ready.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="Review extension request" %}
-
-    <p>
-    Thank you for using RentCrib.
-    </p>
-
-    {% endblock %}
-    """,
+{% include "emails/tenancy/extension_proposed.html" %}
+""",
     },
-    {
+       {
         "key": "tenancy.extension.accepted",
-        "subject": "Tenancy extension information confirmed for {{ room_title }}",
+        "subject": "Tenancy extension confirmed for {{ room_title }}",
         "body": """
-        {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy extension information confirmed
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <p>
-    The tenancy extension information for:
-    </p>
-
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-    has been confirmed.
-    </p>
-
-    <p>
-    Please ensure the updated details match the agreement made between both parties outside RentCrib.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy information" %}
-
-    <p>
-    Thank you for using RentCrib.
-    </p>
-
-    {% endblock %}
-    """,
+{% include "emails/tenancy/extension_accepted.html" %}
+""",
     },
-    {
+        {
         "key": "tenancy.extension.rejected",
-        "subject": "Tenancy extension request declined for {{ room_title }}",
+        "subject": "Tenancy extension declined for {{ room_title }}",
         "body": """
-        {% extends "emails/base.html" %}
-
-    {% block content %}
-
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Tenancy extension request declined
-    </h2>
-
-    <p>
-    Hi {{ user.first_name }},
-    </p>
-
-    <p>
-    The tenancy extension request for:
-    </p>
-
-    <p>
-    <strong>{{ room_title }}</strong>
-    </p>
-
-    <p>
-    has been declined.
-    </p>
-
-    {% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy information" %}
-
-    <p>
-    Thank you for using RentCrib.
-    </p>
-
-    {% endblock %}
-    """,
+{% include "emails/tenancy/extension_rejected.html" %}
+""",
     },
     
         {
