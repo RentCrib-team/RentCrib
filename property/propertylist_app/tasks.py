@@ -1,6 +1,6 @@
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, F
 from django.apps import apps
 from django.conf import settings
 from datetime import timedelta
@@ -164,6 +164,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         "updated",
         "confirmed",
         "cancelled",
+        "expired_unverified",
+        "rejected_unverified",
     }
 
     if event not in supported_events:
@@ -210,37 +212,42 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     thread_deep_link = f"/app/threads/{thread.id}"
     thread_cta_url = build_absolute_url(thread_deep_link)
 
-    def _maybe_queue(user, template_key: str):
+    def _maybe_queue(user, template_key: str, extra_context: dict | None = None):
         profile, _ = UserProfile.objects.get_or_create(user=user)
 
         if not getattr(profile, "notify_confirmations", True):
             return
 
+        email_context = {
+            "user": {
+                "first_name": user.first_name,
+            },
+            "tenancy_id": tenancy.id,
+            "thread_id": thread.id,
+            "message_id": message.id,
+            "room_title": room_title,
+            "move_in_date": (
+                tenancy.move_in_date.isoformat()
+                if tenancy.move_in_date
+                else None
+            ),
+            "duration_months": tenancy.duration_months,
+            "monthly_rent": (
+                str(tenancy.room.price_per_month)
+                if tenancy.room.price_per_month is not None
+                else None
+            ),
+            "deep_link": thread_deep_link,
+            "cta_url": thread_cta_url,
+        }
+
+        if extra_context:
+            email_context.update(extra_context)
+
         _queue_email(
             user=user,
             template_key=template_key,
-            context={
-                "user": {
-                    "first_name": user.first_name,
-                },
-                "tenancy_id": tenancy.id,
-                "thread_id": thread.id,
-                "message_id": message.id,
-                "room_title": room_title,
-                "move_in_date": (
-                    tenancy.move_in_date.isoformat()
-                    if tenancy.move_in_date
-                    else None
-                ),
-                "duration_months": tenancy.duration_months,
-                "monthly_rent": (
-                    str(tenancy.room.price_per_month)
-                    if tenancy.room.price_per_month is not None
-                    else None
-                ),
-                "deep_link": thread_deep_link,
-                "cta_url": thread_cta_url,
-            },
+            context=email_context,
         )
 
     def _create_notification(
@@ -281,25 +288,55 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         )
 
     if event == "proposed":
+        tenant_submitted_first = sender.id == tenancy.tenant_id
+
         target_user = (
             tenancy.landlord
-            if sender.id == tenancy.tenant_id
+            if tenant_submitted_first
             else tenancy.tenant
         )
+
+        sender_name = (
+            sender.get_full_name().strip()
+            or sender.username
+        )
+
+        if tenant_submitted_first:
+            notification_title = "Verify tenancy claim"
+            notification_body = (
+                f"{sender_name} says they rented {room_title}. "
+                "Confirm that you actually rented the room to this person "
+                "before agreeing."
+            )
+        else:
+            notification_title = "Review tenancy information"
+            notification_body = (
+                f"Your landlord submitted tenancy information for "
+                f"{room_title}. Please review it."
+            )
 
         _create_notification(
             user=target_user,
             notification_type="tenancy_proposed",
-            title="Tenancy proposal",
-            body=(
-                f"A tenancy proposal was created for: "
-                f"{room_title}. Please respond."
-            ),
+            title=notification_title,
+            body=notification_body,
         )
 
         _maybe_queue(
             target_user,
             "tenancy.proposed",
+            {
+                "sender_name": sender_name,
+                "tenant_name": (
+                    tenancy.tenant.get_full_name().strip()
+                    or tenancy.tenant.username
+                ),
+                "landlord_name": (
+                    tenancy.landlord.get_full_name().strip()
+                    or tenancy.landlord.username
+                ),
+                "tenant_submitted_first": tenant_submitted_first,
+            },
         )
 
         return 1
@@ -319,6 +356,114 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             )
 
         return 2
+    
+    
+    if event == "rejected_unverified":
+        tenant_name = (
+            tenancy.tenant.get_full_name().strip()
+            or tenancy.tenant.username
+        )
+        landlord_name = (
+            tenancy.landlord.get_full_name().strip()
+            or tenancy.landlord.username
+        )
+
+        _create_notification(
+            user=tenancy.tenant,
+            notification_type="tenancy_rejected_unverified",
+            title="Tenancy information not confirmed",
+            body=(
+                f"{landlord_name} confirmed that {room_title} was not "
+                "rented to you. Your submitted tenancy information has "
+                "therefore been cancelled."
+            ),
+        )
+
+        _maybe_queue(
+            tenancy.tenant,
+            "tenancy.rejected_unverified",
+            {
+                "tenant_name": tenant_name,
+                "landlord_name": landlord_name,
+            },
+        )
+
+        _create_notification(
+            user=tenancy.landlord,
+            notification_type="tenancy_rejected_unverified",
+            title="Tenancy claim rejected",
+            body=(
+                f"The tenancy claim submitted by {tenant_name} for "
+                f"{room_title} has been rejected. The listing availability "
+                "was not changed."
+            ),
+        )
+
+        _maybe_queue(
+            tenancy.landlord,
+            "tenancy.rejected_unverified_landlord",
+            {
+                "tenant_name": tenant_name,
+                "landlord_name": landlord_name,
+            },
+        )
+
+        return 2
+    
+    
+    if event == "expired_unverified":
+        tenant_name = (
+            tenancy.tenant.get_full_name().strip()
+            or tenancy.tenant.username
+        )
+
+        _create_notification(
+            user=tenancy.tenant,
+            notification_type="tenancy_expired_unverified",
+            title="Tenancy request expired",
+            body=(
+                f"Your tenancy request for {room_title} expired because "
+                "the landlord did not verify it within the required time."
+            ),
+        )
+
+        _maybe_queue(
+            tenancy.tenant,
+            "tenancy.expired_unverified",
+            {
+                "tenant_name": tenant_name,
+                "landlord_name": (
+                    tenancy.landlord.get_full_name().strip()
+                    or tenancy.landlord.username
+                ),
+            },
+        )
+
+        _create_notification(
+            user=tenancy.landlord,
+            notification_type="tenancy_expired_unverified",
+            title="Unverified tenancy request expired",
+            body=(
+                f"The unverified tenancy request from {tenant_name} for "
+                f"{room_title} has expired. The listing availability "
+                "was not changed."
+            ),
+        )
+
+        _maybe_queue(
+            tenancy.landlord,
+            "tenancy.expired_unverified_landlord",
+            {
+                "tenant_name": tenant_name,
+                "landlord_name": (
+                    tenancy.landlord.get_full_name().strip()
+                    or tenancy.landlord.username
+                ),
+            },
+        )
+
+        return 2
+    
 
     if event == "cancelled":
         for user in (tenancy.landlord, tenancy.tenant):
@@ -336,26 +481,74 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         return 2
 
-    # updated
-    target_user = (
+    # updated — the one permitted correction has been submitted.
+    editor = sender
+    other_party = (
         tenancy.landlord
-        if sender.id == tenancy.tenant_id
+        if editor.id == tenancy.tenant_id
         else tenancy.tenant
     )
 
+    editor_role = (
+        "landlord"
+        if editor.id == tenancy.landlord_id
+        else "tenant"
+    )
+    other_party_role = (
+        "tenant"
+        if editor_role == "landlord"
+        else "landlord"
+    )
+
+    editor_name = editor.get_full_name().strip() or editor.username
+    other_party_name = (
+        other_party.get_full_name().strip()
+        or other_party.username
+    )
+
     _create_notification(
-        user=target_user,
+        user=editor,
         notification_type="tenancy_updated",
-        title="Tenancy updated",
-        body=f"Tenancy proposal updated for: {room_title}.",
+        title="Tenancy information updated",
+        body=(
+            f"The tenancy information changes you made for "
+            f"{room_title} have been sent to {other_party_name}."
+        ),
     )
 
     _maybe_queue(
-        target_user,
-        "tenancy.updated",
+        editor,
+        "tenancy.updated_editor",
+        {
+            "editor_name": editor_name,
+            "editor_role": editor_role,
+            "other_party_name": other_party_name,
+            "other_party_role": other_party_role,
+        },
     )
 
-    return 1
+    _create_notification(
+        user=other_party,
+        notification_type="tenancy_updated",
+        title="Tenancy information changed",
+        body=(
+            f"Your {editor_role}, {editor_name}, updated the tenancy "
+            f"information for {room_title}."
+        ),
+    )
+
+    _maybe_queue(
+        other_party,
+        "tenancy.updated_counterparty",
+        {
+            "editor_name": editor_name,
+            "editor_role": editor_role,
+            "other_party_name": other_party_name,
+            "other_party_role": other_party_role,
+        },
+    )
+
+    return 2
 
 
 def _refresh_user_ratings_for_user_ids(user_ids):
@@ -521,6 +714,61 @@ def task_tenancy_prompts_sweep() -> int:
     
     
     count = 0
+    
+    
+    # -------------------------------------------------
+    # 0) Expire unverified tenant-created tenancy claims
+    # -------------------------------------------------
+    # TEMPORARY QA RULE:
+    # A tenancy claim submitted first by a tenant expires after 10 minutes
+    # if the landlord has not verified it.
+    #
+    # PRODUCTION: change this back to 7 days.
+    tenant_claim_expiry_cutoff = now - timedelta(minutes=10)
+
+    expired_tenant_claims = (
+        Tenancy.objects
+        .select_related(
+            "room",
+            "landlord",
+            "tenant",
+            "proposed_by",
+        )
+        .filter(
+            status=Tenancy.STATUS_PROPOSED,
+            proposed_by_id=F("tenant_id"),
+            landlord_confirmed_at__isnull=True,
+            created_at__lte=tenant_claim_expiry_cutoff,
+        )
+    )
+
+    for tenancy in expired_tenant_claims:
+        tenancy.status = Tenancy.STATUS_CANCELLED
+        tenancy.review_open_at = None
+        tenancy.review_deadline_at = None
+        tenancy.still_living_check_at = None
+        tenancy.still_living_confirmed_at = None
+        tenancy.save(
+            update_fields=[
+                "status",
+                "review_open_at",
+                "review_deadline_at",
+                "still_living_check_at",
+                "still_living_confirmed_at",
+                "updated_at",
+            ]
+        )
+
+        # The tenant-created claim never took the listing offline,
+        # so the room availability must remain unchanged.
+        task_send_tenancy_notification.delay(
+            tenancy.id,
+            "expired_unverified",
+        )
+
+        count += 1
+    
+    
     
         # -------------------------------------------------
     # 1) tenancy ending reminder

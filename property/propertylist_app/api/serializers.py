@@ -528,6 +528,15 @@ class TenancyProposalSerializer(serializers.Serializer):
             status=Tenancy.STATUS_PROPOSED,
         )
 
+        # The landlord owns the listing, so a landlord-created tenancy
+        # immediately removes the room from availability.
+        #
+        # A tenant-created tenancy claim must first be verified by the
+        # landlord, so the room remains in its existing availability state.
+        if user.id == landlord.id and room.is_available:
+            room.is_available = False
+            room.save(update_fields=["is_available", "updated_at"])
+
         return tenancy
 
 
@@ -593,6 +602,24 @@ class TenancyRespondSerializer(serializers.Serializer):
             # basic sanity: cannot propose a move-in date in the past
             if attrs["move_in_date"] < timezone.localdate():
                 raise serializers.ValidationError({"move_in_date": "Move-in date cannot be in the past."})
+            
+            
+            if action == "cancel":
+                    # "Not rented to this person" is only available to the
+                    # landlord when the tenant submitted the initial tenancy claim.
+                    if not (
+                        user.id == tenancy.landlord_id
+                        and tenancy.proposed_by_id == tenancy.tenant_id
+                    ):
+                        raise serializers.ValidationError(
+                            {
+                                "action": (
+                                    "Only the landlord can reject tenancy information "
+                                    "submitted first by the tenant."
+                                )
+                            }
+                        )
+                
 
         return attrs
 
@@ -644,30 +671,50 @@ class TenancyRespondSerializer(serializers.Serializer):
             tenancy.still_living_check_at = now + timedelta(minutes=10)
             
             
+            
+            
+        if action == "cancel":
+            # Landlord rejected a tenant-created tenancy claim.
+            # The room availability is deliberately not changed here:
+            # tenant-created claims never take the listing offline.
+            tenancy.status = STATUS_CANCELLED
+            tenancy.review_open_at = None
+            tenancy.review_deadline_at = None
+            tenancy.still_living_check_at = None
+            tenancy.still_living_confirmed_at = None
+            tenancy.save()
+
+            return tenancy    
+            
+            
 
         if action == "propose_changes":
             tenancy.move_in_date = self.validated_data["move_in_date"]
             tenancy.duration_months = self.validated_data["duration_months"]
             tenancy.proposed_by = user
 
-            # The person submitting the amended terms confirms their own
-            # counter-proposal. The other party must review and agree.
-            if user.id == tenancy.landlord_id:
-                tenancy.landlord_confirmed_at = now
-                tenancy.tenant_confirmed_at = None
-            else:
-                tenancy.tenant_confirmed_at = now
-                tenancy.landlord_confirmed_at = None
-
-            tenancy.status = STATUS_PROPOSED
-
-            # Clear schedule-related fields. They will be recomputed when
-            # the other party agrees to the amended tenancy information.
-            tenancy.review_open_at = None
-            tenancy.review_deadline_at = None
-            tenancy.still_living_check_at = None
-            tenancy.still_living_confirmed_at = None
+            # The one permitted correction becomes the final tenancy
+            # information. No further Agree/Edit cycle is required.
+            tenancy.landlord_confirmed_at = now
+            tenancy.tenant_confirmed_at = now
             tenancy.tenant_has_edited = True
+
+            today = timezone.localdate()
+            tenancy.status = (
+                STATUS_ACTIVE
+                if tenancy.move_in_date <= today
+                else STATUS_CONFIRMED
+            )
+
+            # Temporary QA schedule:
+            # Timer 2 becomes due 10 minutes after this correction.
+            _set_schedule_fields()
+            tenancy.still_living_confirmed_at = None
+
+            room = tenancy.room
+            if room.is_available:
+                room.is_available = False
+                room.save(update_fields=["is_available", "updated_at"])
 
             tenancy.save()
             return tenancy
@@ -840,11 +887,34 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         if can_edit:
             available_actions.append("propose_changes")
 
-        if can_edit:
-            reason = "You can agree to the tenancy information or edit it once."
+        # When the tenant submitted the tenancy information first,
+        # the landlord may reject the claim if the room was not
+        # actually rented to that tenant.
+        landlord_reviewing_tenant_claim = (
+            user.id == obj.landlord_id
+            and obj.proposed_by_id == obj.tenant_id
+        )
+
+        if landlord_reviewing_tenant_claim:
+            available_actions.append("cancel")
+
+        if landlord_reviewing_tenant_claim and can_edit:
+            reason = (
+                "Confirm that you actually rented this room to the tenant. "
+                "You can agree, correct the information once, or reject the claim."
+            )
+        elif landlord_reviewing_tenant_claim:
+            reason = (
+                "Confirm that you actually rented this room to the tenant. "
+                "You can agree or reject the claim."
+            )
+        elif can_edit:
+            reason = (
+                "You can agree to the tenancy information or correct it once."
+            )
         else:
             reason = (
-                "The one-time edit has already been used. "
+                "The one-time correction has already been used. "
                 "You can now agree to the tenancy information."
             )
 
@@ -988,9 +1058,16 @@ class RoomPhotoResponseSerializer(serializers.Serializer):
 class RoomSerializer(serializers.ModelSerializer):
     category = serializers.CharField(source="category.name", read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
-        source="category",
-        queryset=RoomCategorie.objects.all(),
-        write_only=True,
+    source="category",
+    queryset=RoomCategorie.objects.all(),
+    write_only=True,
+    )
+
+    cover_photo = serializers.PrimaryKeyRelatedField(
+    queryset=RoomImage.objects.all(),
+    required=False,
+    allow_null=True,
+    write_only=True,
     )
 
     is_saved = serializers.SerializerMethodField(read_only=True)
@@ -1235,6 +1312,20 @@ class RoomSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"availability_to_time": "End time must be after start time."}
             )
+            
+        cover_photo = attrs.get("cover_photo")
+
+        if cover_photo:
+            room = self.instance
+
+            if room and cover_photo.room_id != room.id:
+                raise serializers.ValidationError(
+                    {
+                        "cover_photo":
+                        "Selected cover photo does not belong to this listing."
+                    }
+                )    
+            
 
         return attrs
 
@@ -1980,6 +2071,31 @@ class RoomSerializer(serializers.ModelSerializer):
         - images remain hidden until at least 3 are approved
         """
         images = self._room_images(obj)
+        
+        
+        selected_cover_id = getattr(obj, "cover_photo_id", None)
+
+        if selected_cover_id:
+            selected_cover = next(
+                (
+                    image
+                    for image in images
+                    if image.id == selected_cover_id
+                ),
+                None,
+            )
+
+            if selected_cover:
+                images = [
+                    selected_cover,
+                    *[
+                        image
+                        for image in images
+                        if image.id != selected_cover_id
+                    ],
+                ]
+        
+        
 
         if not images:
             legacy_url = self._absolute_media_url(

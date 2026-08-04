@@ -1313,6 +1313,7 @@ You can respond to this viewing request from your RentCrib account.
                             <tr>
                                 <td style="padding:0 0 26px;">
 
+                                    {% if tenant_submitted_first %}
                                     <p style="
                                         margin:0;
                                         font-family:Arial, Helvetica, sans-serif;
@@ -1320,11 +1321,42 @@ You can respond to this viewing request from your RentCrib account.
                                         line-height:1.75;
                                         color:#4f5b70;
                                     ">
-                                        Tenancy information has been submitted for
+                                        <strong style="color:#172033;">
+                                            {{ tenant_name }}
+                                        </strong>
+                                        has submitted tenancy information for
                                         <strong style="color:#172033;">
                                             {{ room_title }}
                                         </strong>.
                                     </p>
+
+                                    <p style="
+                                        margin:18px 0 0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:16px;
+                                        line-height:1.75;
+                                        color:#4f5b70;
+                                    ">
+                                        Please make sure you actually rented this room to this tenant before agreeing.
+                                    </p>
+                                    {% else %}
+                                    <p style="
+                                        margin:0;
+                                        font-family:Arial, Helvetica, sans-serif;
+                                        font-size:16px;
+                                        line-height:1.75;
+                                        color:#4f5b70;
+                                    ">
+                                        Your landlord,
+                                        <strong style="color:#172033;">
+                                            {{ landlord_name }}
+                                        </strong>,
+                                        has submitted tenancy information for
+                                        <strong style="color:#172033;">
+                                            {{ room_title }}
+                                        </strong>.
+                                    </p>
+                                    {% endif %}
 
                                 </td>
                             </tr>
@@ -1843,6 +1875,153 @@ You can respond to this viewing request from your RentCrib account.
 {% endblock %}
 """,
 },
+  
+      {
+        "key": "tenancy.updated_editor",
+        "subject": "Your tenancy changes were sent to {{ other_party_name }}",
+        "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+    Your tenancy information has been updated
+</h2>
+
+<p>
+    Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p>
+    The changes you made to the tenancy information for:
+</p>
+
+<p>
+    <strong>{{ room_title }}</strong>
+</p>
+
+<p>
+    have been saved and sent to your {{ other_party_role }},
+    <strong>{{ other_party_name }}</strong>.
+</p>
+
+<h3 style="font-family:Arial,sans-serif;color:#333333;">
+    Updated tenancy information
+</h3>
+
+<table role="presentation" width="100%" cellpadding="8" cellspacing="0" border="0"
+       style="border-collapse:collapse;background:#f7f9fc;border:1px solid #dfe6ef;">
+    <tr>
+        <td style="border-bottom:1px solid #e4e9f0;">Move-in date</td>
+        <td align="right" style="border-bottom:1px solid #e4e9f0;">
+            <strong>{{ move_in_date }}</strong>
+        </td>
+    </tr>
+    <tr>
+        <td style="border-bottom:1px solid #e4e9f0;">Monthly rent</td>
+        <td align="right" style="border-bottom:1px solid #e4e9f0;">
+            <strong>&pound;{{ monthly_rent }} per month</strong>
+        </td>
+    </tr>
+    <tr>
+        <td>Tenancy duration</td>
+        <td align="right">
+            <strong>
+                {{ duration_months }} month{{ duration_months|pluralize }}
+            </strong>
+        </td>
+    </tr>
+</table>
+
+<p>
+    No further confirmation is required. RentCrib will use these updated
+    details for the tenancy reminders.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy information" %}
+
+<p>
+    Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""",
+    },
+    {
+        "key": "tenancy.updated_counterparty",
+        "subject": "Your {{ editor_role }} updated the tenancy information for {{ room_title }}",
+        "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+    Your tenancy information has changed
+</h2>
+
+<p>
+    Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p>
+    Your {{ editor_role }},
+    <strong>{{ editor_name }}</strong>,
+    has corrected the tenancy information recorded for:
+</p>
+
+<p>
+    <strong>{{ room_title }}</strong>
+</p>
+
+<h3 style="font-family:Arial,sans-serif;color:#333333;">
+    Updated tenancy information
+</h3>
+
+<table role="presentation" width="100%" cellpadding="8" cellspacing="0" border="0"
+       style="border-collapse:collapse;background:#f7f9fc;border:1px solid #dfe6ef;">
+    <tr>
+        <td style="border-bottom:1px solid #e4e9f0;">Move-in date</td>
+        <td align="right" style="border-bottom:1px solid #e4e9f0;">
+            <strong>{{ move_in_date }}</strong>
+        </td>
+    </tr>
+    <tr>
+        <td style="border-bottom:1px solid #e4e9f0;">Monthly rent</td>
+        <td align="right" style="border-bottom:1px solid #e4e9f0;">
+            <strong>&pound;{{ monthly_rent }} per month</strong>
+        </td>
+    </tr>
+    <tr>
+        <td>Tenancy duration</td>
+        <td align="right">
+            <strong>
+                {{ duration_months }} month{{ duration_months|pluralize }}
+            </strong>
+        </td>
+    </tr>
+</table>
+
+<p>
+    This was the one permitted correction to the tenancy information.
+    No further confirmation is required.
+</p>
+
+<p>
+    RentCrib will use these updated details for the tenancy reminders.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy information" %}
+
+<p>
+    Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""",
+    },
+  
+  
+  
     {
         "key": "tenancy.confirmed",
         "subject": "Tenancy information confirmed for {{ room_title }}",
@@ -1935,6 +2114,199 @@ You can respond to this viewing request from your RentCrib account.
     {% endblock %}
     """,
     },
+    
+    
+        {
+        "key": "tenancy.expired_unverified",
+        "subject": "Your tenancy request for {{ room_title }} has expired",
+        "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+    Your tenancy request has expired
+</h2>
+
+<p>
+    Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p>
+    The landlord did not verify the tenancy information you submitted for:
+</p>
+
+<p>
+    <strong>{{ room_title }}</strong>
+</p>
+
+<p>
+    within the required time, so the request has expired.
+</p>
+
+<p>
+    The room listing remained available while the request was awaiting
+    verification.
+</p>
+
+<p>
+    If you have rented this room, please contact the landlord and ask them
+    to submit or confirm the tenancy information.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
+
+<p>
+    Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""",
+    },
+    {
+        "key": "tenancy.expired_unverified_landlord",
+        "subject": "Unverified tenancy request expired for {{ room_title }}",
+        "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+    An unverified tenancy request has expired
+</h2>
+
+<p>
+    Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p>
+    The tenancy information submitted by
+    <strong>{{ tenant_name }}</strong>
+    for:
+</p>
+
+<p>
+    <strong>{{ room_title }}</strong>
+</p>
+
+<p>
+    was not verified within the required time and has now expired.
+</p>
+
+<p>
+    The room listing availability was not changed.
+</p>
+
+<p>
+    If you rented the room to this tenant, you can submit the correct tenancy
+    information from your listing.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
+
+<p>
+    Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""",
+    },
+    
+    
+    
+        {
+        "key": "tenancy.rejected_unverified",
+        "subject": "Your tenancy information for {{ room_title }} was not confirmed",
+        "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+    Your tenancy information was not confirmed
+</h2>
+
+<p>
+    Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p>
+    {{ landlord_name }} has confirmed that they did not rent:
+</p>
+
+<p>
+    <strong>{{ room_title }}</strong>
+</p>
+
+<p>
+    to you.
+</p>
+
+<p>
+    The tenancy information you submitted has therefore been cancelled.
+    The room listing remains available.
+</p>
+
+<p>
+    If you believe this is a mistake, please contact the landlord directly.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
+
+<p>
+    Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""",
+    },
+    {
+        "key": "tenancy.rejected_unverified_landlord",
+        "subject": "Tenancy claim rejected for {{ room_title }}",
+        "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<h2 style="font-family:Arial,sans-serif;color:#333333;">
+    Tenancy claim rejected
+</h2>
+
+<p>
+    Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p>
+    You confirmed that you did not rent:
+</p>
+
+<p>
+    <strong>{{ room_title }}</strong>
+</p>
+
+<p>
+    to <strong>{{ tenant_name }}</strong>.
+</p>
+
+<p>
+    Their tenancy claim has been cancelled. The room listing availability
+    was not changed.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
+
+<p>
+    Thank you for using RentCrib.
+</p>
+
+{% endblock %}
+""",
+    },
+    
+    
+    
+    
+    
     {
         "key": "tenancy.still_living_check",
         "subject": "Your tenancy for {{ room_title }} is ending soon",

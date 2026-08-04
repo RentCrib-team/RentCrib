@@ -14,6 +14,8 @@ EVENT_MESSAGE_TYPES = {
     "updated": Message.TYPE_TENANCY_UPDATED,
     "confirmed": Message.TYPE_TENANCY_CONFIRMED,
     "cancelled": Message.TYPE_TENANCY_CANCELLED,
+    "expired_unverified": Message.TYPE_TENANCY_CANCELLED,
+    "rejected_unverified": Message.TYPE_TENANCY_CANCELLED,
 }
 
 
@@ -21,6 +23,13 @@ EVENT_BODIES = {
     "updated": "The tenancy proposal has been updated.",
     "confirmed": "The tenancy has been confirmed.",
     "cancelled": "The tenancy proposal has been cancelled.",
+    "expired_unverified": (
+        "The tenant-created tenancy request expired because the landlord "
+        "did not verify it within the required time."
+    ),
+    "rejected_unverified": (
+        "The landlord confirmed that the room was not rented to this tenant."
+    ),
 }
 
 
@@ -54,14 +63,31 @@ def _build_tenancy_message_body(
     duration = tenancy.duration_months
     monthly_rent = tenancy.room.price_per_month
 
+    sender_is_tenant = sender.id == tenancy.tenant_id
+
+    if sender_is_tenant:
+        action_guidance = (
+            "Please confirm that you actually rented this room to this tenant "
+            "before agreeing.\n\n"
+            "If the tenancy is genuine but one detail is wrong, you may edit "
+            "the information once.\n\n"
+            "If you did not rent the room to this tenant, select "
+            "\"Not rented to this person\"."
+        )
+    else:
+        action_guidance = (
+            "If everything is correct, agree to confirm the tenancy.\n\n"
+            "You may edit the details once before confirming if anything "
+            "needs correcting."
+        )
+
     return (
         f"{sender_name} has proposed a tenancy for {room_title}.\n\n"
         "Please review the proposed tenancy details below before responding.\n\n"
         f"Move-in date: {move_in_date}\n"
         f"Duration: {duration} months\n"
         f"Monthly rent: £{monthly_rent}\n\n"
-        "If everything is correct, agree to confirm the tenancy. "
-        "You may edit the details before confirming if anything needs to change."
+        f"{action_guidance}"
     )
 
 

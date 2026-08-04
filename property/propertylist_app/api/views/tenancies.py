@@ -374,18 +374,28 @@ class TenancyRespondView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
+        action = serializer.validated_data["action"]
         tenancy = serializer.save()
 
         from propertylist_app.tasks import task_send_tenancy_notification
-        if tenancy.status == getattr(Tenancy, "STATUS_CONFIRMED", "confirmed"):
+
+        if action == "propose_changes":
+            task_send_tenancy_notification.delay(tenancy.id, "updated")
+            response_message = (
+                "Tenancy information corrected successfully. "
+                "The updated details have been sent to both parties."
+            )
+        elif action == "cancel":
+            task_send_tenancy_notification.delay(
+                tenancy.id,
+                "rejected_unverified",
+            )
+            response_message = (
+                "The tenant-created tenancy claim was rejected successfully."
+            )
+        else:
             task_send_tenancy_notification.delay(tenancy.id, "confirmed")
             response_message = "Tenancy confirmed successfully."
-        elif tenancy.status == getattr(Tenancy, "STATUS_CANCELLED", "cancelled"):
-            task_send_tenancy_notification.delay(tenancy.id, "cancelled")
-            response_message = "Tenancy cancelled successfully."
-        else:
-            task_send_tenancy_notification.delay(tenancy.id, "updated")
-            response_message = "Tenancy updated successfully."
 
         return ok_response(
             TenancyDetailSerializer(
