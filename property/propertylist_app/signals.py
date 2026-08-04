@@ -134,12 +134,22 @@ def booking_created_queue_emails(
     )
 
     if owner:
+        booker_name = (
+            booker.get_full_name().strip()
+            or booker.username
+            or booker.first_name
+            or "A prospective tenant"
+        )
+
         _queue_email(
             user=owner,
             template_key="booking.new",
             context={
                 "user": {
                     "first_name": owner.first_name,
+                },
+                "booker": {
+                    "name": booker_name,
                 },
                 "room": {
                     "title": room.title,
