@@ -569,60 +569,69 @@ class TenancyRespondSerializer(serializers.Serializer):
         action = attrs["action"]
 
         if action == "propose_changes":
+            # Once the one permitted correction has been used,
+            # neither party may edit the tenancy information again.
+            if tenancy.tenant_has_edited:
+                raise serializers.ValidationError(
+                    {
+                        "action": (
+                            "Further changes are not allowed because the one "
+                            "permitted correction has already been used."
+                        )
+                    }
+                )
+
             # Only the party reviewing the current proposal may edit it.
             # The person who submitted the current proposal cannot edit
-            # their own tenancy information through the review endpoint.
+            # their own tenancy information.
             if user.id == tenancy.proposed_by_id:
                 raise serializers.ValidationError(
                     {
                         "action": (
                             "You submitted the current tenancy information. "
-                            "The other party must review it before changes can be proposed."
+                            "The other party must review it before changes "
+                            "can be proposed."
                         )
                     }
                 )
 
-            if tenancy.tenant_has_edited:
+            if (
+                "move_in_date" not in attrs
+                or "duration_months" not in attrs
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "non_field_errors": (
+                            "move_in_date and duration_months are required "
+                            "for propose_changes."
+                        )
+                    }
+                )
+
+            if attrs["move_in_date"] < timezone.localdate():
+                raise serializers.ValidationError(
+                    {
+                        "move_in_date": (
+                            "Move-in date cannot be in the past."
+                        )
+                    }
+                )
+
+        if action == "cancel":
+            # "Not my tenant" is only available to the landlord
+            # when the tenant submitted the initial tenancy claim.
+            if not (
+                user.id == tenancy.landlord_id
+                and tenancy.proposed_by_id == tenancy.tenant_id
+            ):
                 raise serializers.ValidationError(
                     {
                         "action": (
-                            "The one-time edit for this tenancy information "
-                            "has already been used."
+                            "Only the landlord can reject tenancy information "
+                            "submitted first by the tenant."
                         )
                     }
                 )
-
-
-
-            if "move_in_date" not in attrs or "duration_months" not in attrs:
-                raise serializers.ValidationError(
-                    {"non_field_errors": "move_in_date and duration_months are required for propose_changes."}
-                )
-
-            # basic sanity: cannot propose a move-in date in the past
-            if attrs["move_in_date"] < timezone.localdate():
-                raise serializers.ValidationError({"move_in_date": "Move-in date cannot be in the past."})
-            
-            
-            if action == "cancel":
-                    # "Not rented to this person" is only available to the
-                    # landlord when the tenant submitted the initial tenancy claim.
-                    if not (
-                        user.id == tenancy.landlord_id
-                        and tenancy.proposed_by_id == tenancy.tenant_id
-                    ):
-                        raise serializers.ValidationError(
-                            {
-                                "action": (
-                                    "Only the landlord can reject tenancy information "
-                                    "submitted first by the tenant."
-                                )
-                            }
-                        )
-                
-
-        return attrs
-
     @transaction.atomic
     def save(self, **kwargs):
         request = self.context["request"]
