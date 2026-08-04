@@ -1463,7 +1463,11 @@ You can respond to this viewing request from your RentCrib account.
                                                     line-height:1.65;
                                                     color:#566176;
                                                 ">
-                                                    RentCrib does not create or replace tenancy agreements. We help both parties record and keep track of the tenancy information they agreed outside RentCrib.
+                                                    {% if tenant_submitted_first %}
+                                                    Please confirm that you actually rented this room to {{ tenant_name }} before agreeing. If the tenancy is genuine but one detail is incorrect, you may use Edit once. If you did not rent the room to this tenant, choose “Not rented to this person” inside RentCrib.
+                                                    {% else %}
+                                                    Check the information carefully before responding. Choose Agree if it is correct, or use Edit once if one recorded detail needs correcting.
+                                                    {% endif %}
                                                 </p>
 
                                             </td>
