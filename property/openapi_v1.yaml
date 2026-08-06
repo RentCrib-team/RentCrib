@@ -535,8 +535,10 @@ paths:
   /api/v1/auth/logout/:
     post:
       operationId: auth_logout_create
-      description: Invalidate the submitted refresh token. A valid access token is
-        not required.
+      description: Revoke the supplied refresh token and terminate the session. Logout
+        authenticates using the submitted refresh token rather than the short-lived
+        access token so users can always sign out even after the access token has
+        expired.
       tags:
       - auth
       requestBody:
@@ -833,8 +835,8 @@ paths:
   /api/v1/auth/token/refresh/:
     post:
       operationId: auth_token_refresh_create
-      description: Exchange a refresh token for a new access token. Returns ok_response
-        envelope.
+      description: Rotate a valid refresh token and return a replacement access and
+        refresh token pair. The submitted refresh token is blacklisted.
       tags:
       - auth
       requestBody:
@@ -9135,6 +9137,10 @@ components:
         category_id:
           type: integer
           writeOnly: true
+        cover_photo:
+          type: integer
+          writeOnly: true
+          nullable: true
         is_saved:
           type: boolean
           readOnly: true
@@ -10303,6 +10309,10 @@ components:
         category_id:
           type: integer
           writeOnly: true
+        cover_photo:
+          type: integer
+          writeOnly: true
+          nullable: true
         is_saved:
           type: boolean
           readOnly: true
@@ -11603,12 +11613,16 @@ components:
     TenancyExtensionCreate:
       type: object
       properties:
+        proposed_start_date:
+          type: string
+          format: date
         proposed_duration_months:
           type: integer
           maximum: 24
           minimum: 1
       required:
       - proposed_duration_months
+      - proposed_start_date
     TenancyExtensionCreateOkResponse:
       type: object
       properties:
@@ -11641,6 +11655,9 @@ components:
           type: integer
         proposed_by_user_id:
           type: integer
+        proposed_start_date:
+          type: string
+          format: date
         proposed_duration_months:
           type: integer
         status:
@@ -11657,6 +11674,7 @@ components:
       - id
       - proposed_by_user_id
       - proposed_duration_months
+      - proposed_start_date
       - responded_at
       - status
       - tenancy_id
@@ -11925,6 +11943,8 @@ components:
       properties:
         access:
           type: string
+        refresh:
+          type: string
         access_expires_at:
           type: string
           format: date-time
@@ -11934,6 +11954,7 @@ components:
       required:
       - access
       - access_expires_at
+      - refresh
       - refresh_expires_at
     TokenRefreshOkResponse:
       type: object
