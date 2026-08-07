@@ -10,6 +10,10 @@ from propertylist_app.models import RoomCategorie, Room, Booking
 
 # IMPORTANT: once you add Tenancy model, this import must work
 from propertylist_app.models import Tenancy
+from notifications.models import (
+    NotificationTemplate,
+    OutboundNotification,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -741,12 +745,36 @@ def test_landlord_rejecting_tenant_created_proposal_keeps_room_available():
 
 
 def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
+    NotificationTemplate.objects.create(
+        key="tenancy.expired_unverified",
+        channel="email",
+        subject="Tenancy request expired",
+        body="{{ room_title }} {{ cta_url }}",
+        is_active=True,
+    )
+
+    NotificationTemplate.objects.create(
+        key="tenancy.expired_unverified_landlord",
+        channel="email",
+        subject="Unverified tenancy request expired",
+        body="{{ room_title }} {{ cta_url }}",
+        is_active=True,
+    )
+    NotificationTemplate.objects.create(
+        key="tenancy.proposed",
+        channel="email",
+        subject="Tenancy information received",
+        body="{{ room_title }} {{ cta_url }}",
+        is_active=True,
+    )
+    
     landlord = _make_user("landlord_tenant_first_expiry")
     tenant = _make_user("tenant_tenant_first_expiry")
     room = _make_room(owner=landlord)
     _make_viewing_booking(user=tenant, room=room)
 
     tenant_client = _api_client_for(tenant)
+    landlord_client = _api_client_for(landlord)
 
     proposal_response = tenant_client.post(
         f"{API_PREFIX}/tenancies/propose/",
@@ -769,11 +797,11 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
 
     tenancy = Tenancy.objects.get(id=tenancy_id)
 
-    # TEMPORARY TESTING RULE:
+    # TEMPORARY QA RULE:
     # Tenant-created proposals expire after 10 minutes.
     #
-    # BEFORE PRODUCTION:
-    # Change the application expiry back to 7 days.
+    # PRODUCTION:
+    # Use a 30-day response window.
     Tenancy.objects.filter(id=tenancy_id).update(
         created_at=timezone.now() - timedelta(minutes=11)
     )
@@ -788,4 +816,112 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
     assert tenancy.status == Tenancy.STATUS_CANCELLED
     assert room.is_available is True
     assert tenancy.still_living_check_at is None
-    assert tenancy.review_open_at is None    
+    assert tenancy.review_open_at is None  
+    
+        # Both parties receive the correct expiry emails.
+    tenant_expiry_email = OutboundNotification.objects.filter(
+        user=tenant,
+        template_key="tenancy.expired_unverified",
+        context__tenancy_id=tenancy.id,
+    ).first()
+
+    landlord_expiry_email = OutboundNotification.objects.filter(
+        user=landlord,
+        template_key="tenancy.expired_unverified_landlord",
+        context__tenancy_id=tenancy.id,
+    ).first()
+
+    assert tenant_expiry_email is not None
+    assert landlord_expiry_email is not None
+
+    assert tenant_expiry_email.context["room_title"] == room.title
+    assert landlord_expiry_email.context["room_title"] == room.title
+    
+    
+    
+    
+    # The tenant cannot repeatedly submit the expired claim.
+    tenant_retry_response = tenant_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": landlord.id,
+            "move_in_date": str(
+                date.today() + timedelta(days=7)
+            ),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert tenant_retry_response.status_code == 400
+    assert "contact the landlord" in str(
+        tenant_retry_response.data
+    ).lower()
+    
+    assert not OutboundNotification.objects.filter(
+        user=landlord,
+        template_key="tenancy.proposed",
+        context__tenancy_id__gt=tenancy.id,
+    ).exists()
+
+    # The landlord may create fresh legitimate tenancy information
+    # after the tenant-created claim has expired.
+    landlord_submission_response = landlord_client.post(
+        f"{API_PREFIX}/tenancies/propose/",
+        data={
+            "room_id": room.id,
+            "counterparty_user_id": tenant.id,
+            "move_in_date": str(
+                date.today() + timedelta(days=7)
+            ),
+            "duration_months": 6,
+        },
+        format="json",
+    )
+
+    assert landlord_submission_response.status_code == 201, (
+        landlord_submission_response.data
+    )
+
+    landlord_payload = landlord_submission_response.data.get(
+        "data",
+        landlord_submission_response.data,
+    )
+
+    new_tenancy = Tenancy.objects.get(
+        id=landlord_payload["id"]
+    )
+    
+    replacement_email = OutboundNotification.objects.filter(
+        user=tenant,
+        template_key="tenancy.proposed",
+        context__tenancy_id=new_tenancy.id,
+    ).first()
+    
+    replacement_created_at = new_tenancy.created_at
+
+    repeated_viewing_email_exists = OutboundNotification.objects.filter(
+        user__in=[tenant, landlord],
+        template_key__in=[
+            "booking.new",
+            "booking.confirmation",
+            "booking.reminder",
+            "booking.completed",
+        ],
+        created_at__gte=replacement_created_at,
+    ).exists()
+
+    assert repeated_viewing_email_exists is False
+
+    assert replacement_email is not None
+    assert replacement_email.context["room_title"] == room.title
+    assert replacement_email.context["tenancy_id"] == new_tenancy.id
+
+    room.refresh_from_db()
+
+    assert new_tenancy.proposed_by_id == landlord.id
+    assert new_tenancy.status == Tenancy.STATUS_PROPOSED
+    assert new_tenancy.landlord_confirmed_at is not None
+    assert new_tenancy.tenant_confirmed_at is None
+    assert room.is_available is False  

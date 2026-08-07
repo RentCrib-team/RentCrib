@@ -492,6 +492,16 @@ class Room(SoftDeleteModel):
         default=list,
         help_text="List of specific viewing dates when mode is 'custom'.",
     )
+    
+    cover_photo = models.ForeignKey(
+            "RoomImage",
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name="cover_for_rooms",
+            help_text="User-selected cover photo for this room.",
+        )
+    
 
     @property
     def is_live(self):
@@ -1227,6 +1237,12 @@ class TenancyExtension(models.Model):
         related_name="tenancy_extensions_proposed",
     )
 
+
+    proposed_start_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+    
     proposed_duration_months = models.PositiveIntegerField()
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PROPOSED)

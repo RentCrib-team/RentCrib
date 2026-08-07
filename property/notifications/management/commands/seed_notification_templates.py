@@ -1065,7 +1065,7 @@ You can respond to this viewing request from your RentCrib account.
         font-weight:700;
         color:#172033;
     ">
-    Ready to update the tenancy?
+    If you later rent this room
     </p>
 
     <p style="
@@ -1075,7 +1075,7 @@ You can respond to this viewing request from your RentCrib account.
         line-height:1.65;
         color:#566176;
     ">
-    If you rented this room, open the completed booking and submit the tenancy information for the landlord to review.
+    If you later agree to rent this room, you can return to this completed booking and submit the tenancy information for the landlord to review. No action is required now.
     </p>
 
     </td>
@@ -2057,7 +2057,7 @@ You can respond to this viewing request from your RentCrib account.
     },
             {
         "key": "tenancy.rejected_unverified",
-        "subject": "Your tenancy information for {{ room_title }} was not confirmed",
+        "subject": "Your tenancy information for {{ room_title }} could not be verified",
         "body": """
 {% include "emails/tenancy/rejected_unverified.html" %}
 """,

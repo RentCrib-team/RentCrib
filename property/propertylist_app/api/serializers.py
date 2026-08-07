@@ -366,23 +366,71 @@ class StillLivingConfirmResponseSerializer(serializers.Serializer):
 
 
 class TenancyExtensionCreateSerializer(serializers.Serializer):
-    proposed_duration_months = serializers.IntegerField(min_value=1, max_value=24)
+    proposed_start_date = serializers.DateField()
+
+    proposed_duration_months = serializers.IntegerField(
+        min_value=1,
+        max_value=24,
+    )
+
+    def validate_proposed_start_date(self, value):
+        if value < timezone.localdate():
+            raise serializers.ValidationError(
+                "The renewal start date cannot be in the past."
+            )
+
+        return value
 
 
 class TenancyExtensionRespondSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(choices=["accept", "reject"])
+    action = serializers.ChoiceField(
+        choices=[
+            "accept",
+            "reject",
+        ]
+    )
 
 
 class TenancyExtensionResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     tenancy_id = serializers.IntegerField()
     proposed_by_user_id = serializers.IntegerField()
+    proposed_start_date = serializers.DateField()
     proposed_duration_months = serializers.IntegerField()
     status = serializers.CharField()
-    responded_at = serializers.DateTimeField(allow_null=True)
+    responded_at = serializers.DateTimeField(
+        allow_null=True,
+    )
     created_at = serializers.DateTimeField()
 
+class TenancyExtensionHistoryItemSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    tenancy_id = serializers.IntegerField()
 
+    proposed_by_user_id = serializers.IntegerField()
+    proposed_by_name = serializers.CharField(
+        allow_blank=True,
+    )
+    proposed_by_role = serializers.ChoiceField(
+        choices=[
+            "landlord",
+            "tenant",
+        ]
+    )
+
+    proposed_start_date = serializers.DateField(
+        allow_null=True,
+    )
+    proposed_duration_months = serializers.IntegerField()
+
+    status = serializers.CharField()
+
+    responded_at = serializers.DateTimeField(
+        allow_null=True,
+    )
+    created_at = serializers.DateTimeField()
 
 
 class TenancyProposalSerializer(serializers.Serializer):
@@ -483,21 +531,39 @@ class TenancyProposalSerializer(serializers.Serializer):
         landlord = validated_data["landlord"]
         tenant = validated_data["tenant"]
 
-        existing_tenancy = (
+        existing_tenancies = list(
             Tenancy.objects
             .select_for_update()
             .filter(
                 room=room,
                 tenant=tenant,
             )
-            .first()
+            .order_by("-created_at")
         )
 
-        if existing_tenancy is not None:
-            if user.id == landlord.id:
-                other_party = "tenant"
-            else:
-                other_party = "landlord"
+        # Only one live tenancy submission may exist for the same
+        # room, landlord and tenant at any time.
+        live_statuses = {
+            Tenancy.STATUS_PROPOSED,
+            Tenancy.STATUS_CONFIRMED,
+            Tenancy.STATUS_ACTIVE,
+        }
+
+        live_tenancy = next(
+            (
+                existing
+                for existing in existing_tenancies
+                if existing.status in live_statuses
+            ),
+            None,
+        )
+
+        if live_tenancy is not None:
+            other_party = (
+                "tenant"
+                if user.id == landlord.id
+                else "landlord"
+            )
 
             raise serializers.ValidationError(
                 {
@@ -506,6 +572,40 @@ class TenancyProposalSerializer(serializers.Serializer):
                             f"Your {other_party} has already created the tenancy "
                             "information for this room. Please review the existing "
                             "tenancy information instead."
+                        )
+                    ]
+                }
+            )
+
+        # A tenant-created claim that expired or was rejected must not
+        # be repeatedly resubmitted by the tenant.
+        #
+        # The landlord may, however, create fresh tenancy information
+        # for the same tenant if the tenancy is genuine.
+        expired_or_rejected_tenant_claim = next(
+            (
+                existing
+                for existing in existing_tenancies
+                if (
+                    existing.status == Tenancy.STATUS_CANCELLED
+                    and existing.proposed_by_id == tenant.id
+                )
+            ),
+            None,
+        )
+
+        if (
+            user.id == tenant.id
+            and expired_or_rejected_tenant_claim is not None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        (
+                            "Your previous tenancy submission for this room "
+                            "has expired or was not confirmed. Please contact "
+                            "the landlord and ask them to submit the tenancy "
+                            "information."
                         )
                     ]
                 }
@@ -632,6 +732,8 @@ class TenancyRespondSerializer(serializers.Serializer):
                         )
                     }
                 )
+        return attrs
+    
     @transaction.atomic
     def save(self, **kwargs):
         request = self.context["request"]

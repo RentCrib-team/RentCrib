@@ -33,6 +33,46 @@
                             <strong style="color:#172033;">{{ room_title }}</strong>.
                         </p>
 
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="
+                                margin-top:22px;
+                                background:#f7f9fc;
+                                border:1px solid #dfe6ef;
+                                border-radius:4px;
+                            "
+                        >
+                            <tr>
+                                <td style="padding:18px 20px;">
+                                    <p style="margin:0 0 10px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#566176;">
+                                        <strong style="color:#172033;">
+                                            Proposed by:
+                                        </strong>
+                                        {{ proposer_name|default:"The other party" }}
+                                    </p>
+
+                                    <p style="margin:0 0 10px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#566176;">
+                                        <strong style="color:#172033;">
+                                            New tenancy start date:
+                                        </strong>
+                                        {{ proposed_start_date }}
+                                    </p>
+
+                                    <p style="margin:0;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#566176;">
+                                        <strong style="color:#172033;">
+                                            New tenancy duration:
+                                        </strong>
+                                        {{ proposed_duration_months }}
+                                        month{{ proposed_duration_months|pluralize }}
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+
                         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
                                style="margin-top:22px;background:#f4f8ff;border:1px solid #dce8fb;border-left:4px solid #357af0;border-radius:4px;">
                             <tr>

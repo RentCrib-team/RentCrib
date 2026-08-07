@@ -251,10 +251,23 @@ def test_tenancy_extension_proposed_queues_email():
         is_active=True,
     )
 
-    landlord = User.objects.create_user(username="land4", email="l4@example.com", password="x")
-    tenant = User.objects.create_user(username="ten4", email="t4@example.com", password="x")
+    landlord = User.objects.create_user(
+        username="land4",
+        first_name="Landlord",
+        email="l4@example.com",
+        password="x",
+    )
+    tenant = User.objects.create_user(
+        username="ten4",
+        first_name="Tenant",
+        email="t4@example.com",
+        password="x",
+    )
 
-    cat = RoomCategorie.objects.create(name="Any4", active=True)
+    cat = RoomCategorie.objects.create(
+        name="Any4",
+        active=True,
+    )
     room = Room.objects.create(
         property_owner=landlord,
         title="Room 4",
@@ -274,15 +287,245 @@ def test_tenancy_extension_proposed_queues_email():
         status=Tenancy.STATUS_CONFIRMED,
     )
 
-    # proposer is landlord -> other party is tenant
-    TenancyExtension.objects.create(
+    renewal_start_date = (
+        date.today() + timedelta(days=30)
+    )
+
+    extension = TenancyExtension.objects.create(
         tenancy=tenancy,
         proposed_by=landlord,
-        proposed_duration_months=3,
+        proposed_start_date=renewal_start_date,
+        proposed_duration_months=7,
         status=TenancyExtension.STATUS_PROPOSED,
     )
 
-    assert OutboundNotification.objects.filter(
+    email = OutboundNotification.objects.get(
         user=tenant,
         template_key="tenancy.extension.proposed",
+    )
+
+    assert email.context["tenancy_id"] == tenancy.id
+    assert email.context["extension_id"] == extension.id
+    assert email.context["room_title"] == room.title
+    assert (
+        email.context["proposed_start_date"]
+        == renewal_start_date.isoformat()
+    )
+    assert (
+        email.context["proposed_duration_months"]
+        == 7
+    )
+    assert email.context["proposer_name"] == "Landlord"
+    assert email.context["deep_link"] == (
+        f"/app/tenancies/{tenancy.id}"
+    )
+
+
+@pytest.mark.django_db
+def test_tenancy_extension_accepted_queues_email_for_both_parties():
+    NotificationTemplate.objects.create(
+        key="tenancy.extension.proposed",
+        channel="email",
+        subject="x",
+        body="Open: {{ cta_url }}",
+        is_active=True,
+    )
+    NotificationTemplate.objects.create(
+        key="tenancy.extension.accepted",
+        channel="email",
+        subject="x",
+        body=(
+            "{{ proposed_start_date }} "
+            "{{ proposed_duration_months }}"
+        ),
+        is_active=True,
+    )
+
+    landlord = User.objects.create_user(
+        username="land_extension_accepted",
+        first_name="Landlord",
+        email="land-accepted@example.com",
+        password="x",
+    )
+    tenant = User.objects.create_user(
+        username="tenant_extension_accepted",
+        first_name="Tenant",
+        email="tenant-accepted@example.com",
+        password="x",
+    )
+
+    cat = RoomCategorie.objects.create(
+        name="Extension accepted category",
+        active=True,
+    )
+    room = Room.objects.create(
+        property_owner=landlord,
+        title="Accepted renewal room",
+        description="desc",
+        price_per_month=800,
+        location="SW1A 1AD",
+        category=cat,
+    )
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=date.today(),
+        duration_months=6,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    renewal_start_date = (
+        date.today() + timedelta(days=30)
+    )
+
+    extension = TenancyExtension.objects.create(
+        tenancy=tenancy,
+        proposed_by=landlord,
+        proposed_start_date=renewal_start_date,
+        proposed_duration_months=7,
+        status=TenancyExtension.STATUS_PROPOSED,
+    )
+
+    extension.status = (
+        TenancyExtension.STATUS_ACCEPTED
+    )
+    extension.responded_at = timezone.now()
+    extension.save(
+        update_fields=[
+            "status",
+            "responded_at",
+        ]
+    )
+
+    landlord_email = OutboundNotification.objects.get(
+        user=landlord,
+        template_key="tenancy.extension.accepted",
+    )
+    tenant_email = OutboundNotification.objects.get(
+        user=tenant,
+        template_key="tenancy.extension.accepted",
+    )
+
+    for email in (
+        landlord_email,
+        tenant_email,
+    ):
+        assert (
+            email.context["extension_id"]
+            == extension.id
+        )
+        assert (
+            email.context["proposed_start_date"]
+            == renewal_start_date.isoformat()
+        )
+        assert (
+            email.context["proposed_duration_months"]
+            == 7
+        )
+
+    assert OutboundNotification.objects.filter(
+        template_key="tenancy.extension.accepted",
+    ).count() == 2
+
+
+@pytest.mark.django_db
+def test_tenancy_extension_rejected_queues_email_for_proposer():
+    NotificationTemplate.objects.create(
+        key="tenancy.extension.proposed",
+        channel="email",
+        subject="x",
+        body="Open: {{ cta_url }}",
+        is_active=True,
+    )
+    NotificationTemplate.objects.create(
+        key="tenancy.extension.rejected",
+        channel="email",
+        subject="x",
+        body=(
+            "{{ proposed_start_date }} "
+            "{{ proposed_duration_months }}"
+        ),
+        is_active=True,
+    )
+
+    landlord = User.objects.create_user(
+        username="land_extension_rejected",
+        first_name="Landlord",
+        email="land-rejected@example.com",
+        password="x",
+    )
+    tenant = User.objects.create_user(
+        username="tenant_extension_rejected",
+        first_name="Tenant",
+        email="tenant-rejected@example.com",
+        password="x",
+    )
+
+    cat = RoomCategorie.objects.create(
+        name="Extension rejected category",
+        active=True,
+    )
+    room = Room.objects.create(
+        property_owner=landlord,
+        title="Rejected renewal room",
+        description="desc",
+        price_per_month=800,
+        location="SW1A 1AD",
+        category=cat,
+    )
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=date.today(),
+        duration_months=6,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    renewal_start_date = (
+        date.today() + timedelta(days=30)
+    )
+
+    extension = TenancyExtension.objects.create(
+        tenancy=tenancy,
+        proposed_by=landlord,
+        proposed_start_date=renewal_start_date,
+        proposed_duration_months=7,
+        status=TenancyExtension.STATUS_PROPOSED,
+    )
+
+    extension.status = (
+        TenancyExtension.STATUS_REJECTED
+    )
+    extension.responded_at = timezone.now()
+    extension.save(
+        update_fields=[
+            "status",
+            "responded_at",
+        ]
+    )
+
+    email = OutboundNotification.objects.get(
+        user=landlord,
+        template_key="tenancy.extension.rejected",
+    )
+
+    assert email.context["extension_id"] == extension.id
+    assert (
+        email.context["proposed_start_date"]
+        == renewal_start_date.isoformat()
+    )
+    assert (
+        email.context["proposed_duration_months"]
+        == 7
+    )
+
+    assert not OutboundNotification.objects.filter(
+        user=tenant,
+        template_key="tenancy.extension.rejected",
     ).exists()

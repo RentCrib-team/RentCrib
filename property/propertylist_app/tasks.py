@@ -371,11 +371,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         _create_notification(
             user=tenancy.tenant,
             notification_type="tenancy_rejected_unverified",
-            title="Tenancy information not confirmed",
+            title="Tenancy information could not be verified",
             body=(
-                f"{landlord_name} confirmed that {room_title} was not "
-                "rented to you. Your submitted tenancy information has "
-                "therefore been cancelled."
+                f"{landlord_name} could not verify the tenancy information "
+                f"you submitted for {room_title}. Your submission has been "
+                "cancelled."
             ),
         )
 
@@ -697,34 +697,68 @@ def task_tenancy_prompts_sweep() -> int:
     
     
 
-    def _maybe_queue_reminder(user, template_key: str, *, deep_link: str, room_title: str):
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        if not getattr(profile, "notify_reminders", True):
+    def _maybe_queue_reminder(
+        user,
+        template_key: str,
+        *,
+        deep_link: str,
+        room_title: str,
+        tenancy_id=None,
+    ):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user,
+        )
+
+        if not getattr(
+            profile,
+            "notify_reminders",
+            True,
+        ):
             return
+
+        context = {
+            "user": {
+                "first_name": user.first_name,
+            },
+            "room_title": room_title,
+            "deep_link": deep_link,
+            "cta_url": build_absolute_url(
+                deep_link
+            ),
+        }
+
+        if tenancy_id is not None:
+            context["tenancy_id"] = tenancy_id
+
         _queue_email(
             user=user,
             template_key=template_key,
-            context={
-                "user": {"first_name": user.first_name},
-                "room_title": room_title,
-                "deep_link": deep_link,
-                "cta_url": build_absolute_url(deep_link),
-            },
+            context=context,
         )
     
     
     count = 0
     
     
-    # -------------------------------------------------
-    # 0) Expire unverified tenant-created tenancy claims
+        # -------------------------------------------------
+    # Tenant-created tenancy claim response window
     # -------------------------------------------------
     # TEMPORARY QA RULE:
-    # A tenancy claim submitted first by a tenant expires after 10 minutes
-    # if the landlord has not verified it.
+    # Give the landlord 10 minutes to Agree, Edit or select
+    # "Not my tenant" after the tenant submits first.
     #
-    # PRODUCTION: change this back to 7 days.
-    tenant_claim_expiry_cutoff = now - timedelta(minutes=10)
+    # PRODUCTION RULE:
+    # Replace the QA duration below with:
+    #
+    #     tenant_claim_response_window = timedelta(days=30)
+    #
+    # A 30-day response window is appropriate for residential
+    # tenancies and prevents legitimate claims expiring too quickly.
+    tenant_claim_response_window = timedelta(minutes=10)
+
+    tenant_claim_expiry_cutoff = (
+        now - tenant_claim_response_window
+    )
 
     expired_tenant_claims = (
         Tenancy.objects
@@ -863,6 +897,7 @@ def task_tenancy_prompts_sweep() -> int:
                 template_key,
                 deep_link=deep_link,
                 room_title=tenancy.room.title,
+                tenancy_id=tenancy.id,
             )
 
             return 1
