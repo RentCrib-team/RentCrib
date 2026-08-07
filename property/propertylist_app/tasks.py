@@ -654,7 +654,24 @@ def task_tenancy_prompts_sweep() -> int:
         if not tenancy_message or not tenancy_message.thread_id:
             return None, None
 
-        event_key = f"tenancy:{tenancy.id}:{event_type}"
+        cycle_start = (
+            tenancy.move_in_date.isoformat()
+            if tenancy.move_in_date
+            else "no-start"
+        )
+
+        cycle_duration = (
+            tenancy.duration_months
+            if tenancy.duration_months is not None
+            else "no-duration"
+        )
+
+        event_key = (
+            f"tenancy:{tenancy.id}:"
+            f"{cycle_start}:"
+            f"{cycle_duration}:"
+            f"{event_type}"
+        )
 
         existing_message = (
             Message.objects
@@ -871,11 +888,45 @@ def task_tenancy_prompts_sweep() -> int:
         
 
         def _notify_user(user, template_key):
+            latest_accepted_extension = (
+                tenancy.extensions
+                .filter(
+                    status="accepted",
+                    responded_at__isnull=False,
+                )
+                .order_by(
+                    "-responded_at",
+                    "-id",
+                )
+                .first()
+            )
+
+            if latest_accepted_extension:
+                cycle_started_at = (
+                    latest_accepted_extension.responded_at
+                )
+            else:
+                confirmation_times = [
+                    value
+                    for value in [
+                        tenancy.landlord_confirmed_at,
+                        tenancy.tenant_confirmed_at,
+                    ]
+                    if value is not None
+                ]
+
+                cycle_started_at = (
+                    max(confirmation_times)
+                    if confirmation_times
+                    else tenancy.created_at
+                )
+
             reminder_exists = Notification.objects.filter(
                 user=user,
                 type="tenancy_still_living_check",
                 target_type="still_living_check",
                 target_id=tenancy.id,
+                created_at__gte=cycle_started_at,
             ).exists()
 
             if reminder_exists:
