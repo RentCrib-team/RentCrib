@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 from django.utils import timezone
-
+from rest_framework.test import APIClient
 from propertylist_app.tasks import task_tenancy_prompts_sweep
 
 pytestmark = pytest.mark.django_db
@@ -356,4 +356,130 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
 
     assert abs(after_value - float(expected_after)) < 0.0001
     assert room.number_rating == 1
+    
+    
+def test_other_review_hidden_until_review_deadline(
+    user_factory,
+    room_factory,
+):
+    """
+    Double-blind review rule:
+
+    - During the review window, each party can see their own review.
+    - They cannot see the other party's review.
+    - The other review becomes visible only when the review deadline passes.
+    """
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    Review = _get_model(
+        "propertylist_app",
+        "Review",
+    )
+
+    landlord = user_factory(
+        username="privacy_landlord",
+    )
+    tenant = user_factory(
+        username="privacy_tenant",
+    )
+    room = room_factory(
+        property_owner=landlord,
+    )
+
+    _make_booking(tenant, room)
+
+    tenancy = _make_tenancy(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        status=Tenancy.STATUS_ENDED,
+    )
+
+    # QA-style private review window:
+    # already open, but deadline is still 5 minutes away.
+    tenancy.review_open_at = (
+        timezone.now() - timedelta(seconds=1)
+    )
+    tenancy.review_deadline_at = (
+        timezone.now() + timedelta(minutes=5)
+    )
+    tenancy.save(
+        update_fields=[
+            "review_open_at",
+            "review_deadline_at",
+        ]
+    )
+
+    tenant_review = Review.objects.create(
+        tenancy=tenancy,
+        reviewer=tenant,
+        reviewee=landlord,
+        role=Review.ROLE_TENANT_TO_LANDLORD,
+        overall_rating=5,
+        notes="Tenant review",
+    )
+
+    landlord_review = Review.objects.create(
+        tenancy=tenancy,
+        reviewer=landlord,
+        reviewee=tenant,
+        role=Review.ROLE_LANDLORD_TO_TENANT,
+        overall_rating=4,
+        notes="Landlord review",
+    )
+
+    # Critical rule: reveal time is the END of the
+    # private review window, not when it opens.
+    assert tenant_review.reveal_at == tenancy.review_deadline_at
+    assert landlord_review.reveal_at == tenancy.review_deadline_at
+
+    client = APIClient()
+    client.force_authenticate(user=tenant)
+
+    url = (
+        f"/api/v1/tenancies/"
+        f"{tenancy.id}/reviews/"
+    )
+
+    # BEFORE DEADLINE:
+    # tenant sees their own review but NOT landlord's.
+    response = client.get(url)
+
+    assert response.status_code == 200
+
+    assert response.data["my_review"] is not None
+    assert (
+        response.data["my_review"]["id"]
+        == tenant_review.id
+    )
+
+    assert response.data["other_review"] is None
+
+    # Simulate the private review window ending.
+    past = timezone.now() - timedelta(seconds=1)
+
+    Review.objects.filter(
+        tenancy=tenancy,
+    ).update(
+        reveal_at=past,
+    )
+
+    tenancy.review_deadline_at = past
+    tenancy.save(
+        update_fields=["review_deadline_at"]
+    )
+
+    # AFTER DEADLINE:
+    # landlord's review can now be revealed.
+    response = client.get(url)
+
+    assert response.status_code == 200
+    assert response.data["other_review"] is not None
+    assert (
+        response.data["other_review"]["id"]
+        == landlord_review.id
+    )
 

@@ -1331,9 +1331,14 @@ class Review(models.Model):
     def save(self, *args, **kwargs):
         end_dt = None
 
-        # Prefer tenancy end-date flow (new)
-        if self.reveal_at is None and self.tenancy and self.tenancy.review_open_at:
-            self.reveal_at = self.tenancy.review_open_at
+        if (
+            self.reveal_at is None
+            and self.tenancy
+            and self.tenancy.review_deadline_at
+        ):
+            self.reveal_at = (
+                self.tenancy.review_deadline_at
+            )
 
         #  IMPORTANT FIX:
         # Only auto-calc rating from flags if flags were actually supplied.
