@@ -98,7 +98,7 @@ def test_room_custom_dates_generate_public_booking_slots():
         end_time="10:00",
     )
 
-    assert AvailabilitySlot.objects.filter(room=room).count() == 3
+    assert AvailabilitySlot.objects.filter(room=room).count() == 2
 
     client = APIClient()
     url = reverse("v1:room-slots-public", args=[room.id])
@@ -125,19 +125,17 @@ def test_room_custom_dates_generate_public_booking_slots():
     )
 
     assert slots_response.status_code == 200
-    assert len(slots_response.data.get("results", [])) == 3
+    assert len(slots_response.data.get("results", [])) == 2
 
 
 @pytest.mark.django_db
-def test_custom_availability_rounds_up_to_quarter_hour():
+def test_custom_availability_rounds_to_quarter_hour_boundaries():
     """
-    09:02-11:08 must become 09:15-11:15.
+    09:02-11:08 becomes a usable window of 09:15-11:00.
 
-    The resulting 30-minute slots are:
-    09:15-09:45
-    09:45-10:15
-    10:15-10:45
-    10:45-11:15
+    The start rounds up to 09:15.
+    The end rounds down to 11:00.
+    Only complete 30-minute slots that finish by 11:00 are created.
     """
     room = create_room(username="rounding_landlord")
 
@@ -157,16 +155,17 @@ def test_custom_availability_rounds_up_to_quarter_hour():
         ("09:15", "09:45"),
         ("09:45", "10:15"),
         ("10:15", "10:45"),
-        ("10:45", "11:15"),
     ]
 
-
 @pytest.mark.django_db
-def test_custom_availability_generates_seven_consecutive_slots():
+def test_custom_availability_does_not_cross_end_boundary():
     """
-    14:13-17:36 must become 14:15-17:45 and produce seven slots.
+    14:13-17:36 becomes a usable window of 14:15-17:30.
+
+    A slot is created only when its full 30 minutes finishes
+    on or before 17:30.
     """
-    room = create_room(username="seven_slots_landlord")
+    room = create_room(username="end_boundary_landlord")
 
     viewing_date = (
         timezone.localdate() + timedelta(days=5)
@@ -187,9 +186,7 @@ def test_custom_availability_generates_seven_consecutive_slots():
         ("15:45", "16:15"),
         ("16:15", "16:45"),
         ("16:45", "17:15"),
-        ("17:15", "17:45"),
     ]
-
 
 @pytest.mark.django_db
 def test_everyday_mode_generates_slots_for_next_30_days():
@@ -204,7 +201,7 @@ def test_everyday_mode_generates_slots_for_next_30_days():
 
     slots = AvailabilitySlot.objects.filter(room=room)
 
-    # Each complete future day has three 30-minute slots.
+    # Each complete future day has two 30-minute slots.
     tomorrow = timezone.localdate() + timedelta(days=1)
     final_day = timezone.localdate() + timedelta(days=29)
 
@@ -226,7 +223,7 @@ def test_everyday_mode_generates_slots_for_next_30_days():
             slots.filter(
                 start__date=expected_date,
             ).count()
-             == 3
+             == 2
         )
 
 
@@ -342,18 +339,19 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         mode="custom",
         custom_dates=[viewing_date],
         start_time="09:00",
-        end_time="10:00",
+        end_time="11:00",
     )
 
     original_slots = list(
         AvailabilitySlot.objects.filter(room=room).order_by("start")
     )
 
-    assert len(original_slots) == 3
+    assert len(original_slots) == 4
 
     booked_slot = original_slots[0]
     obsolete_unbooked_slot = original_slots[1]
-    retained_matching_slot = original_slots[2]
+    retained_matching_slot_1 = original_slots[2]
+    retained_matching_slot_2 = original_slots[3]
 
     Booking.objects.create(
         user=tenant,
@@ -371,26 +369,22 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         end_time="11:00",
     )
 
-    # Existing booked slot must remain.
-    assert AvailabilitySlot.objects.filter(
-        pk=booked_slot.pk,
-    ).exists()
+    assert AvailabilitySlot.objects.filter(pk=booked_slot.pk).exists()
 
-    # Existing unbooked slot which no longer matches must be removed.
     assert not AvailabilitySlot.objects.filter(
         pk=obsolete_unbooked_slot.pk,
     ).exists()
 
-    # Existing unbooked slot which still matches must be retained.
     assert AvailabilitySlot.objects.filter(
-        pk=retained_matching_slot.pk,
+        pk=retained_matching_slot_1.pk,
     ).exists()
 
-    remaining_times = local_slot_times(room)
+    assert AvailabilitySlot.objects.filter(
+        pk=retained_matching_slot_2.pk,
+    ).exists()
 
-    assert remaining_times == [
+    assert local_slot_times(room) == [
         ("09:00", "09:30"),
         ("10:00", "10:30"),
         ("10:30", "11:00"),
-        ("11:00", "11:30"),
     ]

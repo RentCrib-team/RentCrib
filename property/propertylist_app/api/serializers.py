@@ -1620,15 +1620,17 @@ class RoomSerializer(serializers.ModelSerializer):
 
         Rules:
         - The start time is rounded up to the nearest quarter hour.
-        - The end time is rounded down to the nearest quarter hour and is
-          treated as the latest selectable viewing start time.
+        - The end time is rounded down to the nearest quarter hour.
+        - Times already on a 00, 15, 30 or 45 minute boundary are unchanged.
         - Each viewing lasts 30 minutes.
+        - A slot is created only when its full 30 minutes finishes on or
+        before the rounded end time.
         - Recurring modes generate slots for the next 30 calendar days.
         - Custom mode uses only the landlord-selected dates.
         - Existing future slots with active bookings are preserved.
 
         Example:
-        17:13-21:18 creates:
+        17:13-21:18 becomes a usable window of 17:15-21:15 and creates:
 
         17:15-17:45
         17:45-18:15
@@ -1638,8 +1640,9 @@ class RoomSerializer(serializers.ModelSerializer):
         19:45-20:15
         20:15-20:45
         20:45-21:15
-        21:15-21:45
-        """
+
+        The next slot, 21:15-21:45, is not created because it would
+        finish after the rounded end time of 21:15."""
 
         def round_up_to_quarter(value):
             """
@@ -1728,18 +1731,13 @@ class RoomSerializer(serializers.ModelSerializer):
                 desired_dates.append(selected_date)
 
         desired_slots = []
-
+        
         start_minutes = round_up_to_quarter(start_time)
-        latest_start_minutes = round_down_to_quarter(end_time)
+        end_minutes = round_down_to_quarter(end_time)
 
-        # Do not generate slots if the rounded latest start is before
-        # the rounded first start.
-        if latest_start_minutes < start_minutes:
-            return
-
-        # Do not generate slots if the rounded latest start is before
-        # the rounded first start.
-        if latest_start_minutes < start_minutes:
+        # The rounded end is an availability boundary, not a valid slot
+        # start by itself. A complete 30-minute viewing must fit inside it.
+        if end_minutes <= start_minutes:
             return
 
         for selected_date in desired_dates:
@@ -1749,8 +1747,8 @@ class RoomSerializer(serializers.ModelSerializer):
                 minutes=start_minutes
             )
 
-            latest_start = day_start + timedelta(
-                minutes=latest_start_minutes
+            rounded_end = day_start + timedelta(
+                minutes=end_minutes
             )
 
             if timezone.is_naive(rounded_start):
@@ -1759,25 +1757,30 @@ class RoomSerializer(serializers.ModelSerializer):
                     timezone.get_current_timezone(),
                 )
 
-            if timezone.is_naive(latest_start):
-                latest_start = timezone.make_aware(
-                    latest_start,
+            if timezone.is_naive(rounded_end):
+                rounded_end = timezone.make_aware(
+                    rounded_end,
                     timezone.get_current_timezone(),
                 )
 
             current = rounded_start
 
-            while current <= latest_start:
+            while True:
                 slot_end = current + timedelta(
                     minutes=slot_minutes
                 )
+
+                # A complete viewing must finish on or before the
+                # landlord's rounded availability end boundary.
+                if slot_end > rounded_end:
+                    break
 
                 # Do not create a slot which has already ended.
                 if slot_end > timezone.now():
                     desired_slots.append((current, slot_end))
 
                 current = slot_end
-
+                
         desired_set = set(desired_slots)
 
         # Remove only future unbooked slots that no longer match the
