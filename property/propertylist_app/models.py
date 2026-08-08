@@ -492,6 +492,16 @@ class Room(SoftDeleteModel):
         default=list,
         help_text="List of specific viewing dates when mode is 'custom'.",
     )
+    
+    cover_photo = models.ForeignKey(
+            "RoomImage",
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name="cover_for_rooms",
+            help_text="User-selected cover photo for this room.",
+        )
+    
 
     @property
     def is_live(self):
@@ -1227,6 +1237,12 @@ class TenancyExtension(models.Model):
         related_name="tenancy_extensions_proposed",
     )
 
+
+    proposed_start_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+    
     proposed_duration_months = models.PositiveIntegerField()
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PROPOSED)
@@ -1315,9 +1331,14 @@ class Review(models.Model):
     def save(self, *args, **kwargs):
         end_dt = None
 
-        # Prefer tenancy end-date flow (new)
-        if self.reveal_at is None and self.tenancy and self.tenancy.review_open_at:
-            self.reveal_at = self.tenancy.review_open_at
+        if (
+            self.reveal_at is None
+            and self.tenancy
+            and self.tenancy.review_deadline_at
+        ):
+            self.reveal_at = (
+                self.tenancy.review_deadline_at
+            )
 
         #  IMPORTANT FIX:
         # Only auto-calc rating from flags if flags were actually supplied.

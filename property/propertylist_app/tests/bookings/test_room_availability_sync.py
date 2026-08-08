@@ -129,12 +129,13 @@ def test_room_custom_dates_generate_public_booking_slots():
 
 
 @pytest.mark.django_db
-def test_custom_availability_rounds_start_up_and_end_down():
+def test_custom_availability_rounds_to_quarter_hour_boundaries():
     """
-    09:02-11:08 becomes a safe window of 09:15-11:00.
+    09:02-11:08 becomes a usable window of 09:15-11:00.
 
-    Only complete 30-minute slots finishing on or before 11:00
-    may be generated.
+    The start rounds up to 09:15.
+    The end rounds down to 11:00.
+    Only complete 30-minute slots that finish by 11:00 are created.
     """
     room = create_room(username="rounding_landlord")
 
@@ -156,15 +157,15 @@ def test_custom_availability_rounds_start_up_and_end_down():
         ("10:15", "10:45"),
     ]
 
-
 @pytest.mark.django_db
-def test_custom_availability_generates_only_complete_slots():
+def test_custom_availability_does_not_cross_end_boundary():
     """
-    14:13-17:36 becomes a safe window of 14:15-17:30.
+    14:13-17:36 becomes a usable window of 14:15-17:30.
 
-    The final possible complete slot ends at 17:15.
+    A slot is created only when its full 30 minutes finishes
+    on or before 17:30.
     """
-    room = create_room(username="complete_slots_landlord")
+    room = create_room(username="end_boundary_landlord")
 
     viewing_date = (
         timezone.localdate() + timedelta(days=5)
@@ -338,17 +339,19 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         mode="custom",
         custom_dates=[viewing_date],
         start_time="09:00",
-        end_time="10:00",
+        end_time="11:00",
     )
 
     original_slots = list(
         AvailabilitySlot.objects.filter(room=room).order_by("start")
     )
 
-    assert len(original_slots) == 2
+    assert len(original_slots) == 4
 
     booked_slot = original_slots[0]
     obsolete_unbooked_slot = original_slots[1]
+    retained_matching_slot_1 = original_slots[2]
+    retained_matching_slot_2 = original_slots[3]
 
     Booking.objects.create(
         user=tenant,
@@ -366,15 +369,18 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         end_time="11:00",
     )
 
-    # The existing booked slot must remain even though it is no longer
-    # part of the landlord's updated availability.
-    assert AvailabilitySlot.objects.filter(
-        pk=booked_slot.pk,
-    ).exists()
+    assert AvailabilitySlot.objects.filter(pk=booked_slot.pk).exists()
 
-    # The old unbooked slot must be removed.
     assert not AvailabilitySlot.objects.filter(
         pk=obsolete_unbooked_slot.pk,
+    ).exists()
+
+    assert AvailabilitySlot.objects.filter(
+        pk=retained_matching_slot_1.pk,
+    ).exists()
+
+    assert AvailabilitySlot.objects.filter(
+        pk=retained_matching_slot_2.pk,
     ).exists()
 
     assert local_slot_times(room) == [

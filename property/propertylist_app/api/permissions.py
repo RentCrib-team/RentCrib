@@ -1,4 +1,55 @@
-﻿from rest_framework import permissions
+﻿from django.contrib.auth import get_user_model
+from rest_framework import permissions
+from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+class HasValidRefreshToken(permissions.BasePermission):
+    """
+    Authenticate logout using the refresh token being revoked.
+
+    Logout must remain available after the short-lived access token expires.
+    """
+
+    message = "A valid refresh token is required."
+
+    def has_permission(self, request, view):
+        refresh_value = (request.data.get("refresh") or "").strip()
+
+        if not refresh_value:
+            raise ValidationError(
+                {"refresh": "Refresh token is required."}
+            )
+
+        try:
+            refresh_token = RefreshToken(refresh_value)
+        except TokenError:
+            raise ValidationError(
+                {"refresh": "Invalid or expired refresh token."}
+            )
+
+        user_id = refresh_token.get("user_id")
+        User = get_user_model()
+
+        if (
+            not user_id
+            or not User.objects.filter(
+                pk=user_id,
+                is_active=True,
+            ).exists()
+        ):
+            raise ValidationError(
+                {"refresh": "Invalid or expired refresh token."}
+            )
+
+        request.validated_refresh_token = refresh_token
+        return True
+
+
+
+
+
 
 ADMIN_ROLES = {
     "super_admin",

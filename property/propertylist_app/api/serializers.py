@@ -4,10 +4,6 @@ from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 import re
 
-
-from datetime import timedelta
-
-
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
@@ -286,12 +282,10 @@ class ReviewCreateSerializer(serializers.Serializer):
         if user.id not in {tenancy.tenant_id, tenancy.landlord_id}:
             raise serializers.ValidationError("You are not allowed to review this tenancy.")
 
-        if tenancy.status not in {
-            Tenancy.STATUS_CONFIRMED,
-            Tenancy.STATUS_ACTIVE,
-            Tenancy.STATUS_ENDED,
-        }:
-            raise serializers.ValidationError("Tenancy is not confirmed yet.")
+        if tenancy.status != Tenancy.STATUS_ENDED:
+            raise serializers.ValidationError(
+                "A review can only be left after the tenancy has ended."
+            )
 
         if not tenancy.review_open_at:
             raise serializers.ValidationError("Tenancy review schedule is not ready yet.")
@@ -372,23 +366,71 @@ class StillLivingConfirmResponseSerializer(serializers.Serializer):
 
 
 class TenancyExtensionCreateSerializer(serializers.Serializer):
-    proposed_duration_months = serializers.IntegerField(min_value=1, max_value=24)
+    proposed_start_date = serializers.DateField()
+
+    proposed_duration_months = serializers.IntegerField(
+        min_value=1,
+        max_value=24,
+    )
+
+    def validate_proposed_start_date(self, value):
+        if value < timezone.localdate():
+            raise serializers.ValidationError(
+                "The renewal start date cannot be in the past."
+            )
+
+        return value
 
 
 class TenancyExtensionRespondSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(choices=["accept", "reject"])
+    action = serializers.ChoiceField(
+        choices=[
+            "accept",
+            "reject",
+        ]
+    )
 
 
 class TenancyExtensionResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     tenancy_id = serializers.IntegerField()
     proposed_by_user_id = serializers.IntegerField()
+    proposed_start_date = serializers.DateField()
     proposed_duration_months = serializers.IntegerField()
     status = serializers.CharField()
-    responded_at = serializers.DateTimeField(allow_null=True)
+    responded_at = serializers.DateTimeField(
+        allow_null=True,
+    )
     created_at = serializers.DateTimeField()
 
+class TenancyExtensionHistoryItemSerializer(
+    serializers.Serializer
+):
+    id = serializers.IntegerField()
+    tenancy_id = serializers.IntegerField()
 
+    proposed_by_user_id = serializers.IntegerField()
+    proposed_by_name = serializers.CharField(
+        allow_blank=True,
+    )
+    proposed_by_role = serializers.ChoiceField(
+        choices=[
+            "landlord",
+            "tenant",
+        ]
+    )
+
+    proposed_start_date = serializers.DateField(
+        allow_null=True,
+    )
+    proposed_duration_months = serializers.IntegerField()
+
+    status = serializers.CharField()
+
+    responded_at = serializers.DateTimeField(
+        allow_null=True,
+    )
+    created_at = serializers.DateTimeField()
 
 
 class TenancyProposalSerializer(serializers.Serializer):
@@ -422,8 +464,7 @@ class TenancyProposalSerializer(serializers.Serializer):
             canceled_at__isnull=True,
             start__lte=completion_cutoff,
         ).exists()
-    
-    
+
     def validate(self, attrs):
         request = self.context["request"]
         user = request.user
@@ -490,21 +531,39 @@ class TenancyProposalSerializer(serializers.Serializer):
         landlord = validated_data["landlord"]
         tenant = validated_data["tenant"]
 
-        existing_tenancy = (
+        existing_tenancies = list(
             Tenancy.objects
             .select_for_update()
             .filter(
                 room=room,
                 tenant=tenant,
             )
-            .first()
+            .order_by("-created_at")
         )
 
-        if existing_tenancy is not None:
-            if user.id == landlord.id:
-                other_party = "tenant"
-            else:
-                other_party = "landlord"
+        # Only one live tenancy submission may exist for the same
+        # room, landlord and tenant at any time.
+        live_statuses = {
+            Tenancy.STATUS_PROPOSED,
+            Tenancy.STATUS_CONFIRMED,
+            Tenancy.STATUS_ACTIVE,
+        }
+
+        live_tenancy = next(
+            (
+                existing
+                for existing in existing_tenancies
+                if existing.status in live_statuses
+            ),
+            None,
+        )
+
+        if live_tenancy is not None:
+            other_party = (
+                "tenant"
+                if user.id == landlord.id
+                else "landlord"
+            )
 
             raise serializers.ValidationError(
                 {
@@ -513,6 +572,40 @@ class TenancyProposalSerializer(serializers.Serializer):
                             f"Your {other_party} has already created the tenancy "
                             "information for this room. Please review the existing "
                             "tenancy information instead."
+                        )
+                    ]
+                }
+            )
+
+        # A tenant-created claim that expired or was rejected must not
+        # be repeatedly resubmitted by the tenant.
+        #
+        # The landlord may, however, create fresh tenancy information
+        # for the same tenant if the tenancy is genuine.
+        expired_or_rejected_tenant_claim = next(
+            (
+                existing
+                for existing in existing_tenancies
+                if (
+                    existing.status == Tenancy.STATUS_CANCELLED
+                    and existing.proposed_by_id == tenant.id
+                )
+            ),
+            None,
+        )
+
+        if (
+            user.id == tenant.id
+            and expired_or_rejected_tenant_claim is not None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        (
+                            "Your previous tenancy submission for this room "
+                            "has expired or was not confirmed. Please contact "
+                            "the landlord and ask them to submit the tenancy "
+                            "information."
                         )
                     ]
                 }
@@ -534,6 +627,15 @@ class TenancyProposalSerializer(serializers.Serializer):
             tenant_confirmed_at=tenant_confirmed_at,
             status=Tenancy.STATUS_PROPOSED,
         )
+
+        # The landlord owns the listing, so a landlord-created tenancy
+        # immediately removes the room from availability.
+        #
+        # A tenant-created tenancy claim must first be verified by the
+        # landlord, so the room remains in its existing availability state.
+        if user.id == landlord.id and room.is_available:
+            room.is_available = False
+            room.save(update_fields=["is_available", "updated_at"])
 
         return tenancy
 
@@ -567,42 +669,71 @@ class TenancyRespondSerializer(serializers.Serializer):
         action = attrs["action"]
 
         if action == "propose_changes":
+            # Once the one permitted correction has been used,
+            # neither party may edit the tenancy information again.
+            if tenancy.tenant_has_edited:
+                raise serializers.ValidationError(
+                    {
+                        "action": (
+                            "Further changes are not allowed because the one "
+                            "permitted correction has already been used."
+                        )
+                    }
+                )
+
             # Only the party reviewing the current proposal may edit it.
             # The person who submitted the current proposal cannot edit
-            # their own tenancy information through the review endpoint.
+            # their own tenancy information.
             if user.id == tenancy.proposed_by_id:
                 raise serializers.ValidationError(
                     {
                         "action": (
                             "You submitted the current tenancy information. "
-                            "The other party must review it before changes can be proposed."
+                            "The other party must review it before changes "
+                            "can be proposed."
                         )
                     }
                 )
 
-            if tenancy.tenant_has_edited:
+            if (
+                "move_in_date" not in attrs
+                or "duration_months" not in attrs
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "non_field_errors": (
+                            "move_in_date and duration_months are required "
+                            "for propose_changes."
+                        )
+                    }
+                )
+
+            if attrs["move_in_date"] < timezone.localdate():
+                raise serializers.ValidationError(
+                    {
+                        "move_in_date": (
+                            "Move-in date cannot be in the past."
+                        )
+                    }
+                )
+
+        if action == "cancel":
+            # "Not my tenant" is only available to the landlord
+            # when the tenant submitted the initial tenancy claim.
+            if not (
+                user.id == tenancy.landlord_id
+                and tenancy.proposed_by_id == tenancy.tenant_id
+            ):
                 raise serializers.ValidationError(
                     {
                         "action": (
-                            "The one-time edit for this tenancy information "
-                            "has already been used."
+                            "Only the landlord can reject tenancy information "
+                            "submitted first by the tenant."
                         )
                     }
                 )
-
-
-
-            if "move_in_date" not in attrs or "duration_months" not in attrs:
-                raise serializers.ValidationError(
-                    {"non_field_errors": "move_in_date and duration_months are required for propose_changes."}
-                )
-
-            # basic sanity: cannot propose a move-in date in the past
-            if attrs["move_in_date"] < timezone.localdate():
-                raise serializers.ValidationError({"move_in_date": "Move-in date cannot be in the past."})
-
         return attrs
-
+    
     @transaction.atomic
     def save(self, **kwargs):
         request = self.context["request"]
@@ -643,10 +774,28 @@ class TenancyRespondSerializer(serializers.Serializer):
             # ) - timedelta(days=7)
             
             
-            # Temporary QA rule:
-            # Send the tenancy check 10 minutes after both parties confirm.
-            # Production rule will be tenancy end minus 14 days.
+            # TEMPORARY QA RULE:
+            # Timer 2 becomes due 10 minutes after both parties confirm
+            # the tenancy information.
+            #
+            # Production must revert to 7 days before the tenancy end date.
             tenancy.still_living_check_at = now + timedelta(minutes=10)
+            
+            
+            
+            
+        if action == "cancel":
+            # Landlord rejected a tenant-created tenancy claim.
+            # The room availability is deliberately not changed here:
+            # tenant-created claims never take the listing offline.
+            tenancy.status = STATUS_CANCELLED
+            tenancy.review_open_at = None
+            tenancy.review_deadline_at = None
+            tenancy.still_living_check_at = None
+            tenancy.still_living_confirmed_at = None
+            tenancy.save()
+
+            return tenancy    
             
             
 
@@ -655,24 +804,28 @@ class TenancyRespondSerializer(serializers.Serializer):
             tenancy.duration_months = self.validated_data["duration_months"]
             tenancy.proposed_by = user
 
-            # The person submitting the amended terms confirms their own
-            # counter-proposal. The other party must review and agree.
-            if user.id == tenancy.landlord_id:
-                tenancy.landlord_confirmed_at = now
-                tenancy.tenant_confirmed_at = None
-            else:
-                tenancy.tenant_confirmed_at = now
-                tenancy.landlord_confirmed_at = None
-
-            tenancy.status = STATUS_PROPOSED
-
-            # Clear schedule-related fields. They will be recomputed when
-            # the other party agrees to the amended tenancy information.
-            tenancy.review_open_at = None
-            tenancy.review_deadline_at = None
-            tenancy.still_living_check_at = None
-            tenancy.still_living_confirmed_at = None
+            # The one permitted correction becomes the final tenancy
+            # information. No further Agree/Edit cycle is required.
+            tenancy.landlord_confirmed_at = now
+            tenancy.tenant_confirmed_at = now
             tenancy.tenant_has_edited = True
+
+            today = timezone.localdate()
+            tenancy.status = (
+                STATUS_ACTIVE
+                if tenancy.move_in_date <= today
+                else STATUS_CONFIRMED
+            )
+
+            # Temporary QA schedule:
+            # Timer 2 becomes due 10 minutes after this correction.
+            _set_schedule_fields()
+            tenancy.still_living_confirmed_at = None
+
+            room = tenancy.room
+            if room.is_available:
+                room.is_available = False
+                room.save(update_fields=["is_available", "updated_at"])
 
             tenancy.save()
             return tenancy
@@ -845,11 +998,34 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         if can_edit:
             available_actions.append("propose_changes")
 
-        if can_edit:
-            reason = "You can agree to the tenancy information or edit it once."
+        # When the tenant submitted the tenancy information first,
+        # the landlord may reject the claim if the room was not
+        # actually rented to that tenant.
+        landlord_reviewing_tenant_claim = (
+            user.id == obj.landlord_id
+            and obj.proposed_by_id == obj.tenant_id
+        )
+
+        if landlord_reviewing_tenant_claim:
+            available_actions.append("cancel")
+
+        if landlord_reviewing_tenant_claim and can_edit:
+            reason = (
+                "Confirm that you actually rented this room to the tenant. "
+                "You can agree, correct the information once, or reject the claim."
+            )
+        elif landlord_reviewing_tenant_claim:
+            reason = (
+                "Confirm that you actually rented this room to the tenant. "
+                "You can agree or reject the claim."
+            )
+        elif can_edit:
+            reason = (
+                "You can agree to the tenancy information or correct it once."
+            )
         else:
             reason = (
-                "The one-time edit has already been used. "
+                "The one-time correction has already been used. "
                 "You can now agree to the tenancy information."
             )
 
@@ -993,9 +1169,16 @@ class RoomPhotoResponseSerializer(serializers.Serializer):
 class RoomSerializer(serializers.ModelSerializer):
     category = serializers.CharField(source="category.name", read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
-        source="category",
-        queryset=RoomCategorie.objects.all(),
-        write_only=True,
+    source="category",
+    queryset=RoomCategorie.objects.all(),
+    write_only=True,
+    )
+
+    cover_photo = serializers.PrimaryKeyRelatedField(
+    queryset=RoomImage.objects.all(),
+    required=False,
+    allow_null=True,
+    write_only=True,
     )
 
     is_saved = serializers.SerializerMethodField(read_only=True)
@@ -1240,6 +1423,20 @@ class RoomSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"availability_to_time": "End time must be after start time."}
             )
+            
+        cover_photo = attrs.get("cover_photo")
+
+        if cover_photo:
+            room = self.instance
+
+            if room and cover_photo.room_id != room.id:
+                raise serializers.ValidationError(
+                    {
+                        "cover_photo":
+                        "Selected cover photo does not belong to this listing."
+                    }
+                )    
+            
 
         return attrs
 
@@ -1422,33 +1619,41 @@ class RoomSerializer(serializers.ModelSerializer):
         30-minute bookable slots.
 
         Rules:
-        - Round the landlord's start time up to a 15-minute boundary.
-        - Round the landlord's end time down to a 15-minute boundary.
-        - Each viewing lasts exactly 30 minutes.
-        - Generate only complete slots which finish on or before the
-          rounded end time.
+        - The start time is rounded up to the nearest quarter hour.
+        - The end time is rounded down to the nearest quarter hour.
+        - Times already on a 00, 15, 30 or 45 minute boundary are unchanged.
+        - Each viewing lasts 30 minutes.
+        - A slot is created only when its full 30 minutes finishes on or
+        before the rounded end time.
         - Recurring modes generate slots for the next 30 calendar days.
         - Custom mode uses only the landlord-selected dates.
         - Existing future slots with active bookings are preserved.
 
         Example:
-        17:19-21:23 becomes 17:30-21:15.
+        17:13-21:18 becomes a usable window of 17:15-21:15 and creates:
 
-        Generated slots:
-        17:30-18:00
-        18:00-18:30
-        18:30-19:00
-        19:00-19:30
-        19:30-20:00
-        20:00-20:30
-        20:30-21:00
-        """
+        17:15-17:45
+        17:45-18:15
+        18:15-18:45
+        18:45-19:15
+        19:15-19:45
+        19:45-20:15
+        20:15-20:45
+        20:45-21:15
+
+        The next slot, 21:15-21:45, is not created because it would
+        finish after the rounded end time of 21:15."""
 
         def round_up_to_quarter(value):
             """
-            Round upward to the next 00, 15, 30 or 45-minute boundary.
+            Round a time upward to the next 00, 15, 30 or 45 minute boundary.
 
-            A time already on a quarter-hour boundary remains unchanged.
+            Examples:
+            09:00 -> 09:00
+            09:02 -> 09:15
+            09:15 -> 09:15
+            09:16 -> 09:30
+            09:46 -> 10:00
             """
             total_minutes = (value.hour * 60) + value.minute
 
@@ -1459,7 +1664,15 @@ class RoomSerializer(serializers.ModelSerializer):
 
         def round_down_to_quarter(value):
             """
-            Round downward to the previous 00, 15, 30 or 45-minute boundary.
+            Round a time downward to the previous 00, 15, 30 or 45
+            minute boundary.
+
+            Examples:
+            09:00 -> 09:00
+            09:02 -> 09:00
+            09:15 -> 09:15
+            09:18 -> 09:15
+            09:59 -> 09:45
             """
             total_minutes = (value.hour * 60) + value.minute
             return (total_minutes // 15) * 15
@@ -1499,7 +1712,7 @@ class RoomSerializer(serializers.ModelSerializer):
                     desired_dates.append(selected_date)
 
         else:
-            # Generate today plus the following 29 calendar days.
+            # Generate today plus the following 29 days.
             for day_offset in range(30):
                 selected_date = today + timedelta(days=day_offset)
 
@@ -1517,11 +1730,15 @@ class RoomSerializer(serializers.ModelSerializer):
 
                 desired_dates.append(selected_date)
 
+        desired_slots = []
+        
         start_minutes = round_up_to_quarter(start_time)
         end_minutes = round_down_to_quarter(end_time)
 
-        desired_slots = []
-        current_time = timezone.now()
+        # The rounded end is an availability boundary, not a valid slot
+        # start by itself. A complete 30-minute viewing must fit inside it.
+        if end_minutes <= start_minutes:
+            return
 
         for selected_date in desired_dates:
             day_start = datetime.combine(selected_date, time.min)
@@ -1548,29 +1765,29 @@ class RoomSerializer(serializers.ModelSerializer):
 
             current = rounded_start
 
-            while current + timedelta(minutes=slot_minutes) <= rounded_end:
+            while True:
                 slot_end = current + timedelta(
                     minutes=slot_minutes
                 )
 
+                # A complete viewing must finish on or before the
+                # landlord's rounded availability end boundary.
+                if slot_end > rounded_end:
+                    break
+
                 # Do not create a slot which has already ended.
-                if slot_end > current_time:
-                    desired_slots.append(
-                        (
-                            current,
-                            slot_end,
-                        )
-                    )
+                if slot_end > timezone.now():
+                    desired_slots.append((current, slot_end))
 
                 current = slot_end
-
+                
         desired_set = set(desired_slots)
 
-        # Remove only future unbooked slots which no longer match the
-        # landlord's current availability.
+        # Remove only future unbooked slots that no longer match the
+        # landlord's current availability selection.
         future_slots = AvailabilitySlot.objects.filter(
             room=room,
-            end__gt=current_time,
+            end__gt=timezone.now(),
         )
 
         for slot in future_slots:
@@ -1613,6 +1830,7 @@ class RoomSerializer(serializers.ModelSerializer):
             new_slots,
             ignore_conflicts=True,
         )
+        
     def create(self, validated_data):
         room = super().create(validated_data)
 
@@ -1967,6 +2185,31 @@ class RoomSerializer(serializers.ModelSerializer):
         - images remain hidden until at least 3 are approved
         """
         images = self._room_images(obj)
+        
+        
+        selected_cover_id = getattr(obj, "cover_photo_id", None)
+
+        if selected_cover_id:
+            selected_cover = next(
+                (
+                    image
+                    for image in images
+                    if image.id == selected_cover_id
+                ),
+                None,
+            )
+
+            if selected_cover:
+                images = [
+                    selected_cover,
+                    *[
+                        image
+                        for image in images
+                        if image.id != selected_cover_id
+                    ],
+                ]
+        
+        
 
         if not images:
             legacy_url = self._absolute_media_url(
@@ -3420,19 +3663,72 @@ class MessageSerializer(serializers.ModelSerializer):
             ]
         
         
+    
     @extend_schema_field(
-    serializers.ListField(
-        child=serializers.CharField(),
-    )
+        serializers.ListField(
+            child=serializers.CharField(),
+        )
     )
     def get_available_actions(self, obj):
+        metadata = obj.metadata or {}
+        event_type = metadata.get("event_type")
+
+        # Timer 2 thread message.
+        if event_type == "still_living_check":
+            tenancy_id = metadata.get("tenancy_id")
+
+            if not tenancy_id:
+                return []
+
+            try:
+                tenancy = Tenancy.objects.get(id=tenancy_id)
+            except Tenancy.DoesNotExist:
+                return []
+
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+
+            if (
+                not user
+                or not user.is_authenticated
+                or user.id not in {
+                    tenancy.landlord_id,
+                    tenancy.tenant_id,
+                }
+            ):
+                return []
+
+            return ["update_tenancy"]
+
+        # Timer 3 thread message.
+        if event_type == "review_available":
+            tenancy_id = metadata.get("tenancy_id")
+
+            if not tenancy_id:
+                return []
+
+            try:
+                tenancy = Tenancy.objects.get(id=tenancy_id)
+            except Tenancy.DoesNotExist:
+                return []
+
+            serializer = TenancyDetailSerializer(
+                tenancy,
+                context=self.context,
+            )
+
+            if serializer.data.get("can_leave_review"):
+                return ["leave_review"]
+
+            return []
+
+        # Existing tenancy proposal/update actions.
         if obj.message_type not in {
             Message.TYPE_TENANCY_PROPOSAL,
             Message.TYPE_TENANCY_UPDATED,
         }:
             return []
 
-        metadata = obj.metadata or {}
         tenancy_id = metadata.get("tenancy_id")
 
         if not tenancy_id:
@@ -3452,7 +3748,7 @@ class MessageSerializer(serializers.ModelSerializer):
             context=self.context,
         )
 
-        return serializer.data.get("available_actions", [])    
+        return serializer.data.get("available_actions", [])
             
 
     def get_is_read(self, obj):

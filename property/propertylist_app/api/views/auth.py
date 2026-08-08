@@ -52,12 +52,14 @@ from propertylist_app.services.security import (
     register_login_failure,
 )
 from propertylist_app.validators import ensure_idempotency, normalise_email
+from propertylist_app.api.permissions import HasValidRefreshToken
 from propertylist_app.api.throttling import (
     LoginScopedThrottle,
     PasswordResetScopedThrottle,
     PasswordResetConfirmScopedThrottle,
     RegisterAnonThrottle,
     RegisterScopedThrottle,
+    TokenRefreshScopedThrottle,
 )
 from propertylist_app.api.schema_serializers import (
     ErrorResponseSerializer,
@@ -619,14 +621,34 @@ class GoogleRegisterView(APIView):
                 code="bad_request",
             )
 
+        first_name = (idinfo.get("given_name") or "").strip()
+        last_name = (idinfo.get("family_name") or "").strip()
+
         User = get_user_model()
 
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
                 "username": generate_unique_username_from_email(email),
+                "first_name": first_name,
+                "last_name": last_name,
             },
         )
+
+        # Backfill missing names for existing Google users, but never overwrite
+        # names the user has already entered or changed on RentCrib.
+        name_fields_to_update = []
+
+        if not user.first_name and first_name:
+            user.first_name = first_name
+            name_fields_to_update.append("first_name")
+
+        if not user.last_name and last_name:
+            user.last_name = last_name
+            name_fields_to_update.append("last_name")
+
+        if name_fields_to_update:
+            user.save(update_fields=name_fields_to_update)
 
         profile = mark_profile_email_verified(user)
 
@@ -1183,46 +1205,59 @@ class AccountReactivateView(APIView):
 
 
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasValidRefreshToken]
     versioning_class = None
 
     @extend_schema(
-        request=None,
+        request=inline_serializer(
+            name="LogoutRequest",
+            fields={
+                "refresh": serializers.CharField(),
+            },
+        ),
         responses={
             200: inline_serializer(
                 name="LogoutOkResponse",
                 fields={
                     "ok": serializers.BooleanField(),
-                    "message": serializers.CharField(required=False, allow_null=True),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
                     "data": inline_serializer(
                         name="LogoutData",
-                        fields={"detail": serializers.CharField()},
+                        fields={
+                            "detail": serializers.CharField(),
+                        },
                     ),
                 },
             ),
-            401: OpenApiResponse(description="Authentication required."),
+            400: OpenApiResponse(
+                description="Missing, invalid, expired, blacklisted, or inactive-user refresh token."
+            ),
         },
-        description="Logout current user. Returns ok_response envelope.",
+        auth=[],
+        description=(
+            "Revoke the supplied refresh token and terminate the session. "
+            "Logout authenticates using the submitted refresh token rather than "
+            "the short-lived access token so users can always sign out even after "
+            "the access token has expired."
+        ),
     )
     def post(self, request):
-        refresh = (request.data.get("refresh") or "").strip()
-        if not refresh:
-            # Reason: allow global error handler to format consistently
-            raise ValidationError({"refresh": "Refresh token is required."})
+        refresh_token = request.validated_refresh_token
+        refresh_token.blacklist()
 
-        try:
-            RefreshToken(refresh).blacklist()
-        except Exception:
-            # Reason: treat invalid/expired/already-blacklisted the same for security + consistency
-            raise ValidationError({"refresh": "Invalid or expired refresh token."})
-
-        # Reason: A3/C1 consistent success envelope
-        return ok_response({"detail": "Logged out."}, status_code=status.HTTP_200_OK)
-
+        return ok_response(
+            {"detail": "Logged out."},
+            status_code=status.HTTP_200_OK,
+        )
 
 class TokenRefreshView(APIView):
     permission_classes = [AllowAny]
     versioning_class = None
+    throttle_classes = [TokenRefreshScopedThrottle]
+    throttle_scope = "token-refresh"
 
     @extend_schema(
         request=TokenRefreshRequestSerializer,
@@ -1236,6 +1271,7 @@ class TokenRefreshView(APIView):
                         name="TokenRefreshData",
                         fields={
                             "access": serializers.CharField(),
+                            "refresh": serializers.CharField(),
                             "access_expires_at": serializers.DateTimeField(),
                             "refresh_expires_at": serializers.DateTimeField(),
                         },
@@ -1245,43 +1281,69 @@ class TokenRefreshView(APIView):
             400: OpenApiResponse(description="Invalid or expired refresh token."),
         },
         auth=[],
-        description="Exchange a refresh token for a new access token. Returns ok_response envelope.",
+        description=(
+            "Rotate a valid refresh token and return a replacement access and "
+            "refresh token pair. The submitted refresh token is blacklisted."
+        ),
     )
     def post(self, request):
-        from propertylist_app.api.serializers import TokenRefreshRequestSerializer
-
         ser = TokenRefreshRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
 
         refresh_str = (ser.validated_data.get("refresh") or "").strip()
         if not refresh_str:
-            raise ValidationError({"refresh": "Refresh token is required."})
+            raise ValidationError(
+                {"refresh": "Refresh token is required."}
+            )
 
         try:
-            refresh = RefreshToken(refresh_str)
-
-            user_id = refresh.get("user_id")
+            
+            refresh_claims = RefreshToken(refresh_str)
+            user_id = refresh_claims.get("user_id")
             User = get_user_model()
 
-            if not user_id or not User.objects.filter(id=user_id, is_active=True).exists():
-                raise ValidationError({"refresh": "Invalid or expired refresh token."})
+            if not user_id or not User.objects.filter(
+                id=user_id,
+                is_active=True,
+            ).exists():
+                raise ValidationError(
+                    {"refresh": "Invalid or expired refresh token."}
+                )
+            jwt_ser = SimpleJWTTokenRefreshSerializer(
+                data={"refresh": refresh_str}
+            )
+            jwt_ser.is_valid(raise_exception=True)
 
-            access_token = refresh.access_token
+            rotated_data = jwt_ser.validated_data
 
-            access_exp = datetime.fromtimestamp(int(access_token["exp"]), tz=dt_timezone.utc)
-            refresh_exp = datetime.fromtimestamp(int(refresh["exp"]), tz=dt_timezone.utc)
+            access_value = str(rotated_data["access"])
+            refresh_value = str(rotated_data["refresh"])
+
+            access_token = AccessToken(access_value)
+            refresh_token = RefreshToken(refresh_value)
 
             payload = {
-                "access": str(access_token),
-                "access_expires_at": access_exp,
-                "refresh_expires_at": refresh_exp,
+                "access": access_value,
+                "refresh": refresh_value,
+                "access_expires_at": datetime.fromtimestamp(
+                    int(access_token["exp"]),
+                    tz=dt_timezone.utc,
+                ),
+                "refresh_expires_at": datetime.fromtimestamp(
+                    int(refresh_token["exp"]),
+                    tz=dt_timezone.utc,
+                ),
             }
 
-            return ok_response(payload, status_code=status.HTTP_200_OK)
+            return ok_response(
+                payload,
+                status_code=status.HTTP_200_OK,
+            )
 
-        except Exception:
-            raise ValidationError({"refresh": "Invalid or expired refresh token."})
-
+        except (TokenError, InvalidToken, KeyError, TypeError, ValueError):
+            raise ValidationError(
+                {"refresh": "Invalid or expired refresh token."}
+            )
 
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]

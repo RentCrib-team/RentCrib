@@ -17,6 +17,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_seriali
 
 from propertylist_app.models import Tenancy, Review
 from propertylist_app.tasks import task_send_tenancy_notification
+from propertylist_app.services.tenancy_dates import compute_review_window
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import standard_response_serializer
 from propertylist_app.api.serializers import (
@@ -26,6 +27,7 @@ from propertylist_app.api.serializers import (
     StillLivingConfirmResponseSerializer,
     TenancyExtensionCreateSerializer,
     TenancyExtensionRespondSerializer,
+    TenancyExtensionHistoryItemSerializer,
     TenancyExtensionResponseSerializer,
     DetailResponseSerializer,
 )
@@ -135,6 +137,144 @@ class TenancyStillLivingConfirmView(APIView):
 
 class TenancyExtensionCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    
+    
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name="TenancyExtensionHistoryOkResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "data": TenancyExtensionHistoryItemSerializer(
+                        many=True,
+                    ),
+                },
+            ),
+            401: OpenApiResponse(
+                description="Authentication required.",
+            ),
+            403: DetailResponseSerializer,
+            404: DetailResponseSerializer,
+        },
+        description=(
+            "Return the complete renewal history for a tenancy. "
+            "Only the tenancy landlord or tenant may access it. "
+            "Results are ordered from oldest to newest."
+        ),
+    )
+    def get(self, request, tenancy_id: int):
+        Tenancy = _get_model(
+            "propertylist_app",
+            "Tenancy",
+        )
+        TenancyExtension = _get_model(
+            "propertylist_app",
+            "TenancyExtension",
+        )
+
+        tenancy = (
+            Tenancy.objects
+            .select_related(
+                "landlord",
+                "tenant",
+            )
+            .filter(
+                id=tenancy_id,
+            )
+            .first()
+        )
+
+        if not tenancy:
+            raise NotFound(
+                "Tenancy not found."
+            )
+
+        user = request.user
+
+        if user.id not in {
+            tenancy.landlord_id,
+            tenancy.tenant_id,
+        }:
+            raise PermissionDenied(
+                "Forbidden."
+            )
+
+        extensions = (
+            TenancyExtension.objects
+            .select_related(
+                "proposed_by",
+            )
+            .filter(
+                tenancy_id=tenancy.id,
+            )
+            .order_by(
+                "created_at",
+                "id",
+            )
+        )
+
+        history = []
+
+        for extension in extensions:
+            proposer = extension.proposed_by
+
+            proposer_name = ""
+
+            if proposer:
+                proposer_name = (
+                    proposer.get_full_name()
+                    or proposer.username
+                    or proposer.first_name
+                    or ""
+                )
+
+            proposer_role = (
+                "landlord"
+                if extension.proposed_by_id
+                == tenancy.landlord_id
+                else "tenant"
+            )
+
+            history.append(
+                {
+                    "id": extension.id,
+                    "tenancy_id": extension.tenancy_id,
+                    "proposed_by_user_id": (
+                        extension.proposed_by_id
+                    ),
+                    "proposed_by_name": proposer_name,
+                    "proposed_by_role": proposer_role,
+                    "proposed_start_date": (
+                        extension.proposed_start_date
+                    ),
+                    "proposed_duration_months": (
+                        extension.proposed_duration_months
+                    ),
+                    "status": extension.status,
+                    "responded_at": (
+                        extension.responded_at
+                    ),
+                    "created_at": extension.created_at,
+                }
+            )
+
+        data = TenancyExtensionHistoryItemSerializer(
+            history,
+            many=True,
+        ).data
+
+        return ok_response(
+            data,
+            message=(
+                "Tenancy renewal history retrieved "
+                "successfully."
+            ),
+            status_code=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         request=TenancyExtensionCreateSerializer,
@@ -187,15 +327,24 @@ class TenancyExtensionCreateView(APIView):
         ext = TenancyExtension.objects.create(
             tenancy=tenancy,
             proposed_by=user,
-            proposed_duration_months=ser.validated_data["proposed_duration_months"],
+            proposed_start_date=ser.validated_data[
+                "proposed_start_date"
+            ],
+            proposed_duration_months=ser.validated_data[
+                "proposed_duration_months"
+            ],
             status=TenancyExtension.STATUS_PROPOSED,
         )
+        
 
         payload = {
             "id": ext.id,
             "tenancy_id": ext.tenancy_id,
             "proposed_by_user_id": ext.proposed_by_id,
-            "proposed_duration_months": ext.proposed_duration_months,
+            "proposed_start_date": ext.proposed_start_date,
+            "proposed_duration_months": (
+                ext.proposed_duration_months
+            ),
             "status": ext.status,
             "responded_at": ext.responded_at,
             "created_at": ext.created_at,
@@ -264,18 +413,94 @@ class TenancyExtensionRespondView(APIView):
         if action == "accept":
             ext.status = TenancyExtension.STATUS_ACCEPTED
             ext.responded_at = now
-            ext.save(update_fields=["status", "responded_at"])
+            ext.save(
+                update_fields=[
+                    "status",
+                    "responded_at",
+                ]
+            )
 
-            # Apply extension to tenancy
-            if hasattr(tenancy, "duration_months"):
-                tenancy.duration_months = ext.proposed_duration_months
-                tenancy.save(update_fields=["duration_months"])
+            # The accepted extension becomes the tenancy's new
+            # current rental period.
+            tenancy.move_in_date = ext.proposed_start_date
+            tenancy.duration_months = (
+                ext.proposed_duration_months
+            )
 
+            # Recalculate all lifecycle dates from the accepted
+            # renewal start date and renewal duration.
+            (
+                review_open_at,
+                review_deadline_at,
+                _production_still_living_check_at,
+            ) = compute_review_window(
+                tenancy.move_in_date,
+                tenancy.duration_months,
+            )
+
+            tenancy.review_open_at = review_open_at
+            tenancy.review_deadline_at = review_deadline_at
+
+            # TEMPORARY QA RULE:
+            # After a renewal is accepted, Timer 2 becomes due
+            # 10 minutes later so the renewed-tenancy ending
+            # reminder can be tested immediately.
+            #
+            # PRODUCTION:
+            # Replace this with the value returned by
+            # compute_review_window(), which schedules the reminder
+            # seven days before the renewed tenancy end date.
+            tenancy.still_living_check_at = (
+                now + timedelta(minutes=10)
+            )
+
+            # Clear the previous ending-reminder state so the new
+            # rental period gets its own future reminder cycle.
+            tenancy.still_living_confirmed_at = None
+            tenancy.still_living_landlord_confirmed_at = None
+            tenancy.still_living_tenant_confirmed_at = None
+
+            tenancy.status = (
+                Tenancy.STATUS_ACTIVE
+                if tenancy.move_in_date
+                <= timezone.localdate()
+                else Tenancy.STATUS_CONFIRMED
+            )
+
+            tenancy.save(
+                update_fields=[
+                    "move_in_date",
+                    "duration_months",
+                    "review_open_at",
+                    "review_deadline_at",
+                    "still_living_check_at",
+                    "still_living_confirmed_at",
+                    "still_living_landlord_confirmed_at",
+                    "still_living_tenant_confirmed_at",
+                    "status",
+                    "updated_at",
+                ]
+            )
+
+            # The room remains unavailable throughout the renewed
+            # tenancy relationship.
+            room = tenancy.room
+            if room.is_available:
+                room.is_available = False
+                room.save(
+                    update_fields=[
+                        "is_available",
+                        "updated_at",
+                    ]
+                )
         payload = {
             "id": ext.id,
             "tenancy_id": ext.tenancy_id,
             "proposed_by_user_id": ext.proposed_by_id,
-            "proposed_duration_months": ext.proposed_duration_months,
+            "proposed_start_date": ext.proposed_start_date,
+            "proposed_duration_months": (
+                ext.proposed_duration_months
+            ),
             "status": ext.status,
             "responded_at": ext.responded_at,
             "created_at": ext.created_at,
@@ -374,18 +599,28 @@ class TenancyRespondView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
+        action = serializer.validated_data["action"]
         tenancy = serializer.save()
 
         from propertylist_app.tasks import task_send_tenancy_notification
-        if tenancy.status == getattr(Tenancy, "STATUS_CONFIRMED", "confirmed"):
+
+        if action == "propose_changes":
+            task_send_tenancy_notification.delay(tenancy.id, "updated")
+            response_message = (
+                "Tenancy information corrected successfully. "
+                "The updated details have been sent to both parties."
+            )
+        elif action == "cancel":
+            task_send_tenancy_notification.delay(
+                tenancy.id,
+                "rejected_unverified",
+            )
+            response_message = (
+                "The tenant-created tenancy claim was rejected successfully."
+            )
+        else:
             task_send_tenancy_notification.delay(tenancy.id, "confirmed")
             response_message = "Tenancy confirmed successfully."
-        elif tenancy.status == getattr(Tenancy, "STATUS_CANCELLED", "cancelled"):
-            task_send_tenancy_notification.delay(tenancy.id, "cancelled")
-            response_message = "Tenancy cancelled successfully."
-        else:
-            task_send_tenancy_notification.delay(tenancy.id, "updated")
-            response_message = "Tenancy updated successfully."
 
         return ok_response(
             TenancyDetailSerializer(

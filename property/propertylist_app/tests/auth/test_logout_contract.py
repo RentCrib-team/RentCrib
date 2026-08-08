@@ -31,7 +31,8 @@ def test_logout_blacklists_refresh_and_returns_success_envelope(api_client):
     access = login.data["data"]["tokens"]["access"]
     refresh = login.data["data"]["tokens"]["refresh"]
 
-    # Must be authenticated to logout
+    # Access authentication is optional for logout.
+    # The refresh token is the credential being validated and revoked.
     api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
 
     logout = api_client.post(API_LOGOUT_URL, {"refresh": refresh}, format="json")
@@ -51,35 +52,28 @@ def test_logout_blacklists_refresh_and_returns_success_envelope(api_client):
     assert "token" in flat_text or "refresh" in flat_text, data
 
 
-
 @pytest.mark.django_db
 def test_logout_missing_refresh_returns_400(api_client):
-    User = get_user_model()
-
-    user = User.objects.create_user(
-        username="logoutmissing",
-        email="logoutmissing@example.com",
-        password="Str0ng!Pass123",
-    )
-    profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.email_verified = True
-    profile.save()
-
-    login = api_client.post(
-        API_LOGIN_URL,
-        {"identifier": "logoutmissing", "password": "Str0ng!Pass123"},
+    response = api_client.post(
+        API_LOGOUT_URL,
+        {},
         format="json",
     )
-    assert login.status_code == 200
 
-    access = login.data["data"]["tokens"]["access"]
-    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+    assert response.status_code == 400
 
-    res = api_client.post(API_LOGOUT_URL, {}, format="json")
-    assert res.status_code == 400
-
+    response_text = str(getattr(response, "data", {}) or {}).lower()
+    assert "refresh" in response_text
 
 @pytest.mark.django_db
-def test_logout_requires_authentication(api_client):
-    res = api_client.post(API_LOGOUT_URL, {"refresh": "anything"}, format="json")
-    assert res.status_code == 401
+def test_logout_rejects_invalid_refresh_token(api_client):
+    res = api_client.post(
+        API_LOGOUT_URL,
+        {"refresh": "anything"},
+        format="json",
+    )
+
+    assert res.status_code == 400
+
+    flat_text = str(getattr(res, "data", {}) or {}).lower()
+    assert "refresh" in flat_text or "token" in flat_text

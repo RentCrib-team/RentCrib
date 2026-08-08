@@ -10,6 +10,7 @@ from propertylist_app.tasks import (
     task_tenancy_prompts_sweep,
 )
 
+from propertylist_app.notifications.tasks import notify_completed_viewings
 pytestmark = pytest.mark.django_db
 
 
@@ -189,3 +190,77 @@ def test_still_living_check_triggers_notification_for_both_users(user_factory, r
     qs = Notification.objects.filter(type="tenancy_still_living_check").order_by("-id")[:2]
     user_ids = {n.user_id for n in qs}
     assert user_ids == {landlord.id, tenant.id}
+
+
+def test_timer_one_does_not_schedule_timer_two(
+    user_factory,
+    room_factory,
+):
+    Tenancy = __import__("django.apps").apps.apps.get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    NotificationTemplate = __import__("django.apps").apps.apps.get_model(
+        "notifications",
+        "NotificationTemplate",
+    )
+    OutboundNotification = __import__("django.apps").apps.apps.get_model(
+        "notifications",
+        "OutboundNotification",
+    )
+
+    landlord = user_factory(username="timer_one_landlord")
+    tenant = user_factory(username="timer_one_tenant")
+    room = room_factory(property_owner=landlord)
+
+    booking = _make_booking(
+        tenant,
+        room,
+        days_ago=0,
+    )
+
+    now = timezone.now()
+
+    # Timer 1 becomes eligible 10 minutes after booking.start.
+    booking.start = now - timedelta(minutes=10, seconds=5)
+    booking.end = booking.start + timedelta(minutes=30)
+    booking.save(update_fields=["start", "end"])
+
+    tenancy = _make_tenancy(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    original_timer_two = now + timedelta(days=30)
+    tenancy.still_living_check_at = original_timer_two
+    tenancy.save(update_fields=["still_living_check_at"])
+
+    NotificationTemplate.objects.create(
+        key="booking.completed",
+        channel="email",
+        subject="Viewing completed",
+        body="Open: {{ cta_url }}",
+        is_active=True,
+    )
+
+    notify_completed_viewings()
+
+    tenancy.refresh_from_db()
+
+    # Timer 1 must not start or move Timer 2.
+    assert tenancy.still_living_check_at == original_timer_two
+
+    timer_one_email = OutboundNotification.objects.get(
+        user=tenant,
+        template_key="booking.completed",
+        context__booking_id=booking.id,
+    )
+
+    assert timer_one_email.context["cta_url"].endswith(
+        f"/my-bookings/{booking.id}"
+    )
+
+

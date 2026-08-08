@@ -14,7 +14,12 @@ from notifications.models import (
     OutboundNotification,
 )
 from notifications.services import send_mail
-from propertylist_app.models import Booking, Notification, Room, UserProfile
+from propertylist_app.models import (
+    Booking,
+    Notification,
+    Room,
+    UserProfile,
+)
 from propertylist_app.notifications.utils import create_in_app_notification_if_allowed
 
 
@@ -252,6 +257,8 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
             f"{start_str}. (booking_id={booking.id})"
         )
 
+
+        timer_one_created = False
         # ---------- 1) IN-APP (dedupe by booking_id) ----------
         already_in_app = Notification.objects.filter(
             user=user,
@@ -267,6 +274,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 body=body,
                 preference_field="notify_confirmations",
             )
+            timer_one_created = True
 
         # ---------- 2) EMAIL QUEUE (dedupe by booking_id) ----------
         if template:
@@ -290,10 +298,16 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                         "booking_id": booking.id,
                         "room_title": room_title,
                         "ended_at": start_str,
-                        "cta_url": _inbox_link(),
+                        "cta_url": f"{_frontend_base_url()}/my-bookings/{booking.id}",
                     },
                 )
+                timer_one_created = True
 
+
+                
         processed += 1
 
     return processed
+
+
+     

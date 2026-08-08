@@ -134,12 +134,22 @@ def booking_created_queue_emails(
     )
 
     if owner:
+        booker_name = (
+            booker.get_full_name().strip()
+            or booker.username
+            or booker.first_name
+            or "A prospective tenant"
+        )
+
         _queue_email(
             user=owner,
             template_key="booking.new",
             context={
                 "user": {
                     "first_name": owner.first_name,
+                },
+                "booker": {
+                    "name": booker_name,
                 },
                 "room": {
                     "title": room.title,
@@ -192,6 +202,11 @@ def message_created_create_notifications(
         return
     
     if instance.message_type != Message.TYPE_TEXT:
+        return
+    
+    metadata = instance.metadata or {}
+
+    if metadata.get("system_event") is True:
         return
 
     thread: MessageThread = instance.thread
@@ -336,10 +351,44 @@ def tenancy_extension_notifications(
         if not user:
             return
 
-        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user,
+        )
 
-        if not getattr(profile, "notify_confirmations", True):
+        if not getattr(
+            profile,
+            "notify_confirmations",
+            True,
+        ):
             return
+
+        proposed_by = getattr(
+            instance,
+            "proposed_by",
+            None,
+        )
+
+        proposer_name = ""
+
+        if proposed_by:
+            proposer_name = (
+                proposed_by.get_full_name()
+                or proposed_by.username
+                or proposed_by.first_name
+                or ""
+            )
+
+        proposed_start_date = getattr(
+            instance,
+            "proposed_start_date",
+            None,
+        )
+
+        proposed_start_date_value = (
+            proposed_start_date.isoformat()
+            if proposed_start_date
+            else ""
+        )
 
         _queue_email(
             user=user,
@@ -349,11 +398,72 @@ def tenancy_extension_notifications(
                     "first_name": user.first_name,
                 },
                 "tenancy_id": tenancy.id,
+                "extension_id": instance.id,
                 "room_title": tenancy.room.title,
+                "proposer_name": proposer_name,
+                "proposed_start_date": (
+                    proposed_start_date_value
+                ),
+                "proposed_duration_months": (
+                    instance.proposed_duration_months
+                ),
                 "deep_link": deep_link,
                 "cta_url": cta_url,
             },
         )
+
+    proposed_start_date = getattr(
+        instance,
+        "proposed_start_date",
+        None,
+    )
+
+    if proposed_start_date:
+        proposed_start_date_text = (
+            proposed_start_date.strftime("%d %B %Y")
+        )
+    else:
+        proposed_start_date_text = (
+            "the agreed renewal date"
+        )
+
+    proposed_duration_months = getattr(
+        instance,
+        "proposed_duration_months",
+        None,
+    )
+
+    duration_text = (
+        f"{proposed_duration_months} "
+        f"month{'s' if proposed_duration_months != 1 else ''}"
+        if proposed_duration_months
+        else "the agreed duration"
+    )
+
+    proposed_start_date = getattr(
+        instance,
+        "proposed_start_date",
+        None,
+    )
+
+    proposed_start_date_text = (
+        proposed_start_date.strftime("%d %B %Y")
+        if proposed_start_date
+        else "the agreed renewal date"
+    )
+
+    proposed_duration_months = getattr(
+        instance,
+        "proposed_duration_months",
+        None,
+    )
+
+    duration_text = (
+        f"{proposed_duration_months} "
+        f"month{'s' if proposed_duration_months != 1 else ''}"
+        if proposed_duration_months
+        else "the agreed duration"
+    )
 
     if created:
         other_party = _ext_other_party(instance)
@@ -361,16 +471,21 @@ def tenancy_extension_notifications(
         if not other_party:
             return
 
-        Notification.objects.create(
+        Notification.objects.get_or_create(
             user=other_party,
             type="tenancy_extension_proposed",
-            title="Tenancy extension proposed",
-            body=(
-                "A tenancy extension was proposed for "
-                f"{tenancy.room.title}."
-            ),
             target_type="tenancy_extension",
-            target_id=tenancy.id,
+            target_id=instance.id,
+            defaults={
+                "title": "Tenancy renewal proposed",
+                "body": (
+                    f"A renewal has been proposed for "
+                    f"{tenancy.room.title}, starting "
+                    f"{proposed_start_date_text} for "
+                    f"{duration_text}. Review the renewal "
+                    "information and respond."
+                ),
+            },
         )
 
         maybe_queue_email(
@@ -379,27 +494,39 @@ def tenancy_extension_notifications(
         )
         return
 
-    old_status = getattr(instance, "_old_status", None)
+    old_status = getattr(
+        instance,
+        "_old_status",
+        None,
+    )
     new_status = instance.status
 
     if old_status == new_status:
         return
 
     if new_status == instance.STATUS_ACCEPTED:
-        for user in (tenancy.landlord, tenancy.tenant):
+        for user in (
+            tenancy.landlord,
+            tenancy.tenant,
+        ):
             if not user:
                 continue
 
-            Notification.objects.create(
+            Notification.objects.get_or_create(
                 user=user,
                 type="tenancy_extension_accepted",
-                title="Tenancy extension accepted",
-                body=(
-                    "The tenancy extension for "
-                    f"{tenancy.room.title} was accepted."
-                ),
                 target_type="tenancy_extension",
-                target_id=tenancy.id,
+                target_id=instance.id,
+                defaults={
+                    "title": "Tenancy renewal accepted",
+                    "body": (
+                        f"The renewal for "
+                        f"{tenancy.room.title} has been "
+                        f"accepted. The new tenancy period "
+                        f"starts {proposed_start_date_text} "
+                        f"and continues for {duration_text}."
+                    ),
+                },
             )
 
             maybe_queue_email(
@@ -413,16 +540,22 @@ def tenancy_extension_notifications(
         if not proposer:
             return
 
-        Notification.objects.create(
+        Notification.objects.get_or_create(
             user=proposer,
             type="tenancy_extension_rejected",
-            title="Tenancy extension rejected",
-            body=(
-                "The tenancy extension for "
-                f"{tenancy.room.title} was rejected."
-            ),
             target_type="tenancy_extension",
-            target_id=tenancy.id,
+            target_id=instance.id,
+            defaults={
+                "title": "Tenancy renewal declined",
+                "body": (
+                    f"The proposed renewal for "
+                    f"{tenancy.room.title}, starting "
+                    f"{proposed_start_date_text} for "
+                    f"{duration_text}, was declined. "
+                    "The existing tenancy information "
+                    "remains unchanged."
+                ),
+            },
         )
 
         maybe_queue_email(

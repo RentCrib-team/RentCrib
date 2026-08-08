@@ -1,4 +1,4 @@
-# property/propertylist_app/tests/tenancies/test_tenancy_extension_notifications.py
+# propertylist_app/tests/tenancies/test_tenancy_extension_notifications.py
 
 from datetime import date, timedelta
 
@@ -11,11 +11,23 @@ pytestmark = pytest.mark.django_db
 
 
 def _get_model(app_label, model_name):
-    return apps.get_model(app_label, model_name)
+    return apps.get_model(
+        app_label,
+        model_name,
+    )
 
 
-def _make_tenancy(room, landlord, tenant, *, status):
-    Tenancy = _get_model("propertylist_app", "Tenancy")
+def _make_tenancy(
+    room,
+    landlord,
+    tenant,
+    *,
+    status,
+):
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
     now = timezone.now()
 
     return Tenancy.objects.create(
@@ -23,134 +35,407 @@ def _make_tenancy(room, landlord, tenant, *, status):
         landlord=landlord,
         tenant=tenant,
         proposed_by=landlord,
-        move_in_date=date.today() - timedelta(days=90),
+        move_in_date=(
+            date.today() - timedelta(days=90)
+        ),
         duration_months=3,
         status=status,
-        landlord_confirmed_at=now - timedelta(days=90),
-        tenant_confirmed_at=now - timedelta(days=90),
+        landlord_confirmed_at=(
+            now - timedelta(days=90)
+        ),
+        tenant_confirmed_at=(
+            now - timedelta(days=90)
+        ),
     )
 
 
-def test_extension_proposal_creates_notification_to_other_party(user_factory, room_factory):
-    Tenancy = _get_model("propertylist_app", "Tenancy")
-    TenancyExtension = _get_model("propertylist_app", "TenancyExtension")
-    Notification = _get_model("propertylist_app", "Notification")
+def _renewal_start_date():
+    return date.today() + timedelta(days=30)
 
-    landlord = user_factory(username="extn_landlord1")
-    tenant = user_factory(username="extn_tenant1")
-    room = room_factory(property_owner=landlord)
 
-    tenancy = _make_tenancy(room, landlord, tenant, status=Tenancy.STATUS_ACTIVE)
+def test_extension_proposal_creates_notification_to_other_party(
+    user_factory,
+    room_factory,
+):
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    TenancyExtension = _get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    )
+    Notification = _get_model(
+        "propertylist_app",
+        "Notification",
+    )
 
-    before = Notification.objects.count()
+    landlord = user_factory(
+        username="extn_landlord1",
+    )
+    tenant = user_factory(
+        username="extn_tenant1",
+    )
+    room = room_factory(
+        property_owner=landlord,
+    )
 
-    TenancyExtension.objects.create(
+    tenancy = _make_tenancy(
+        room,
+        landlord,
+        tenant,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    renewal_start_date = _renewal_start_date()
+
+    extension = TenancyExtension.objects.create(
         tenancy=tenancy,
         proposed_by=landlord,
+        proposed_start_date=renewal_start_date,
         proposed_duration_months=6,
         status=TenancyExtension.STATUS_PROPOSED,
     )
 
-    after = Notification.objects.count()
-    assert after == before + 1
+    notifications = Notification.objects.filter(
+        type="tenancy_extension_proposed",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    )
 
-    n = Notification.objects.latest("id")
-    assert n.user_id == tenant.id
-    assert n.type == "tenancy_extension_proposed"
+    assert notifications.count() == 1
+
+    notification = notifications.get()
+
+    assert notification.user_id == tenant.id
+    assert (
+        notification.title
+        == "Tenancy renewal proposed"
+    )
+    assert room.title in notification.body
+    assert (
+        renewal_start_date.strftime("%d %B %Y")
+        in notification.body
+    )
+    assert "6 months" in notification.body
+
+    # The proposer must not receive their own proposal alert.
+    assert not Notification.objects.filter(
+        user=landlord,
+        type="tenancy_extension_proposed",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    ).exists()
 
 
-def test_extension_accept_creates_notifications_for_both(user_factory, room_factory):
-    Tenancy = _get_model("propertylist_app", "Tenancy")
-    TenancyExtension = _get_model("propertylist_app", "TenancyExtension")
-    Notification = _get_model("propertylist_app", "Notification")
+def test_extension_accept_creates_notifications_for_both(
+    user_factory,
+    room_factory,
+):
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    TenancyExtension = _get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    )
+    Notification = _get_model(
+        "propertylist_app",
+        "Notification",
+    )
 
-    landlord = user_factory(username="extn_landlord2")
-    tenant = user_factory(username="extn_tenant2")
-    room = room_factory(property_owner=landlord)
+    landlord = user_factory(
+        username="extn_landlord2",
+    )
+    tenant = user_factory(
+        username="extn_tenant2",
+    )
+    room = room_factory(
+        property_owner=landlord,
+    )
 
-    tenancy = _make_tenancy(room, landlord, tenant, status=Tenancy.STATUS_ACTIVE)
+    tenancy = _make_tenancy(
+        room,
+        landlord,
+        tenant,
+        status=Tenancy.STATUS_ACTIVE,
+    )
 
-    ext = TenancyExtension.objects.create(
+    renewal_start_date = _renewal_start_date()
+
+    extension = TenancyExtension.objects.create(
         tenancy=tenancy,
         proposed_by=landlord,
-        proposed_duration_months=6,
+        proposed_start_date=renewal_start_date,
+        proposed_duration_months=7,
         status=TenancyExtension.STATUS_PROPOSED,
     )
 
-    before = Notification.objects.filter(type="tenancy_extension_accepted").count()
+    extension.status = (
+        TenancyExtension.STATUS_ACCEPTED
+    )
+    extension.responded_at = timezone.now()
+    extension.save(
+        update_fields=[
+            "status",
+            "responded_at",
+        ]
+    )
 
-    ext.status = TenancyExtension.STATUS_ACCEPTED
-    ext.save(update_fields=["status"])
+    notifications = Notification.objects.filter(
+        type="tenancy_extension_accepted",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    )
 
-    after = Notification.objects.filter(type="tenancy_extension_accepted").count()
-    assert after == before + 2
+    assert notifications.count() == 2
 
-    last_two = Notification.objects.filter(type="tenancy_extension_accepted").order_by("-id")[:2]
-    user_ids = {n.user_id for n in last_two}
-    assert user_ids == {landlord.id, tenant.id}
+    assert set(
+        notifications.values_list(
+            "user_id",
+            flat=True,
+        )
+    ) == {
+        landlord.id,
+        tenant.id,
+    }
+
+    for notification in notifications:
+        assert (
+            notification.title
+            == "Tenancy renewal accepted"
+        )
+        assert room.title in notification.body
+        assert (
+            renewal_start_date.strftime(
+                "%d %B %Y"
+            )
+            in notification.body
+        )
+        assert "7 months" in notification.body
 
 
-def test_extension_reject_notifies_proposer(user_factory, room_factory):
-    Tenancy = _get_model("propertylist_app", "Tenancy")
-    TenancyExtension = _get_model("propertylist_app", "TenancyExtension")
-    Notification = _get_model("propertylist_app", "Notification")
+def test_extension_reject_notifies_proposer(
+    user_factory,
+    room_factory,
+):
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    TenancyExtension = _get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    )
+    Notification = _get_model(
+        "propertylist_app",
+        "Notification",
+    )
 
-    landlord = user_factory(username="extn_landlord3")
-    tenant = user_factory(username="extn_tenant3")
-    room = room_factory(property_owner=landlord)
+    landlord = user_factory(
+        username="extn_landlord3",
+    )
+    tenant = user_factory(
+        username="extn_tenant3",
+    )
+    room = room_factory(
+        property_owner=landlord,
+    )
 
-    tenancy = _make_tenancy(room, landlord, tenant, status=Tenancy.STATUS_ACTIVE)
+    tenancy = _make_tenancy(
+        room,
+        landlord,
+        tenant,
+        status=Tenancy.STATUS_ACTIVE,
+    )
 
-    # tenant proposes this time
-    ext = TenancyExtension.objects.create(
+    renewal_start_date = _renewal_start_date()
+
+    # The tenant proposes this renewal.
+    extension = TenancyExtension.objects.create(
         tenancy=tenancy,
         proposed_by=tenant,
-        proposed_duration_months=6,
+        proposed_start_date=renewal_start_date,
+        proposed_duration_months=8,
         status=TenancyExtension.STATUS_PROPOSED,
     )
 
-    before = Notification.objects.filter(type="tenancy_extension_rejected").count()
+    extension.status = (
+        TenancyExtension.STATUS_REJECTED
+    )
+    extension.responded_at = timezone.now()
+    extension.save(
+        update_fields=[
+            "status",
+            "responded_at",
+        ]
+    )
 
-    ext.status = TenancyExtension.STATUS_REJECTED
-    ext.save(update_fields=["status"])
+    notifications = Notification.objects.filter(
+        type="tenancy_extension_rejected",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    )
 
-    after = Notification.objects.filter(type="tenancy_extension_rejected").count()
-    assert after == before + 1
+    assert notifications.count() == 1
 
-    n = Notification.objects.filter(type="tenancy_extension_rejected").latest("id")
-    assert n.user_id == tenant.id
+    notification = notifications.get()
+
+    assert notification.user_id == tenant.id
+    assert (
+        notification.title
+        == "Tenancy renewal declined"
+    )
+    assert room.title in notification.body
+    assert (
+        renewal_start_date.strftime("%d %B %Y")
+        in notification.body
+    )
+    assert "8 months" in notification.body
+    assert (
+        "existing tenancy information remains unchanged"
+        in notification.body.lower()
+    )
+
+    # The counterparty does not receive a rejection alert.
+    assert not Notification.objects.filter(
+        user=landlord,
+        type="tenancy_extension_rejected",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    ).exists()
 
 
+def test_extension_status_save_without_change_does_not_duplicate_notifications(
+    user_factory,
+    room_factory,
+):
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    TenancyExtension = _get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    )
+    Notification = _get_model(
+        "propertylist_app",
+        "Notification",
+    )
 
-def test_extension_status_save_without_change_does_not_duplicate_notifications(user_factory, room_factory):
-    Tenancy = _get_model("propertylist_app", "Tenancy")
-    TenancyExtension = _get_model("propertylist_app", "TenancyExtension")
-    Notification = _get_model("propertylist_app", "Notification")
+    landlord = user_factory(
+        username="extn_landlord_dup",
+    )
+    tenant = user_factory(
+        username="extn_tenant_dup",
+    )
+    room = room_factory(
+        property_owner=landlord,
+    )
 
-    landlord = user_factory(username="extn_landlord_dup")
-    tenant = user_factory(username="extn_tenant_dup")
-    room = room_factory(property_owner=landlord)
+    tenancy = _make_tenancy(
+        room,
+        landlord,
+        tenant,
+        status=Tenancy.STATUS_ACTIVE,
+    )
 
-    tenancy = _make_tenancy(room, landlord, tenant, status=Tenancy.STATUS_ACTIVE)
-
-    ext = TenancyExtension.objects.create(
+    extension = TenancyExtension.objects.create(
         tenancy=tenancy,
         proposed_by=landlord,
+        proposed_start_date=_renewal_start_date(),
         proposed_duration_months=6,
         status=TenancyExtension.STATUS_PROPOSED,
     )
 
-    before = Notification.objects.filter(type="tenancy_extension_accepted").count()
+    extension.status = (
+        TenancyExtension.STATUS_ACCEPTED
+    )
+    extension.responded_at = timezone.now()
+    extension.save(
+        update_fields=[
+            "status",
+            "responded_at",
+        ]
+    )
 
-    ext.status = TenancyExtension.STATUS_ACCEPTED
-    ext.save(update_fields=["status"])
+    first_count = Notification.objects.filter(
+        type="tenancy_extension_accepted",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    ).count()
 
-    mid = Notification.objects.filter(type="tenancy_extension_accepted").count()
-    assert mid == before + 2
+    assert first_count == 2
 
-    # saving again with same status should NOT create more
-    ext.status = TenancyExtension.STATUS_ACCEPTED
-    ext.save(update_fields=["status"])
+    # Saving the same status again must not create duplicates.
+    extension.status = (
+        TenancyExtension.STATUS_ACCEPTED
+    )
+    extension.save(
+        update_fields=[
+            "status",
+        ]
+    )
 
-    after = Notification.objects.filter(type="tenancy_extension_accepted").count()
-    assert after == mid
+    second_count = Notification.objects.filter(
+        type="tenancy_extension_accepted",
+        target_type="tenancy_extension",
+        target_id=extension.id,
+    ).count()
+
+    assert second_count == first_count
+
+
+def test_extension_notification_target_id_is_extension_id(
+    user_factory,
+    room_factory,
+):
+    Tenancy = _get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+    TenancyExtension = _get_model(
+        "propertylist_app",
+        "TenancyExtension",
+    )
+    Notification = _get_model(
+        "propertylist_app",
+        "Notification",
+    )
+
+    landlord = user_factory(
+        username="extn_landlord_target",
+    )
+    tenant = user_factory(
+        username="extn_tenant_target",
+    )
+    room = room_factory(
+        property_owner=landlord,
+    )
+
+    tenancy = _make_tenancy(
+        room,
+        landlord,
+        tenant,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    extension = TenancyExtension.objects.create(
+        tenancy=tenancy,
+        proposed_by=landlord,
+        proposed_start_date=_renewal_start_date(),
+        proposed_duration_months=5,
+        status=TenancyExtension.STATUS_PROPOSED,
+    )
+
+    notification = Notification.objects.get(
+        user=tenant,
+        type="tenancy_extension_proposed",
+    )
+
+    assert (
+        notification.target_type
+        == "tenancy_extension"
+    )
+    assert notification.target_id == extension.id

@@ -120,11 +120,24 @@ STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 
-TURNSTILE_SITE_KEY = " 0x4AAAAAADwEBB9wTWqh9QFI"
-TURNSTILE_SECRET_KEY = "0x4AAAAAADwEBHSlbSnV4Sa08u8UL3eWPuI"
 
-TURNSTILE_REQUIRED = False
-# TURNSTILE_REQUIRED = True
+
+TURNSTILE_SITE_KEY = os.getenv(
+    "TURNSTILE_SITE_KEY",
+    "",
+).strip()
+
+TURNSTILE_SECRET_KEY = os.getenv(
+    "TURNSTILE_SECRET_KEY",
+    "",
+).strip()
+
+TURNSTILE_REQUIRED = os.getenv(
+    "TURNSTILE_REQUIRED",
+    "false",
+).strip().lower() in {"1", "true", "yes"}
+
+
 
 missing_stripe = []
 
@@ -334,6 +347,7 @@ REST_FRAMEWORK = {
         "room-create": "10/hour",
 
         "login": "5/minute",
+        "token-refresh": "10/minute",
         "register": "5/hour",
         "register_anon": "3/hour",
 
@@ -350,6 +364,8 @@ REST_FRAMEWORK = {
 
         "otp-verify": "5/minute",
         "otp-resend": "2/hour",
+        
+        
     },
 
 

@@ -1,0 +1,87 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="width:100%;border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding:0;">
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="width:100%;max-width:620px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe5ee;border-radius:5px;">
+                <tr>
+                    <td style="padding:34px 34px 32px;">
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;text-align:center;color:#d97706;">
+                            TENANCY REQUEST
+                        </p>
+
+                        <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-0.4px;text-align:center;color:#172033;">
+                            An unverified request has expired
+                        </h1>
+
+                        <p style="margin:10px 0 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;text-align:center;color:#5f6b7a;">
+                            No landlord verification was recorded within the required time.
+                        </p>
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            Hi {{ user.first_name|default:"there" }},
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            The tenancy request submitted by
+                            <strong style="color:#172033;">{{ tenant_name }}</strong>
+                            for
+                            <strong style="color:#172033;">{{ room_title }}</strong>
+                            was not verified in time and has now expired.
+                        </p>
+
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="width:100%;border-collapse:separate;background-color:#fff9ed;border:1px solid #f3dfb6;border-left:4px solid #d97706;border-radius:4px;">
+                            <tr>
+                                <td style="padding:18px 20px;">
+
+                                    <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;font-weight:700;color:#172033;">
+                                        Listing status
+                                    </p>
+
+                                    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#566176;">
+                                        The tenant-created request did not take the listing offline. The room availability was not changed by this request.
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="width:100%;margin-top:20px;border-collapse:separate;background-color:#f7f9fc;border:1px solid #dfe6ef;border-radius:4px;">
+                            <tr>
+                                <td style="padding:18px 20px;">
+
+                                    <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;font-weight:700;color:#172033;">
+                                        Did you rent the room to this tenant?
+                                    </p>
+
+                                    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#566176;">
+                                        If you rented the room to {{ tenant_name }}, submit the correct tenancy information from your listing.
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        {% include "emails/components/button.html" with button_url=cta_url button_text="View tenancy conversation" %}
+
+                        <p style="margin:24px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.65;text-align:center;color:#8892a3;">
+                            No action is required if you did not rent the room to this person.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}

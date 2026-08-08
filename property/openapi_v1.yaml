@@ -535,11 +535,24 @@ paths:
   /api/v1/auth/logout/:
     post:
       operationId: auth_logout_create
-      description: Logout current user. Returns ok_response envelope.
+      description: Revoke the supplied refresh token and terminate the session. Logout
+        authenticates using the submitted refresh token rather than the short-lived
+        access token so users can always sign out even after the access token has
+        expired.
       tags:
       - auth
-      security:
-      - jwtAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+        required: true
       responses:
         '200':
           content:
@@ -547,8 +560,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/LogoutOkResponse'
           description: ''
-        '401':
-          description: Authentication required.
+        '400':
+          description: Missing, invalid, expired, blacklisted, or inactive-user refresh
+            token.
   /api/v1/auth/password-reset/:
     post:
       operationId: auth_password_reset_create
@@ -821,8 +835,8 @@ paths:
   /api/v1/auth/token/refresh/:
     post:
       operationId: auth_token_refresh_create
-      description: Exchange a refresh token for a new access token. Returns ok_response
-        envelope.
+      description: Rotate a valid refresh token and return a replacement access and
+        refresh token pair. The submitted refresh token is blacklisted.
       tags:
       - auth
       requestBody:
@@ -8148,6 +8162,13 @@ components:
       required:
       - data
       - ok
+    LogoutRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+      required:
+      - refresh
     Message:
       type: object
       properties:
@@ -8162,7 +8183,34 @@ components:
           readOnly: true
         body:
           type: string
+        message_type:
+          enum:
+          - text
+          - tenancy_proposal
+          - tenancy_updated
+          - tenancy_confirmed
+          - tenancy_cancelled
+          type: string
+          description: |-
+            * `text` - Text
+            * `tenancy_proposal` - Tenancy proposal
+            * `tenancy_updated` - Tenancy updated
+            * `tenancy_confirmed` - Tenancy confirmed
+            * `tenancy_cancelled` - Tenancy cancelled
+          x-spec-enum-id: f7633d6dcefa42a5
+          readOnly: true
+        metadata:
+          readOnly: true
+        available_actions:
+          type: array
+          items:
+            type: string
+          readOnly: true
         created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
           type: string
           format: date-time
           readOnly: true
@@ -8173,13 +8221,17 @@ components:
           type: string
           readOnly: true
       required:
+      - available_actions
       - body
       - created
       - id
       - is_read
+      - message_type
+      - metadata
       - read_at
       - sender
       - thread
+      - updated
     MessageCreate:
       type: object
       properties:
@@ -9085,6 +9137,10 @@ components:
         category_id:
           type: integer
           writeOnly: true
+        cover_photo:
+          type: integer
+          writeOnly: true
+          nullable: true
         is_saved:
           type: boolean
           readOnly: true
@@ -10253,6 +10309,10 @@ components:
         category_id:
           type: integer
           writeOnly: true
+        cover_photo:
+          type: integer
+          writeOnly: true
+          nullable: true
         is_saved:
           type: boolean
           readOnly: true
@@ -11008,11 +11068,23 @@ components:
             * `rejected` - Rejected
           x-spec-enum-id: de3702061fc1d433
           readOnly: true
+        moderation_state:
+          type: string
+          readOnly: true
+        user_message:
+          type: string
+          readOnly: true
+        can_replace:
+          type: string
+          readOnly: true
       required:
+      - can_replace
       - id
       - image
+      - moderation_state
       - room
       - status
+      - user_message
     RoomListAltDeleteResponse:
       type: object
       properties:
@@ -11541,12 +11613,16 @@ components:
     TenancyExtensionCreate:
       type: object
       properties:
+        proposed_start_date:
+          type: string
+          format: date
         proposed_duration_months:
           type: integer
           maximum: 24
           minimum: 1
       required:
       - proposed_duration_months
+      - proposed_start_date
     TenancyExtensionCreateOkResponse:
       type: object
       properties:
@@ -11579,6 +11655,9 @@ components:
           type: integer
         proposed_by_user_id:
           type: integer
+        proposed_start_date:
+          type: string
+          format: date
         proposed_duration_months:
           type: integer
         status:
@@ -11595,6 +11674,7 @@ components:
       - id
       - proposed_by_user_id
       - proposed_duration_months
+      - proposed_start_date
       - responded_at
       - status
       - tenancy_id
@@ -11863,6 +11943,8 @@ components:
       properties:
         access:
           type: string
+        refresh:
+          type: string
         access_expires_at:
           type: string
           format: date-time
@@ -11872,6 +11954,7 @@ components:
       required:
       - access
       - access_expires_at
+      - refresh
       - refresh_expires_at
     TokenRefreshOkResponse:
       type: object

@@ -94,6 +94,12 @@ class ReviewListThrottle(UserRateThrottle):
 class LoginScopedThrottle(ScopedRateThrottle):
     scope = "login"
 
+class TokenRefreshScopedThrottle(ScopedRateThrottle):
+    scope = "token-refresh"
+
+    def get_rate(self):
+        return api_settings.DEFAULT_THROTTLE_RATES.get(self.scope)
+
 class RegisterScopedThrottle(ScopedRateThrottle):
     scope = "register"
 
