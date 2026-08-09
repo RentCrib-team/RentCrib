@@ -127,7 +127,7 @@ def booking_created_queue_emails(
     owner = getattr(room, "property_owner", None)
     booker = instance.user
 
-    booking_deep_link = f"/app/bookings/{instance.id}"
+    booking_deep_link = f"/viewings/{instance.id}"
     booking_full_url = build_absolute_url(
         booking_deep_link,
         force_login=True,
@@ -217,7 +217,7 @@ def message_created_create_notifications(
 
     notifications_to_create = []
 
-    deep_link = f"/app/threads/{thread.id}"
+    deep_link = f"/messages?thread={thread.id}"
     full_url = build_absolute_url(
         deep_link,
         force_login=True,

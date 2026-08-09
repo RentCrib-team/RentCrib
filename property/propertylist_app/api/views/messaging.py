@@ -182,6 +182,7 @@ class InboxListView(APIView):
                     "is_read": unread == 0,
                     "thread_id": t.id,
                     "deep_link": f"/app/threads/{t.id}",
+                    "cta_url": f"/messages?thread={t.id}",
                 }
             )
 

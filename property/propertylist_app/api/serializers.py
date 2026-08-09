@@ -4161,6 +4161,7 @@ class PaymentTransactionDetailSerializer(serializers.ModelSerializer):
 
 class NotificationSerializer(serializers.ModelSerializer):
     deep_link = serializers.SerializerMethodField()
+    cta_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
@@ -4174,6 +4175,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "target_type",
             "target_id",
             "deep_link",
+            "cta_url",
             "is_read",
             "created_at",
         ]
@@ -4212,6 +4214,30 @@ class NotificationSerializer(serializers.ModelSerializer):
 
         # fallback
         return "/app/inbox"
+    
+    
+    
+    
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_cta_url(self, obj) -> str:
+        """
+        Returns the web/Vercel route for browser navigation.
+        Mobile continues to use deep_link.
+        """
+
+        if getattr(obj, "thread_id", None):
+            return f"/messages?thread={obj.thread_id}"
+
+        if getattr(obj, "target_type", None) and getattr(obj, "target_id", None):
+            t = obj.target_type
+
+            if t == "booking":
+                return f"/viewings/{obj.target_id}"
+
+            if t == "tenancy_review":
+                return "/leave-a-review"
+
+        return self.get_deep_link(obj)
 
 
 class ReportSerializer(serializers.ModelSerializer):

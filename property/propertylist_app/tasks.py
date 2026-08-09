@@ -621,7 +621,7 @@ def task_tenancy_prompts_sweep() -> int:
         )
 
         if tenancy_message and tenancy_message.thread_id:
-            return f"/app/threads/{tenancy_message.thread_id}"
+            return f"/messages?thread={tenancy_message.thread_id}"
 
         # Safe fallback for older tenancy records that may not yet have
         # an inbox-thread message.
@@ -883,7 +883,7 @@ def task_tenancy_prompts_sweep() -> int:
         )
 
         if prompt_thread is not None:
-            deep_link = f"/app/threads/{prompt_thread.id}"
+            deep_link = f"/messages?thread={prompt_thread.id}"
         
         
 
@@ -1065,13 +1065,8 @@ def task_tenancy_prompts_sweep() -> int:
             available_action="leave_review",
         )
 
-        # Email and in-app notification should open the exact tenancy thread.
-        # Older tenancies without a thread use the safe fallback.
-        review_deep_link = (
-            f"/app/threads/{prompt_thread.id}"
-            if prompt_thread is not None
-            else _tenancy_thread_deep_link(t)
-        )
+        # Review notifications should open the dedicated web review page.
+        review_deep_link = "/leave-a-review"
 
         # Notify the landlord only if the landlord has not reviewed.
         if not landlord_done:
