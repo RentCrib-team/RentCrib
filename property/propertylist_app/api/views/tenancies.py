@@ -327,9 +327,11 @@ class TenancyExtensionCreateView(APIView):
         # The window remains open until the QA review stage begins.
         #
         # PRODUCTION:
-        # This becomes:
-        #   tenancy end date - 7 days
-        #   through tenancy end date + 7 days.
+        # Tenancy information can be updated/renewed from
+        # 7 days before the real tenancy end date until the end date.
+        #
+        # Once the tenancy has genuinely ended, renewal is no longer
+        # allowed and the room becomes available for reletting.
         update_window_start = tenancy.still_living_check_at
         update_window_end = tenancy.review_open_at
 

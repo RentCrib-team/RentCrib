@@ -1214,14 +1214,44 @@ def task_refresh_tenancy_status_and_review_windows():
 
     today = timezone.localdate()
 
-    for t in Tenancy.objects.exclude(status=Tenancy.STATUS_CANCELLED).iterator():
-        if t.status == Tenancy.STATUS_CONFIRMED and t.move_in_date <= today:
+    for t in (
+        Tenancy.objects
+        .select_related("room")
+        .exclude(status=Tenancy.STATUS_CANCELLED)
+        .iterator()
+    ):
+        if (
+            t.status == Tenancy.STATUS_CONFIRMED
+            and t.move_in_date <= today
+        ):
             t.status = Tenancy.STATUS_ACTIVE
 
-        end_date = compute_end_date(t.move_in_date, t.duration_months)
+        end_date = compute_end_date(
+            t.move_in_date,
+            t.duration_months,
+        )
 
-        if t.status in (Tenancy.STATUS_CONFIRMED, Tenancy.STATUS_ACTIVE) and end_date < today:
+        if (
+            t.status in (
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            )
+            and end_date < today
+        ):
             t.status = Tenancy.STATUS_ENDED
+
+            # The tenancy has genuinely ended.
+            # Make the room available immediately for reletting.
+            room = t.room
+
+            if not room.is_available:
+                room.is_available = True
+                room.save(
+                    update_fields=[
+                        "is_available",
+                        "updated_at",
+                    ]
+                )
 
         if (
             t.review_open_at is None
@@ -1232,8 +1262,11 @@ def task_refresh_tenancy_status_and_review_windows():
                 t.move_in_date,
                 t.duration_months,
             )
+
             t.review_open_at = t.review_open_at or ro
             t.review_deadline_at = t.review_deadline_at or rd
-            t.still_living_check_at = t.still_living_check_at or sl
+            t.still_living_check_at = (
+                t.still_living_check_at or sl
+            )
 
         t.save()

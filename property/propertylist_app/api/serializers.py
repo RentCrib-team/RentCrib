@@ -733,7 +733,7 @@ class TenancyRespondSerializer(serializers.Serializer):
                     }
                 )
         return attrs
-    
+
     @transaction.atomic
     def save(self, **kwargs):
         request = self.context["request"]
@@ -759,7 +759,7 @@ class TenancyRespondSerializer(serializers.Serializer):
             # tenancy.review_open_at = timezone.make_aware(
             #     timezone.datetime.combine(end_date, timezone.datetime.min.time())
             # ) + timedelta(days=7)
-            
+
             # Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
             tenancy.review_open_at = timezone.make_aware(
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
@@ -772,18 +772,18 @@ class TenancyRespondSerializer(serializers.Serializer):
             # tenancy.still_living_check_at = timezone.make_aware(
             #     timezone.datetime.combine(end_date, timezone.datetime.min.time())
             # ) - timedelta(days=7)
-            
-            
+
+
             # TEMPORARY QA RULE:
             # Timer 2 becomes due 10 minutes after both parties confirm
             # the tenancy information.
             #
             # Production must revert to 7 days before the tenancy end date.
             tenancy.still_living_check_at = now + timedelta(minutes=10)
-            
-            
-            
-            
+
+
+
+
         if action == "cancel":
             # Landlord rejected a tenant-created tenancy claim.
             # The room availability is deliberately not changed here:
@@ -795,9 +795,9 @@ class TenancyRespondSerializer(serializers.Serializer):
             tenancy.still_living_confirmed_at = None
             tenancy.save()
 
-            return tenancy    
-            
-            
+            return tenancy
+
+
 
         if action == "propose_changes":
             tenancy.move_in_date = self.validated_data["move_in_date"]
@@ -901,10 +901,10 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
                 "created_at",
                 "updated_at",
             ]
-                    
+
         read_only_fields = fields
-        
-        
+
+
     @extend_schema_field(OpenApiTypes.STR)
     def get_tenant_name(self, obj):
         tenant = getattr(obj, "tenant", None)
@@ -927,9 +927,9 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         full_name = landlord.get_full_name().strip()
 
         return full_name or landlord.username
-        
-        
-        
+
+
+
 
     @extend_schema_field(OpenApiTypes.URI)
     def get_profile_image(self, obj):
@@ -952,7 +952,7 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
         return url
 
 
-    
+
     def _get_tenancy_action_permissions(self, obj):
         request = self.context.get("request")
         user = getattr(request, "user", None)
@@ -1059,10 +1059,10 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.STR)
     def get_tenancy_action_reason(self, obj):
         return self._get_tenancy_action_permissions(obj)["reason"]
-        
-        
-        
-        
+
+
+
+
 
 
     def _get_review_eligibility(self, obj):
@@ -1149,7 +1149,7 @@ class RoomPhotoResponseSerializer(serializers.Serializer):
         read_only=True,
         allow_null=True,
     )
-   
+
     status = serializers.CharField(
         read_only=True,
     )
@@ -1196,8 +1196,8 @@ class RoomSerializer(serializers.ModelSerializer):
     landlord_type = serializers.SerializerMethodField(read_only=True)
     landlord_type_label = serializers.SerializerMethodField(read_only=True)
     landlord_verified = serializers.SerializerMethodField(read_only=True)
-    
-    
+
+
 
     # Amenity keys matching the Step 2/5 chips
     AMENITY_CHOICES = {
@@ -1294,9 +1294,9 @@ class RoomSerializer(serializers.ModelSerializer):
         return normalised
 
 
-        
-    
-    
+
+
+
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -1423,7 +1423,7 @@ class RoomSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"availability_to_time": "End time must be after start time."}
             )
-            
+
         cover_photo = attrs.get("cover_photo")
 
         if cover_photo:
@@ -1435,8 +1435,8 @@ class RoomSerializer(serializers.ModelSerializer):
                         "cover_photo":
                         "Selected cover photo does not belong to this listing."
                     }
-                )    
-            
+                )
+
 
         return attrs
 
@@ -1731,7 +1731,7 @@ class RoomSerializer(serializers.ModelSerializer):
                 desired_dates.append(selected_date)
 
         desired_slots = []
-        
+
         start_minutes = round_up_to_quarter(start_time)
         end_minutes = round_down_to_quarter(end_time)
 
@@ -1780,7 +1780,7 @@ class RoomSerializer(serializers.ModelSerializer):
                     desired_slots.append((current, slot_end))
 
                 current = slot_end
-                
+
         desired_set = set(desired_slots)
 
         # Remove only future unbooked slots that no longer match the
@@ -1791,13 +1791,13 @@ class RoomSerializer(serializers.ModelSerializer):
         )
 
         for slot in future_slots:
-            has_active_booking = Booking.objects.filter(
+            # Never delete a slot referenced by any booking.
+            # Booking.slot uses PROTECT, including for old/cancelled bookings.
+            has_booking = Booking.objects.filter(
                 slot=slot,
-                canceled_at__isnull=True,
-                is_deleted=False,
             ).exists()
 
-            if has_active_booking:
+            if has_booking:
                 continue
 
             if (slot.start, slot.end) not in desired_set:
@@ -1830,7 +1830,7 @@ class RoomSerializer(serializers.ModelSerializer):
             new_slots,
             ignore_conflicts=True,
         )
-        
+
     def create(self, validated_data):
         room = super().create(validated_data)
 
@@ -2185,8 +2185,8 @@ class RoomSerializer(serializers.ModelSerializer):
         - images remain hidden until at least 3 are approved
         """
         images = self._room_images(obj)
-        
-        
+
+
         selected_cover_id = getattr(obj, "cover_photo_id", None)
 
         if selected_cover_id:
@@ -2208,8 +2208,8 @@ class RoomSerializer(serializers.ModelSerializer):
                         if image.id != selected_cover_id
                     ],
                 ]
-        
-        
+
+
 
         if not images:
             legacy_url = self._absolute_media_url(
@@ -2294,7 +2294,7 @@ class RoomSerializer(serializers.ModelSerializer):
     def get_other_images(self, obj) -> list[str] | None:
         return self._image_payload(obj)["other_images"]
 
-    
+
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_image_status(self, obj) -> str | None:
@@ -2313,7 +2313,7 @@ class RoomSerializer(serializers.ModelSerializer):
         state = getattr(obj, "listing_state", None)
         if state:
             return str(state)
-        
+
         today = date.today()
 
         # 1) Explicit hidden + past paid_until = expired
@@ -2388,7 +2388,7 @@ class RoomPreviewSerializer(serializers.Serializer):
         Return all owner-visible photos for the room preview endpoint.
 
         Approved images use the original image.
-       
+
         """
         request = self.context.get("request")
         photos = []
@@ -2399,7 +2399,7 @@ class RoomPreviewSerializer(serializers.Serializer):
 
         for index, img in enumerate(qs):
             original_url = None
-            
+
 
             if img.image:
                 try:
@@ -2407,7 +2407,7 @@ class RoomPreviewSerializer(serializers.Serializer):
                 except (ValueError, AttributeError):
                     original_url = None
 
-            
+
 
             if request is not None:
                 if original_url:
@@ -2451,7 +2451,7 @@ class RoomPreviewSerializer(serializers.Serializer):
                         "image": legacy_url,
                         "url": legacy_url,
                         "original_image": legacy_url,
-                        
+
                         "status": "legacy",
                         "is_main": True,
                     }
@@ -2497,9 +2497,9 @@ class SearchFiltersSerializer(serializers.Serializer):
     def validate_postcode(self, value):
         value = sanitize_plain_text(value, max_len=20).upper()
         return normalize_uk_postcode(value)
-    
- 
-    
+
+
+
 
     def validate_street(self, value):
         return sanitize_plain_text(value, max_len=120)
@@ -2995,8 +2995,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return normalize_uk_postcode(value)
         except Exception:
             raise serializers.ValidationError("Invalid UK postcode.")
-        
-        
+
+
     def validate_occupation(self, value):
         if value is None:
             return ""
@@ -3017,9 +3017,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
         if not value:
             return ""
 
-        return value    
-    
-    
+        return value
+
+
     def validate_preferred_timezone(self, value):
         value = (value or "").strip()
 
@@ -3036,8 +3036,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             )
 
         return value
-        
-        
+
+
 
     def validate_date_of_birth(self, value):
         if not value:
@@ -3285,7 +3285,7 @@ class ProfilePageSerializer(serializers.Serializer):
         email = serializers.EmailField()
         username = serializers.CharField()
         date_joined = serializers.DateTimeField()
-        
+
         landlord_verified = serializers.BooleanField()
 
         # profile fields
@@ -3532,9 +3532,9 @@ class RoomImageSerializer(serializers.ModelSerializer):
 
     def get_can_replace(self, obj):
         return obj.status != RoomImage.STATUS_APPROVED
-    
-    
-    
+
+
+
 class AvatarUploadResponseSerializer(serializers.Serializer):
     avatar = serializers.URLField(allow_null=True)
 
@@ -3661,9 +3661,9 @@ class MessageSerializer(serializers.ModelSerializer):
                 "is_read",
                 "read_at",
             ]
-        
-        
-    
+
+
+
     @extend_schema_field(
         serializers.ListField(
             child=serializers.CharField(),
@@ -3749,7 +3749,7 @@ class MessageSerializer(serializers.ModelSerializer):
         )
 
         return serializer.data.get("available_actions", [])
-            
+
 
     def get_is_read(self, obj):
         request = self.context.get("request")
@@ -3847,7 +3847,7 @@ class MessageThreadSerializer(serializers.ModelSerializer):
             "username": other_user.username,
             "profile_image": avatar_url,
         }
-        
+
 
     @extend_schema_field(MessageSerializer(allow_null=True))
     def get_last_message(self, obj):
@@ -3997,7 +3997,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "start": {"required": False},
             "end": {"required": False},
         }
-        
+
 
 class BookingCreateRequestSerializer(serializers.Serializer):
     room = serializers.IntegerField(required=False)
@@ -4007,10 +4007,10 @@ class BookingCreateRequestSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         return Booking.objects.create(**validated_data)
-    
-    
-    
-    
+
+
+
+
 class BookingRescheduleSerializer(serializers.Serializer):
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
@@ -4029,7 +4029,7 @@ class BookingRescheduleSerializer(serializers.Serializer):
                 {"start": "Cannot reschedule a viewing into the past."}
             )
 
-        return attrs   
+        return attrs
 
 
 class BookingResponseEnvelopeSerializer(serializers.Serializer):
