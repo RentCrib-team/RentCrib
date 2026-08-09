@@ -46,7 +46,7 @@ from drf_spectacular.types import OpenApiTypes
 
 #Project
 from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking
-from propertylist_app.services.image import should_auto_approve_upload
+from propertylist_app.services.image import compress_listing_upload, should_auto_approve_upload
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.validators import (
     assert_no_duplicate_files,
@@ -777,6 +777,9 @@ class RoomPhotoUploadView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Compress only after the original upload has passed all existing checks.
+        file_obj = compress_listing_upload(file_obj)
 
         # IMPORTANT: reset file pointer before any downstream processing
         try:

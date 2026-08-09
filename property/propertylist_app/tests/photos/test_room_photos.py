@@ -115,4 +115,82 @@ def test_non_owner_cannot_upload_or_delete_room_photo():
 
     # Ensure nothing changed
     assert RoomImage.objects.filter(room=room).count() == 1
+    
+    
+    
+@pytest.mark.django_db
+def test_room_photo_upload_is_compressed_before_storage():
+    owner = User.objects.create_user(
+        username="compress-owner",
+        password="pass123",
+        email="compress@example.com",
+    )
+
+    cat = RoomCategorie.objects.create(
+        name="Compression Photos",
+        active=True,
+    )
+
+    room = Room.objects.create(
+        title="Compression Room",
+        description="desc",
+        price_per_month=600,
+        location="SW1A 1AA London",
+        category=cat,
+        property_owner=owner,
+        property_type="flat",
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=owner)
+
+    # Create a realistic large image.
+    img = PIL_Image.new(
+        "RGB",
+        (4000, 3000),
+        (120, 160, 200),
+    )
+
+    buf = io.BytesIO()
+    img.save(
+        buf,
+        format="JPEG",
+        quality=95,
+    )
+
+    original_bytes = buf.getvalue()
+    original_size = len(original_bytes)
+
+    upload = SimpleUploadedFile(
+        "large-room-photo.jpg",
+        original_bytes,
+        content_type="image/jpeg",
+    )
+
+    url_up = reverse(
+        "v1:room-photo-upload",
+        kwargs={"pk": room.pk},
+    )
+
+    with patch(
+        "propertylist_app.api.views.rooms.should_auto_approve_upload",
+        return_value=True,
+    ):
+        response = client.post(
+            url_up,
+            {"image": upload},
+            format="multipart",
+        )
+
+    assert response.status_code == 201, response.data
+
+    photo = RoomImage.objects.get(room=room)
+
+    assert photo.image.name.endswith(".webp")
+    assert photo.image.size < original_size
+
+    with photo.image.open("rb") as stored_file:
+        with PIL_Image.open(stored_file) as stored_image:
+            assert stored_image.format == "WEBP"
+            assert max(stored_image.size) <= 2048    
 
