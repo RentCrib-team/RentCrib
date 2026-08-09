@@ -20,6 +20,108 @@ BREAKPOINTS = (640, 1280)  # small, medium
 MODERATION_JPEG_MAX_DIMENSION = 4096
 MODERATION_JPEG_QUALITY = 90
 
+LISTING_UPLOAD_MAX_DIMENSION = 2048
+LISTING_UPLOAD_WEBP_QUALITY = 82
+
+
+def compress_listing_upload(uploaded_file):
+    """
+    Compress a validated room-listing image before it is passed into
+    the existing storage and moderation workflow.
+
+    Safety behaviour:
+    - Keeps the original upload if compression fails.
+    - Keeps the original upload if compression does not reduce file size.
+    - Does not change the existing upload validation rules.
+    """
+
+    try:
+        uploaded_file.seek(0)
+
+        original_size = getattr(uploaded_file, "size", 0) or 0
+        original_name = getattr(
+            uploaded_file,
+            "name",
+            "listing-photo",
+        )
+
+        with Image.open(uploaded_file) as source:
+            # Correct rotation from phone-camera EXIF information.
+            image = ImageOps.exif_transpose(source)
+            image.load()
+
+            # Reduce very large phone-camera images.
+            if max(image.size) > LISTING_UPLOAD_MAX_DIMENSION:
+                image.thumbnail(
+                    (
+                        LISTING_UPLOAD_MAX_DIMENSION,
+                        LISTING_UPLOAD_MAX_DIMENSION,
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+
+            # WebP output needs a normal RGB image.
+            if image.mode in ("RGBA", "LA"):
+                background = Image.new(
+                    "RGB",
+                    image.size,
+                    "white",
+                )
+
+                alpha = image.getchannel("A")
+                background.paste(
+                    image,
+                    mask=alpha,
+                )
+
+                image = background
+
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            output = io.BytesIO()
+
+            image.save(
+                output,
+                format="WEBP",
+                quality=LISTING_UPLOAD_WEBP_QUALITY,
+                method=6,
+            )
+
+            output.seek(0)
+            compressed_bytes = output.read()
+            compressed_size = len(compressed_bytes)
+
+            # If compression did not actually make the image smaller,
+            # keep the already-validated original file.
+            if (
+                original_size > 0
+                and compressed_size >= original_size
+            ):
+                uploaded_file.seek(0)
+                return uploaded_file
+
+            stem = Path(original_name).stem or "listing-photo"
+
+            compressed_file = ContentFile(
+                compressed_bytes,
+                name=f"{stem}.webp",
+            )
+
+            compressed_file.content_type = "image/webp"
+            compressed_file.seek(0)
+
+            return compressed_file
+
+    except Exception:
+        # Compression must never break a previously valid upload.
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+
+        return uploaded_file
+
 
 def _normalise_image_for_moderation(uploaded_file):
     """
