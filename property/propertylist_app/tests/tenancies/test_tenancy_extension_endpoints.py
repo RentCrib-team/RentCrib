@@ -45,15 +45,19 @@ def _make_tenancy(room, landlord, tenant, *, proposed_by, status, move_in_days_a
     move_in = date.today() - timedelta(days=move_in_days_ago)
 
     return Tenancy.objects.create(
-        room=room,
-        landlord=landlord,
-        tenant=tenant,
-        proposed_by=proposed_by,
-        move_in_date=move_in,
-        duration_months=duration_months,
-        status=status,
-        landlord_confirmed_at=now - timedelta(days=move_in_days_ago),
-        tenant_confirmed_at=now - timedelta(days=move_in_days_ago),
+    room=room,
+    landlord=landlord,
+    tenant=tenant,
+    proposed_by=proposed_by,
+    move_in_date=move_in,
+    duration_months=duration_months,
+    status=status,
+    landlord_confirmed_at=now - timedelta(days=move_in_days_ago),
+    tenant_confirmed_at=now - timedelta(days=move_in_days_ago),
+
+    # Test fixture: place tenancy inside the QA update window.
+    still_living_check_at=now - timedelta(minutes=1),
+    review_open_at=now + timedelta(minutes=9),
     )
 
 
@@ -590,7 +594,10 @@ def test_extension_prevents_multiple_open_proposals(user_factory, room_factory):
     assert res.status_code == 400
 
 
-def test_extension_disallowed_when_tenancy_ended(user_factory, room_factory):
+def test_extension_allowed_when_tenancy_ended_but_inside_grace_window(
+    user_factory,
+    room_factory,
+):
     Tenancy = _get_model("propertylist_app", "Tenancy")
 
     landlord = user_factory(username="ex_landlord8")
@@ -615,7 +622,7 @@ def test_extension_disallowed_when_tenancy_ended(user_factory, room_factory):
         format="json",
     )
 
-    assert res.status_code == 400
+    assert res.status_code == 201, res.data
     
 def test_multiple_consecutive_extensions_restart_lifecycle_each_time(
     user_factory,
@@ -801,6 +808,27 @@ def test_multiple_consecutive_extensions_restart_lifecycle_each_time(
     )
     second_renewal_duration = 8
 
+
+        # Simulate the renewed tenancy reaching its next QA update window.
+    now = timezone.now()
+
+    tenancy.still_living_check_at = (
+        now - timedelta(minutes=1)
+    )
+    tenancy.review_open_at = (
+        now + timedelta(minutes=9)
+    )
+
+    tenancy.save(
+        update_fields=[
+            "still_living_check_at",
+            "review_open_at",
+        ]
+    )
+    
+    
+    
+    
     second_create_response = tenant_client.post(
         first_create_url,
         data={
