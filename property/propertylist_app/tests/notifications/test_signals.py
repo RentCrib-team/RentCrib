@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from propertylist_app.models import (
     MessageThread,
     Message,
+    MessageRead,
     MessageThreadState,
     Room,
     RoomCategorie,
@@ -177,3 +178,65 @@ def test_new_message_restores_recipient_binned_thread_and_returns_it_in_messages
         item["id"] == thread.id
         for item in payload
     )
+    
+    
+def test_thread_mark_read_emits_realtime_read_and_unread_count():
+    sender, reader = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, reader)
+
+    msg1 = Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="First unread",
+        message_type=Message.TYPE_TEXT,
+    )
+    msg2 = Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="Second unread",
+        message_type=Message.TYPE_TEXT,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=reader)
+
+    with patch(
+        "propertylist_app.api.views.messaging.push_user_realtime_event"
+    ) as realtime:
+        response = client.post(
+            f"/api/v1/messages/threads/{thread.id}/read/"
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["data"]["marked"] == 2
+
+    assert MessageRead.objects.filter(
+        user=reader,
+        message__in=[msg1, msg2],
+    ).count() == 2
+
+    realtime.assert_any_call(
+        sender.id,
+        "message_read",
+        {
+            "thread_id": thread.id,
+            "reader_id": reader.id,
+            "message_ids": [msg1.id, msg2.id],
+        },
+    )
+
+    realtime.assert_any_call(
+        reader.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "unread_count": 0,
+        },
+    )
+
+    assert realtime.call_count == 2    

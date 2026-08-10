@@ -39,6 +39,7 @@ from propertylist_app.models import (
 )
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.throttling import MessageUserThrottle, MessagingScopedThrottle
+from propertylist_app.services.realtime import push_user_realtime_event
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
@@ -1027,14 +1028,92 @@ class ThreadMarkReadView(APIView):
             pk=thread_id,
         )
 
-        to_mark = thread.messages.exclude(sender=request.user).exclude(reads__user=request.user)
+        # Materialise before creating MessageRead rows.
+        # Otherwise re-evaluating the queryset afterwards can incorrectly
+        # report zero because the messages have just become read.
+        messages_to_mark = list(
+            thread.messages
+            .exclude(sender=request.user)
+            .exclude(reads__user=request.user)
+        )
+
         MessageRead.objects.bulk_create(
-            [MessageRead(message=m, user=request.user) for m in to_mark],
+            [
+                MessageRead(
+                    message=message,
+                    user=request.user,
+                )
+                for message in messages_to_mark
+            ],
             ignore_conflicts=True,
         )
 
-        return ok_response({"marked": to_mark.count()}, status_code=status.HTTP_200_OK)
+        # Tell each original sender which of their messages were read.
+        message_ids_by_sender = {}
 
+        for message in messages_to_mark:
+            message_ids_by_sender.setdefault(
+                message.sender_id,
+                [],
+            ).append(message.id)
+
+        for sender_id, message_ids in message_ids_by_sender.items():
+            push_user_realtime_event(
+                sender_id,
+                "message_read",
+                {
+                    "thread_id": thread.id,
+                    "reader_id": request.user.id,
+                    "message_ids": message_ids,
+                },
+            )
+
+        # Use the same unread definition as MessageStatsView:
+        # participant threads, excluding threads this user placed in Bin.
+        base_threads = MessageThread.objects.filter(
+            participants=request.user,
+        )
+
+        bin_thread_ids = list(
+            MessageThreadState.objects
+            .filter(
+                user=request.user,
+                in_bin=True,
+            )
+            .values_list(
+                "thread_id",
+                flat=True,
+            )
+        )
+
+        if bin_thread_ids:
+            base_threads = base_threads.exclude(
+                id__in=bin_thread_ids,
+            )
+
+        total_unread = (
+            Message.objects
+            .filter(thread__in=base_threads)
+            .exclude(sender=request.user)
+            .exclude(reads__user=request.user)
+            .count()
+        )
+
+        push_user_realtime_event(
+            request.user.id,
+            "unread_count_changed",
+            {
+                "thread_id": thread.id,
+                "unread_count": total_unread,
+            },
+        )
+
+        return ok_response(
+            {
+                "marked": len(messages_to_mark),
+            },
+            status_code=status.HTTP_200_OK,
+        )
 
 
 
