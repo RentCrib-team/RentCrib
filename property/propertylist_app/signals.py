@@ -9,6 +9,7 @@ from propertylist_app.models import (
     Booking,
     Message,
     MessageThread,
+    MessageThreadState,
     Notification,
     Review,
     Room,
@@ -212,8 +213,20 @@ def message_created_create_notifications(
     thread: MessageThread = instance.thread
 
     recipients = thread.participants.exclude(
-        pk=instance.sender_id
+    pk=instance.sender_id
     ).all()
+
+    # A genuine new incoming message must restore the conversation
+    # for its recipients. Otherwise a thread previously placed in the
+    # bin remains hidden even though the recipient has received a new
+    # message, notification and email.
+    MessageThreadState.objects.filter(
+        user__in=recipients,
+        thread=thread,
+        in_bin=True,
+    ).update(
+        in_bin=False,
+    )
 
     notifications_to_create = []
 

@@ -282,9 +282,24 @@ class NotificationService:
         """
         Deliver one queued notification.
 
-        Any rendering or provider error is recorded against this notification
-        without allowing it to block later notifications in the queue.
+        Lock the database row before sending so two Celery workers cannot
+        deliver the same notification at the same time.
         """
+        notification = (
+            OutboundNotification.objects
+            .select_for_update()
+            .select_related("user")
+            .get(pk=notification.pk)
+        )
+
+        # Another worker may have delivered this notification while this
+        # worker was waiting for the row lock.
+        if notification.status in {
+            OutboundNotification.STATUS_SENT,
+            OutboundNotification.STATUS_SKIPPED,
+        }:
+            return
+
         prefs = getattr(notification.user, "notification_pref", None)
 
         if (

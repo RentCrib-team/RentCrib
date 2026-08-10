@@ -3630,7 +3630,7 @@ class AvatarUploadRequestSerializer(serializers.Serializer):
 
 
 class MessageSerializer(serializers.ModelSerializer):
-    sender = serializers.StringRelatedField(read_only=True)
+    sender = serializers.SerializerMethodField()
     is_read = serializers.SerializerMethodField()
     read_at = serializers.SerializerMethodField()
     available_actions = serializers.SerializerMethodField()
@@ -3662,7 +3662,18 @@ class MessageSerializer(serializers.ModelSerializer):
                 "read_at",
             ]
 
+    
+    @extend_schema_field(serializers.CharField())
+    def get_sender(self, obj):
+        metadata = obj.metadata or {}
 
+        if metadata.get("system_event") is True:
+            return "RentCrib"
+
+        return str(obj.sender)
+    
+    
+    
 
     @extend_schema_field(
         serializers.ListField(

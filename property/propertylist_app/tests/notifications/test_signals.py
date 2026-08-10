@@ -1,7 +1,15 @@
 import pytest
 from unittest.mock import patch
+from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
-from propertylist_app.models import MessageThread, Message, Room, RoomCategorie, Notification as InAppNotification
+from propertylist_app.models import (
+    MessageThread,
+    Message,
+    MessageThreadState,
+    Room,
+    RoomCategorie,
+    Notification as InAppNotification,
+)
 from notifications.models import NotificationTemplate, OutboundNotification
 from django.utils import timezone
 from datetime import timedelta
@@ -58,3 +66,54 @@ def test_new_booking_signal_queues_owner_and_booker_emails():
 
     assert OutboundNotification.objects.filter(template_key="booking.new", user=owner).exists()
     assert OutboundNotification.objects.filter(template_key="booking.confirmation", user=booker).exists()
+    
+    
+def test_new_message_restores_recipient_binned_thread_and_returns_it_in_messages_api():
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, recipient)
+
+    MessageThreadState.objects.create(
+        user=recipient,
+        thread=thread,
+        in_bin=True,
+    )
+
+    # Confirm the thread starts in the recipient's bin.
+    state = MessageThreadState.objects.get(
+        user=recipient,
+        thread=thread,
+    )
+    assert state.in_bin is True
+
+    # A genuine incoming message should restore the conversation.
+    Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="Fresh incoming message",
+        message_type=Message.TYPE_TEXT,
+    )
+
+    state.refresh_from_db()
+
+    # The thread must automatically leave the recipient's bin.
+    assert state.in_bin is False
+
+    # It must also be returned by the normal Messages API again.
+    client = APIClient()
+    client.force_authenticate(user=recipient)
+
+    response = client.get(
+        "/api/v1/messages/threads/",
+        {"limit": 100},
+    )
+
+    assert response.status_code == 200
+
+    payload = response.data.get("data", [])
+
+    assert any(
+        item["id"] == thread.id
+        for item in payload
+    )
