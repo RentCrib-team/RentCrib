@@ -11,6 +11,8 @@ from drf_spectacular.utils import extend_schema
 
 from .views.identity_verification import MyIdentityVerificationView
 
+from .views.realtime import RealtimeTicketView
+
 from propertylist_app.api import views
 
 from .views import EmailOTPVerifyView, EmailOTPResendView,PhoneOTPStartView, PhoneOTPVerifyView,RoomListAlt
@@ -152,6 +154,15 @@ urlpatterns = [
     path("rooms/<int:pk>/save/",           RoomSaveView.as_view(),       name="room-save"),
     path("rooms/<int:pk>/save-toggle/",    RoomSaveToggleView.as_view(), name="room-save-toggle"),
     path("users/me/saved/rooms/",          MySavedRoomsView.as_view(),   name="my-saved-rooms"),
+    
+    
+        # Realtime / WebSocket authentication
+    path(
+        "realtime/ticket/",
+        RealtimeTicketView.as_view(),
+        name="realtime-ticket",
+    ),
+    
 
     # --- Messaging ---
     path("messages/threads/",                              MessageThreadListCreateView.as_view(), name="message-threads"),

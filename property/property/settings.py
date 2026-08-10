@@ -186,6 +186,8 @@ APPLE_AUDIENCE = os.getenv("APPLE_AUDIENCE", "").strip()
 # Application definition
 # -----------------------------
 INSTALLED_APPS = [
+    "daphne",
+    "channels",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -203,6 +205,7 @@ INSTALLED_APPS = [
     "notifications.apps.NotificationsConfig",
     "django_celery_beat",
     "user_app",
+    
 
 
 
@@ -592,6 +595,19 @@ WEBHOOK_SECRETS = {
 # Caching
 # -----------------------------
 REDIS_URL = os.getenv("REDIS_CACHE_URL")
+
+ASGI_APPLICATION = "property.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [
+                REDIS_URL or "redis://127.0.0.1:6379/3",
+            ],
+        },
+    },
+}
 
 if not REDIS_URL and not DEBUG and not TESTING:
     import warnings

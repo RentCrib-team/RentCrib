@@ -16,6 +16,7 @@ from propertylist_app.models import (
     UserProfile,
 )
 from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.realtime import push_user_realtime_event
 from propertylist_app.services.reviews import (
     update_room_rating_from_revealed_reviews,
 )
@@ -244,6 +245,19 @@ def message_created_create_notifications(
     message_snippet = instance.body[:200] if instance.body else ""
 
     for user in recipients:
+        # Realtime chat delivery is independent of email/in-app notification
+        # preferences. The actual message must still arrive instantly.
+        push_user_realtime_event(
+            user.id,
+            "new_message",
+            {
+                "message_id": instance.id,
+                "thread_id": thread.id,
+                "sender_id": instance.sender_id,
+            },
+        )
+
+        profile, _ = UserProfile.objects.get_or_create(user=user)
         profile, _ = UserProfile.objects.get_or_create(user=user)
 
         if not getattr(profile, "notify_messages", True):
@@ -259,6 +273,21 @@ def message_created_create_notifications(
                 body=message_snippet,
             )
         )
+        
+        
+        push_user_realtime_event(
+            user.id,
+            "new_notification",
+            {
+                "kind": "message",
+                "message_id": instance.id,
+                "thread_id": thread.id,
+            },
+        )
+        
+        
+        
+        
 
         _queue_email(
             user=user,

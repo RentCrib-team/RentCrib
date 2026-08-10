@@ -40,6 +40,66 @@ def test_new_message_signal_queues_emails_and_inapp():
 
     # In-app notification created
     assert InAppNotification.objects.filter(user=recipient, thread=t, message=msg).exists()
+    
+    
+def test_new_message_signal_emits_realtime_message_and_notification():
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, recipient)
+
+    NotificationTemplate.objects.create(
+        key="message.new",
+        channel="email",
+        subject="New message",
+        body="Message",
+        is_active=True,
+    )
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        msg = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Realtime test message",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_message",
+        {
+            "message_id": msg.id,
+            "thread_id": thread.id,
+            "sender_id": sender.id,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_notification",
+        {
+            "kind": "message",
+            "message_id": msg.id,
+            "thread_id": thread.id,
+        },
+    )
+
+    assert realtime.call_count == 2
+
+    assert InAppNotification.objects.filter(
+        user=recipient,
+        thread=thread,
+        message=msg,
+    ).exists()
+
+    assert OutboundNotification.objects.filter(
+        user=recipient,
+        template_key="message.new",
+    ).count() == 1    
+    
+    
 
 def test_new_booking_signal_queues_owner_and_booker_emails():
     owner, booker = make_users(2)
