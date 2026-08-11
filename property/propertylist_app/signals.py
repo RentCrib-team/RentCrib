@@ -234,7 +234,7 @@ def message_created_create_notifications(
     deep_link = f"/messages?thread={thread.id}"
     full_url = build_absolute_url(
         deep_link,
-        force_login=True,
+        force_login=False,
     )
 
     sender_name = (
