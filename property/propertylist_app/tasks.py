@@ -1132,13 +1132,59 @@ def task_tenancy_prompts_sweep() -> int:
     # -------------------------------------------------
 
     # 3a) Reveal any reviews whose reveal time has passed
-    to_reveal = Review.objects.filter(
+    to_reveal = list(
+    Review.objects
+    .filter(
         active=False,
         reveal_at__isnull=False,
         reveal_at__lte=now,
     )
+    .select_related(
+        "reviewee",
+        "tenancy",
+        "tenancy__room",
+    )
+    )
 
-    revealed_count = to_reveal.update(active=True)
+    revealed_count = 0
+
+    for review in to_reveal:
+        review.active = True
+        review.save(update_fields=["active"])
+
+        revealed_count += 1
+
+        tenancy = review.tenancy
+        reviewee = review.reviewee
+
+        if not reviewee:
+            continue
+
+        # The review has just become visible.
+        # Because only active=False reviews enter to_reveal,
+        # this notification/email is sent only once.
+        _, notification_created = Notification.objects.get_or_create(
+            user=reviewee,
+            type="review_revealed",
+            target_type="tenancy_review",
+            target_id=review.id,
+            defaults={
+                "title": "Review now available",
+                "body": (
+                    f"A review from your tenancy at "
+                    f"{tenancy.room.title} is now available to view."
+                ),
+            },
+        )
+
+        if notification_created:
+            _maybe_queue_reminder(
+                reviewee,
+                "tenancy.review_revealed",
+                deep_link="/leave-a-review",
+                room_title=tenancy.room.title,
+            )
+            count += 1
     if revealed_count:
         # refresh tenant ratings for tenants affected by newly revealed landlord->tenant reviews
         affected_tenant_ids = (
