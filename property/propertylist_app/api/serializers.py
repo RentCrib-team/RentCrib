@@ -1535,26 +1535,48 @@ class RoomSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
+        """
+        Returns one of: 'draft', 'active', 'expired', 'hidden', 'rented'.
+
+        'active' means the room is currently live/listed:
+        - status == active
+        - is_available == True
+        - paid_until exists
+        - paid_until has not expired
+        """
+        today = date.today()
+
+        # Rented / unavailable always takes priority.
         if not getattr(obj, "is_available", True):
             return "rented"
 
-        annotated = getattr(obj, "listing_state", None)
-        if annotated:
-            return str(annotated)
+        # If the queryset annotated a listing_state, reuse it.
+        state = getattr(obj, "listing_state", None)
+        if state:
+            return str(state)
 
-        paid_until = getattr(obj, "paid_until", None)
-        status = getattr(obj, "status", None)
-
-        if status == "hidden":
-            return "hidden"
-
-        if paid_until is None:
+        # Explicit draft status must remain draft.
+        if obj.status == "draft":
             return "draft"
 
-        if paid_until < timezone.now().date():
+        # Never paid / not yet listed.
+        if obj.paid_until is None:
+            return "draft"
+
+        # Paid period has ended.
+        if obj.paid_until < today:
             return "expired"
 
-        return "active"
+        # Explicitly unpublished / hidden while payment is still valid.
+        if obj.status == "hidden":
+            return "hidden"
+
+        # Only explicitly active + available + currently paid is live.
+        if obj.status == "active":
+            return "active"
+
+        # Any unknown/non-live lifecycle state must not be presented as active.
+        return "draft"
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_landlord_type(self, obj) -> str:

@@ -453,7 +453,7 @@ class RoomDetailAV(APIView):
             400: OpenApiResponse(response=ErrorResponseSerializer),
             404: OpenApiResponse(response=ErrorResponseSerializer),
         },
-        description="Partial update (owner-only). If action=preview, requires at least 3 photos.",
+        description="Partial update (owner-only). Draft listings may be previewed before publishing.",
     )
     def patch(self, request, pk, *args, **kwargs):
         room = self._get_room(request, pk)
@@ -476,32 +476,7 @@ class RoomDetailAV(APIView):
         ser.is_valid(raise_exception=True)
         ser.save()
 
-        if action == "preview":
-            approved_photo_count = (
-                RoomImage.objects
-                .filter(
-                    room=room,
-                    status="approved",
-                )
-                .exclude(image="")
-                .count()
-            )
-
-            if approved_photo_count < 3:
-                return Response(
-                    {
-                        "ok": False,
-                        "message": (
-                            "Please upload at least 3 approved photos "
-                            "before previewing your listing."
-                        ),
-                        "errors": {
-                            "photos_min_required": 3,
-                            "photos_current": approved_photo_count,
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        
 
         return ok_response(
             ser.data,
@@ -1383,18 +1358,28 @@ class MyListingsView(generics.ListAPIView):
                 # Rented/unavailable must take priority over payment lifecycle.
                 When(is_available=False, then=Value("rented")),
 
-                # Draft: no paid_until at all.
+                # Explicit draft status must remain draft.
+                When(status="draft", then=Value("draft")),
+
+                # Never paid / not yet listed.
                 When(paid_until__isnull=True, then=Value("draft")),
-                # expired: paid_until in the past OR hidden + past paid_until
-                When(
-                    Q(status="hidden") & Q(paid_until__lt=today),
-                    then=Value("expired"),
-                ),
+
+                # Paid period has ended.
                 When(paid_until__lt=today, then=Value("expired")),
-                # hidden, but not clearly expired
+
+                # Explicitly hidden/unpublished while payment is still valid.
                 When(status="hidden", then=Value("hidden")),
-                # anything else = active
-                default=Value("active"),
+
+                # Only an explicitly active, available, currently-paid room is live.
+                When(
+                    Q(status="active")
+                    & Q(is_available=True)
+                    & Q(paid_until__gte=today),
+                    then=Value("active"),
+                ),
+
+                # Anything else must not accidentally appear as live.
+                default=Value("draft"),
                 output_field=CharField(),
             )
         )

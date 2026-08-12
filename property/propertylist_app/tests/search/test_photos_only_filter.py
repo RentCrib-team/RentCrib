@@ -159,13 +159,24 @@ def test_public_search_main_photo_exposes_only_approved_room_images():
     )
 
     approved_room = create_active_room(
-        owner=owner,
-        category=category,
-        title="Approved Main Photo",
+    owner=owner,
+    category=category,
+    title="Approved Main Photo",
     )
+
     RoomImage.objects.create(
         room=approved_room,
         image="rooms/approved-main.jpg",
+        status="approved",
+    )
+    RoomImage.objects.create(
+        room=approved_room,
+        image="rooms/approved-second.jpg",
+        status="approved",
+    )
+    RoomImage.objects.create(
+        room=approved_room,
+        image="rooms/approved-third.jpg",
         status="approved",
     )
 
@@ -201,6 +212,10 @@ def test_public_search_main_photo_exposes_only_approved_room_images():
 
     assert approved_cover is not None
     assert approved_cover.endswith("/media/rooms/approved-main.jpg")
-    assert rooms_by_id[approved_room.id]["other_images"] == []
+    other_images = rooms_by_id[approved_room.id]["other_images"]
+
+    assert len(other_images) == 2
+    assert other_images[0].endswith("/media/rooms/approved-second.jpg")
+    assert other_images[1].endswith("/media/rooms/approved-third.jpg")
     
     assert rooms_by_id[approved_room.id]["image_status"] == "approved"
