@@ -1150,11 +1150,11 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
         """
         queryset = self.get_queryset()
 
-        # Build ordered list if distance ordering is active
+        # Preserve geographic filtering, but only force distance ordering when
+        # distance is actually the requested/default postcode sort.
         if self._ordered_ids is not None and self._distance_by_id is not None:
-            room_by_id = {obj.id: obj for obj in queryset}
-
             ordering_raw = (request.query_params.get("ordering") or "").strip()
+
             ui_sort_map = {
                 "default": "-created_at",
                 "newest": "-created_at",
@@ -1163,18 +1163,41 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
                 "price_desc": "-price_per_month",
                 "distance": "distance_miles",
             }
+
             ordering = ui_sort_map.get(ordering_raw, ordering_raw)
 
-            rid_list = self._ordered_ids
-            if ordering == "-distance_miles":
-                rid_list = list(reversed(rid_list))
+            # No explicit ordering on a postcode search means nearest first.
+            distance_ordering_active = ordering in {
+                "",
+                "distance_miles",
+                "-distance_miles",
+            }
 
-            ordered_objs = []
-            for rid in rid_list:
-                obj = room_by_id.get(rid)
-                if obj is not None:
-                    obj.distance_miles = self._distance_by_id.get(rid)
-                    ordered_objs.append(obj)
+            if distance_ordering_active:
+                room_by_id = {obj.id: obj for obj in queryset}
+
+                rid_list = self._ordered_ids
+
+                if ordering == "-distance_miles":
+                    rid_list = list(reversed(rid_list))
+
+                ordered_objs = []
+
+                for rid in rid_list:
+                    obj = room_by_id.get(rid)
+
+                    if obj is not None:
+                        obj.distance_miles = self._distance_by_id.get(rid)
+                        ordered_objs.append(obj)
+
+            else:
+                # get_queryset() has already applied the requested ordering
+                # (price, newest, updated, rating, etc.). Preserve that ordering
+                # while still attaching the calculated distance to each room.
+                ordered_objs = list(queryset)
+
+                for obj in ordered_objs:
+                    obj.distance_miles = self._distance_by_id.get(obj.id)
         else:
             ordered_objs = list(queryset)
 
