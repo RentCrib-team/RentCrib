@@ -68,7 +68,7 @@ from propertylist_app.api.views import (
 
 
     # Payments
-    CreateListingCheckoutSessionView, stripe_webhook, StripeSuccessView, StripeCancelView, SavedCardsListView, CreateSetupIntentView,DetachSavedCardView,
+    CreateListingCheckoutSessionView, CreateListingPaymentIntentView, stripe_webhook, StripeSuccessView, StripeCancelView, SavedCardsListView, CreateSetupIntentView,DetachSavedCardView,
     PaymentTransactionsListView,PaymentTransactionDetailView,SetDefaultSavedCardView,
 
     # Webhooks
@@ -294,6 +294,11 @@ urlpatterns = [
 
     # --- Payments (Stripe) ---
     path("payments/checkout/rooms/<int:pk>/", CreateListingCheckoutSessionView.as_view(), name="payments-checkout-room"),
+    path(
+    "payments/payment-intent/rooms/<int:pk>/",
+    CreateListingPaymentIntentView.as_view(),
+    name="payments-payment-intent-room",
+    ),
     path("payments/webhook/",                 stripe_webhook,                         name="stripe-webhook"),
     path("payments/success/",                 StripeSuccessView.as_view(),            name="payments-success"),
     path("payments/cancel/",                  StripeCancelView.as_view(),             name="payments-cancel"),

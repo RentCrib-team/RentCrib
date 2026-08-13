@@ -92,6 +92,7 @@ from .bookings import (
 
 from .payments import (
     CreateListingCheckoutSessionView,
+    CreateListingPaymentIntentView,
     stripe_webhook,
     StripeSuccessView,
     StripeCancelView,
