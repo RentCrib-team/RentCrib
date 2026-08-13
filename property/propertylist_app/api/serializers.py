@@ -104,12 +104,19 @@ class ReviewSerializer(serializers.ModelSerializer):
     positive_labels = serializers.SerializerMethodField()
     negative_labels = serializers.SerializerMethodField()
 
+    reviewer_name = serializers.SerializerMethodField()
+    reviewer_username = serializers.SerializerMethodField()
+    reviewer_avatar = serializers.SerializerMethodField()
+
     class Meta:
         model = Review
         fields = [
             "id",
             "tenancy",
             "reviewer",
+            "reviewer_name",
+            "reviewer_username",
+            "reviewer_avatar",
             "reviewee",
             "role",
             "review_flags",
@@ -126,8 +133,18 @@ class ReviewSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     # --- keep the same flag sets as models.py save() logic (must match exactly) ---
-    TENANT_TO_LANDLORD_POS = {"responsive", "maintenance_good", "accurate_listing", "respectful_fair"}
-    TENANT_TO_LANDLORD_NEG = {"unresponsive", "maintenance_poor", "misleading_listing", "unfair_treatment"}
+    TENANT_TO_LANDLORD_POS = {
+        "responsive",
+        "maintenance_good",
+        "accurate_listing",
+        "respectful_fair",
+    }
+    TENANT_TO_LANDLORD_NEG = {
+        "unresponsive",
+        "maintenance_poor",
+        "misleading_listing",
+        "unfair_treatment",
+    }
 
     LANDLORD_TO_TENANT_POS = {
         "clean_and_tidy",
@@ -174,6 +191,54 @@ class ReviewSerializer(serializers.ModelSerializer):
     }
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_reviewer_name(self, obj) -> str:
+        """
+        Human-friendly reviewer name.
+
+        Prefer first_name + last_name where available.
+        Fall back to username if no real name is stored.
+        """
+        reviewer = obj.reviewer
+
+        full_name = reviewer.get_full_name().strip()
+        if full_name:
+            return full_name
+
+        return reviewer.username or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reviewer_username(self, obj) -> str:
+        reviewer = obj.reviewer
+        return reviewer.username or ""
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reviewer_avatar(self, obj) -> str:
+        """
+        Return the reviewer's profile avatar URL when available.
+        """
+        try:
+            profile = obj.reviewer.profile
+        except (AttributeError, UserProfile.DoesNotExist):
+            return ""
+
+        avatar = profile.avatar
+
+        if not avatar:
+            return ""
+
+        try:
+            url = avatar.url
+        except (AttributeError, ValueError):
+            return ""
+
+        request = self.context.get("request")
+        if request is not None:
+            return request.build_absolute_uri(url)
+
+        return url
+    
+    
+    @extend_schema_field(OpenApiTypes.STR)
     def get_review_mode(self, obj) -> str:
         flags = obj.review_flags or []
         return "checklist" if flags else "text"
@@ -181,26 +246,36 @@ class ReviewSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_positive_labels(self, obj) -> List[str]:
         flags = set(obj.review_flags or [])
+
         if obj.role == Review.ROLE_TENANT_TO_LANDLORD:
             pos = flags.intersection(self.TENANT_TO_LANDLORD_POS)
         else:
             pos = flags.intersection(self.LANDLORD_TO_TENANT_POS)
-        return [self.FLAG_LABELS.get(k, k) for k in sorted(pos)]
+
+        return [
+            self.FLAG_LABELS.get(k, k)
+            for k in sorted(pos)
+        ]
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_negative_labels(self, obj) -> List[str]:
         flags = set(obj.review_flags or [])
+
         if obj.role == Review.ROLE_TENANT_TO_LANDLORD:
             neg = flags.intersection(self.TENANT_TO_LANDLORD_NEG)
         else:
             neg = flags.intersection(self.LANDLORD_TO_TENANT_NEG)
-        return [self.FLAG_LABELS.get(k, k) for k in sorted(neg)]
+
+        return [
+            self.FLAG_LABELS.get(k, k)
+            for k in sorted(neg)
+        ]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_display_summary(self, obj) -> str:
         """
         Hard rule:
-        - If notes exist (text option), return notes EXACTLY as stored (no edits).
+        - If notes exist (text option), return notes EXACTLY as stored.
         - If checklist option, generate a short sentence from selected labels.
         """
         flags = obj.review_flags or []
@@ -215,15 +290,18 @@ class ReviewSerializer(serializers.ModelSerializer):
         neg = self.get_negative_labels(obj)
 
         parts = []
+
         if pos:
             parts.append(", ".join(pos))
+
         if neg:
-            parts.append("However: " + ", ".join(neg))
+            parts.append(
+                "However: " + ", ".join(neg)
+            )
 
         return ". ".join(parts) if parts else ""
-
-
-
+    
+    
 class ReviewCreateSerializer(serializers.Serializer):
     tenancy_id = serializers.IntegerField()
 
