@@ -693,7 +693,12 @@ class BookingRescheduleView(APIView):
                     "booking_id": booking.id,
                     "new_start": booking.start.isoformat(),
                     "new_end": booking.end.isoformat(),
-                    "cta_url": f"/app/bookings/{booking.id}",
+
+                    # Mobile app deep link.
+                    "deep_link": f"/app/bookings/{booking.id}",
+
+                    # Web/Vercel route used by email action buttons.
+                    "cta_url": f"/viewings/{booking.id}",
                 },
             )
 

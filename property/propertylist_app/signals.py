@@ -129,9 +129,12 @@ def booking_created_queue_emails(
     owner = getattr(room, "property_owner", None)
     booker = instance.user
 
-    booking_deep_link = f"/viewings/{instance.id}"
+    # Mobile app deep link.
+    booking_deep_link = f"/app/bookings/{instance.id}"
+
+    # Web/Vercel route used by email action buttons.
     booking_full_url = build_absolute_url(
-        booking_deep_link,
+        f"/viewings/{instance.id}",
         force_login=True,
     )
 
@@ -231,9 +234,12 @@ def message_created_create_notifications(
 
     notifications_to_create = []
 
-    deep_link = f"/messages?thread={thread.id}"
+    # Mobile app deep link.
+    deep_link = f"/app/threads/{thread.id}"
+
+    # Web/Vercel route used by email action buttons.
     full_url = build_absolute_url(
-        deep_link,
+        f"/messages?thread={thread.id}",
         force_login=False,
     )
 
