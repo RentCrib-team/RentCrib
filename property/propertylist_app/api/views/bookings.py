@@ -695,6 +695,14 @@ class BookingRescheduleView(APIView):
                     "user": {
                         "first_name": recipient.first_name,
                     },
+                    "changed_by": {
+                        "name": (
+                            request.user.get_full_name().strip()
+                            or request.user.username
+                            or request.user.first_name
+                            or "The other party"
+                        ),
+                    },
                     "room": {
                         "title": booking.room.title,
                     },
