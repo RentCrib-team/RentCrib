@@ -38,6 +38,12 @@ def _inbox_link() -> str:
     """
     return f"{_frontend_base_url()}/inbox"
 
+def _my_listings_link() -> str:
+    """
+    Web/Vercel page where a landlord can manually renew a listing.
+    """
+    return f"{_frontend_base_url()}/my-listings"
+
 
 def _html_email(subject: str, body_text: str, button_url: str, button_text: str = "Open inbox") -> str:
     """
@@ -86,7 +92,7 @@ def _enrich_context(ctx: dict) -> dict:
     ctx = dict(ctx or {})
 
     # Ensure common URLs exist
-    ctx.setdefault("renew_url", _inbox_link())
+    ctx.setdefault("renew_url", _my_listings_link())
     ctx.setdefault("cta_url", _inbox_link())
 
     # Build nested room dict if template expects {{ room.title }}
@@ -158,11 +164,16 @@ def notify_listing_expiring(
         owner = room.property_owner
         profile, _ = UserProfile.objects.get_or_create(user=owner)
 
+        expiry_key = str(room.paid_until)
+
+        # Prevent duplicate reminders for the same room and paid period.
+        # A later renewal receives another reminder because paid_until changes.
         already_queued = OutboundNotification.objects.filter(
             user=owner,
             channel=template.CHANNEL_EMAIL,
             template_key=template.key,
             context__room_id=room.pk,
+            context__paid_until=expiry_key,
         ).exists()
 
         if (
@@ -178,10 +189,25 @@ def notify_listing_expiring(
                 template_key=template.key,
                 scheduled_for=timezone.now(),
                 context={
+                    "user": {
+                        "first_name": owner.first_name or owner.username,
+                    },
+                    "room": {
+                        "id": room.pk,
+                        "title": room.title,
+                        "paid_until": expiry_key,
+                    },
+
+                    # Used to prevent duplicate reminders.
                     "room_id": room.pk,
-                    "room_title": room.title,
-                    "paid_until": str(room.paid_until),
-                    "cta_url": _inbox_link(),
+                    "paid_until": expiry_key,
+
+                    # Mobile app deep link, kept separate for mobile navigation.
+                    "deep_link": f"/app/listings/{room.pk}",
+
+                    # Web/Vercel route used by the email action button.
+                    "renew_url": _my_listings_link(),
+                    "cta_url": _my_listings_link(),
                 },
             )
 
