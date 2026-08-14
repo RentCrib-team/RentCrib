@@ -115,11 +115,19 @@ def _allowed_to_send_template(*, profile: UserProfile, template_key: str) -> boo
 
 
 @shared_task(name="notifications.tasks.notify_listing_expiring")
-def notify_listing_expiring(days_ahead: int = 3) -> None:
+def notify_listing_expiring(
+    days_ahead: int = 3,
+    room_id: int | None = None,
+) -> None:
     """
-    Queue EMAIL notifications for listings expiring within `days_ahead` days.
-    - Uses NotificationTemplate with key="listing.expiring" and is_active=True
-    - Creates OutboundNotification rows with status=queued (default)
+    Queue one expiry-reminder email per active paid listing.
+
+    Production:
+    - Celery Beat runs this once daily at 07:00.
+    - A listing receives one reminder when it falls within three days of expiry.
+
+    QA:
+    - `room_id` allows one specific staging listing to be targeted safely.
     """
     template = (
         NotificationTemplate.objects.filter(
@@ -131,27 +139,51 @@ def notify_listing_expiring(days_ahead: int = 3) -> None:
     if not template:
         return
 
-    cutoff = date.today() + timedelta(days=days_ahead)
-    rooms = Room.objects.select_related("property_owner").filter(paid_until__lte=cutoff)
+    today = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+
+    rooms = (
+        Room.objects.select_related("property_owner")
+        .filter(
+            status=Room.Lifecycle.ACTIVE,
+            paid_until__gte=today,
+            paid_until__lte=cutoff,
+        )
+    )
+
+    if room_id is not None:
+        rooms = rooms.filter(pk=room_id)
 
     for room in rooms:
         owner = room.property_owner
         profile, _ = UserProfile.objects.get_or_create(user=owner)
 
-        if _allowed_to_send_template(profile=profile, template_key=template.key):
+        already_queued = OutboundNotification.objects.filter(
+            user=owner,
+            channel=template.CHANNEL_EMAIL,
+            template_key=template.key,
+            context__room_id=room.pk,
+        ).exists()
+
+        if (
+            not already_queued
+            and _allowed_to_send_template(
+                profile=profile,
+                template_key=template.key,
+            )
+        ):
             OutboundNotification.objects.create(
                 user=owner,
                 channel=template.CHANNEL_EMAIL,
                 template_key=template.key,
-                # schedule immediately; your beat task will deliver it
                 scheduled_for=timezone.now(),
                 context={
-                    "room_title": getattr(room, "title", ""),
-                    "paid_until": str(getattr(room, "paid_until", "")),
+                    "room_id": room.pk,
+                    "room_title": room.title,
+                    "paid_until": str(room.paid_until),
                     "cta_url": _inbox_link(),
                 },
             )
-
 
 @shared_task(name="notifications.tasks.send_due_notifications")
 def send_due_notifications() -> dict:
