@@ -1085,8 +1085,8 @@ def task_tenancy_prompts_sweep() -> int:
             available_action="leave_review",
         )
 
-        # Review notifications should open the dedicated web review page.
-        review_deep_link = "/leave-a-review"
+        # Mobile app deep link.
+        review_deep_link = f"/app/tenancies/{t.id}/reviews"
 
         # Notify the landlord only if the landlord has not reviewed.
         if not landlord_done:
@@ -1203,11 +1203,19 @@ def task_tenancy_prompts_sweep() -> int:
             _maybe_queue_reminder(
                 reviewee,
                 "tenancy.review_revealed",
-                deep_link="/leave-a-review",
+
+                # Mobile app deep link.
+                deep_link=f"/app/tenancies/{tenancy.id}/reviews",
+
+                # Web/Vercel route used by email button.
                 cta_path="/leave-a-review",
+
                 room_title=tenancy.room.title,
+                tenancy_id=tenancy.id,
             )
             count += 1
+            
+            
     if revealed_count:
         # refresh tenant ratings for tenants affected by newly revealed landlord->tenant reviews
         affected_tenant_ids = (
