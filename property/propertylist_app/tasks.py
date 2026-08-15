@@ -1005,8 +1005,8 @@ def task_tenancy_prompts_sweep() -> int:
             and reminder_created
         ):
             # TEMPORARY QA RULE:
-            # Open reviews 10 minutes after the ending reminder,
-            # then keep the private review window open for 5 minutes.
+            # QA: Open reviews 10 minutes after the ending reminder,
+            # then keep the private/double-blind review window open for 10 minutes.
             #
             # PRODUCTION RULE:
             # review_deadline_at must be:
@@ -1019,7 +1019,7 @@ def task_tenancy_prompts_sweep() -> int:
 
             tenancy.review_deadline_at = (
                 tenancy.review_open_at
-                + timedelta(minutes=5)
+                + timedelta(minutes=10)
             )
             tenancy.save(
                 update_fields=[
