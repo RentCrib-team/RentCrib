@@ -140,38 +140,27 @@ def _upload_fake_photo(client, room, name="photo.jpg"):
 # ------------------------
 
 @pytest.mark.django_db
-def test_step4_preview_blocked_with_less_than_three_photos(auth_client, create_draft_room):
+def test_step4_preview_allows_with_no_photos(auth_client, create_draft_room):
     """
-    When the wizard sends PATCH /rooms/<id> with action='preview'
-    (Step 4 Next/Preview) and the room has fewer than 3 photos,
-    the backend must return 400 with a helpful error.
+    Draft listings may be previewed before any photos are uploaded.
+    Preview is not the same as publishing the listing.
     """
     room = create_draft_room()
 
-    # Upload ONLY 2 photos
-    resp1 = _upload_fake_photo(auth_client, room, "p1.jpg")
-    assert resp1.status_code == status.HTTP_201_CREATED, resp1.data
+    assert RoomImage.objects.filter(room=room).count() == 0
 
-    resp2 = _upload_fake_photo(auth_client, room, "p2.jpg")
-    assert resp2.status_code == status.HTTP_201_CREATED, resp2.data
-
-    assert RoomImage.objects.filter(room=room).count() == 2
-
-    # Now attempt to go to Preview (Step 4 -> Step 5)
     url = reverse("api:room-detail", args=[room.id])
-    patch_payload = {
-        "action": "preview",  # Step-4 Next/Preview
-    }
-    response = auth_client.patch(url, patch_payload, format="json")
 
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.data["ok"] is False
-    assert response.data["message"] == "Please upload at least 3 photos before previewing your listing."
-    assert "photos_min_required" in response.data["errors"]
-    assert response.data["errors"]["photos_min_required"] == 3
-    assert response.data["errors"]["photos_current"] == 2
+    response = auth_client.patch(
+        url,
+        {
+            "action": "preview",
+        },
+        format="json",
+    )
 
-
+    assert response.status_code == status.HTTP_200_OK, response.data
+    assert response.data["ok"] is True
 @pytest.mark.django_db
 def test_step4_preview_allows_when_at_least_three_photos(auth_client, create_draft_room):
     """

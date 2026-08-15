@@ -359,7 +359,186 @@ def stripe_webhook(request):
             },
             status_code=status.HTTP_200_OK,
         )
+    
+    
+    elif evt_type == "payment_intent.succeeded":
+        intent = (event.get("data") or {}).get("object") or {}
+        metadata = intent.get("metadata") or {}
 
+        payment_id = metadata.get("payment_id")
+        room_id = metadata.get("room_id")
+        user_id = metadata.get("user_id")
+        payment_intent_id = intent.get("id")
+
+        if not payment_id:
+            logger.warning(
+                "stripe_webhook_missing_payment_metadata event_id=%s",
+                event_id,
+            )
+            return Response(
+                {
+                    "ok": False,
+                    "message": "Missing payment metadata.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payment = Payment.objects.select_related("room", "user").get(
+                id=payment_id
+            )
+        except Payment.DoesNotExist:
+            logger.warning(
+                "stripe_webhook_invalid_payment_id event_id=%s payment_id=%s",
+                event_id,
+                payment_id,
+            )
+            return Response(
+                {
+                    "ok": False,
+                    "message": "Invalid payment metadata.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Confirm Stripe metadata still belongs to this Payment.
+        if user_id and str(payment.user_id) != str(user_id):
+            logger.warning(
+                "stripe_webhook_user_mismatch "
+                "event_id=%s payment_id=%s "
+                "metadata_user_id=%s actual_user_id=%s",
+                event_id,
+                payment_id,
+                user_id,
+                payment.user_id,
+            )
+            return Response(
+                {
+                    "ok": False,
+                    "message": "Webhook metadata user mismatch.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if room_id:
+            actual_room_id = payment.room_id
+
+            if str(actual_room_id or "") != str(room_id):
+                logger.warning(
+                    "stripe_webhook_room_mismatch "
+                    "event_id=%s payment_id=%s "
+                    "metadata_room_id=%s actual_room_id=%s",
+                    event_id,
+                    payment_id,
+                    room_id,
+                    actual_room_id,
+                )
+                return Response(
+                    {
+                        "ok": False,
+                        "message": "Webhook metadata room mismatch.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            with transaction.atomic():
+                updated = (
+                    Payment.objects
+                    .filter(id=payment.id)
+                    .exclude(status=Payment.Status.SUCCEEDED)
+                    .update(
+                        status=Payment.Status.SUCCEEDED,
+                        stripe_payment_intent_id=str(
+                            payment_intent_id or ""
+                        ),
+                    )
+                )
+
+                if updated == 1:
+                    logger.info(
+                        "stripe_webhook_payment_succeeded "
+                        "payment_id=%s payment_intent=%s",
+                        payment.id,
+                        payment_intent_id or "",
+                    )
+
+                    payment.refresh_from_db(
+                        fields=[
+                            "status",
+                            "stripe_payment_intent_id",
+                        ]
+                    )
+
+                    room = payment.room
+
+                    if room:
+                        today = timezone.now().date()
+
+                        base = (
+                            room.paid_until
+                            if (
+                                room.paid_until
+                                and room.paid_until > today
+                            )
+                            else today
+                        )
+
+                        room.paid_until = base + timedelta(days=30)
+
+                        # Stripe webhook remains the only trusted
+                        # place allowed to publish a listing.
+                        room.set_status(Room.Lifecycle.ACTIVE)
+                        room.save(
+                            update_fields=[
+                                "status",
+                                "paid_until",
+                            ]
+                        )
+
+                    Notification.objects.create(
+                        user=payment.user,
+                        type="confirmation",
+                        title="Payment confirmed",
+                        body="Your listing payment was successful.",
+                        target_type="payment",
+                        target_id=payment.id,
+                    )
+
+        except Exception:
+            logger.exception(
+                "stripe_webhook_payment_intent_success_failed"
+            )
+            return Response(
+                {
+                    "ok": False,
+                    "message": "Unable to process payment.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if receipt:
+            receipt.processed = True
+            receipt.processed_at = timezone.now()
+            receipt.save(
+                update_fields=[
+                    "processed",
+                    "processed_at",
+                ]
+            )
+
+        return ok_response(
+            {
+                "detail": "payment_intent.succeeded processed",
+                "event_id": event_id,
+                "event_type": evt_type,
+                "payment_id": str(payment_id),
+            },
+            status_code=status.HTTP_200_OK,
+        )
+    
+    
+    
     elif evt_type == "checkout.session.expired":
         session = (event.get("data") or {}).get("object") or {}
         metadata = session.get("metadata") or {}
@@ -532,6 +711,176 @@ def webhook_in(request):
     ensure_webhook_not_replayed(event_id, WebhookReceipt.objects)
     WebhookReceipt.objects.create(source="provider", event_id=event_id)
     return Response({"ok": True})
+
+
+
+class CreateListingPaymentIntentView(APIView):
+    """
+    Creates a Stripe PaymentIntent for a room listing fee.
+
+    Intended for native mobile clients using Stripe PaymentSheet.
+    The listing is NOT activated here. Stripe webhook confirmation
+    remains the trusted source of payment success.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        room = get_object_or_404(
+            Room.objects.filter(is_deleted=False),
+            pk=pk,
+        )
+
+        # Only the property owner can pay to list this room.
+        if room.property_owner != request.user:
+            return error_response(
+                message="You are not allowed to pay for this listing.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="permission_denied",
+            )
+
+        user = request.user
+
+        # Ensure profile exists.
+        profile = getattr(user, "profile", None)
+        if profile is None:
+            profile = user.profile = UserProfile.objects.create(user=user)
+
+        # Reuse the same Stripe Customer used by Checkout / saved cards.
+        if not profile.stripe_customer_id:
+            try:
+                stripe_customer = _stripe_mod().Customer.create(
+                    email=user.email or None,
+                    name=user.get_full_name() or user.username,
+                )
+            except Exception:
+                return error_response(
+                    message="Unable to create Stripe customer.",
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    code="stripe_customer_error",
+                )
+
+            stripe_customer_id = getattr(stripe_customer, "id", None)
+
+            if not stripe_customer_id:
+                return error_response(
+                    message="Unable to create Stripe customer.",
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    code="stripe_customer_error",
+                )
+
+            profile.stripe_customer_id = str(stripe_customer_id)
+            profile.save(update_fields=["stripe_customer_id"])
+
+        customer_id = profile.stripe_customer_id
+
+        # Same listing fee as web Checkout: £1.00.
+        amount_gbp = Decimal("1.00")
+        amount_pence = int(amount_gbp * 100)
+
+        # Create the same internal Payment resource used by web payments.
+        payment = Payment.objects.create(
+            user=user,
+            room=room,
+            amount=amount_gbp,
+            currency="GBP",
+            status=Payment.Status.CREATED,
+        )
+
+        try:
+            customer_session = _stripe_mod().CustomerSession.create(
+                customer=customer_id,
+                components={
+                    "mobile_payment_element": {
+                        "enabled": True,
+                        "features": {
+                            "payment_method_save": "enabled",
+                            "payment_method_redisplay": "enabled",
+                            "payment_method_remove": "enabled",
+                        },
+                    },
+                },
+            )
+
+            payment_intent = _stripe_mod().PaymentIntent.create(
+                amount=amount_pence,
+                currency="gbp",
+                customer=customer_id,
+                automatic_payment_methods={"enabled": True},
+                metadata={
+                    "payment_id": str(payment.id),
+                    "room_id": str(room.id),
+                    "user_id": str(user.id),
+                },
+                description=f"Listing fee for: {room.title}",
+            )
+        except Exception:
+            payment.status = Payment.Status.CANCELED
+            payment.save(update_fields=["status"])
+
+            return error_response(
+                message="Unable to create mobile payment session.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="mobile_payment_session_error",
+            )     
+
+        payment_intent_id = getattr(payment_intent, "id", None)
+        client_secret = getattr(payment_intent, "client_secret", None)
+        
+        customer_session_client_secret = getattr(
+            customer_session,
+            "client_secret",
+            None,
+        )
+
+        # Support dict-based Stripe fakes in tests too.
+        if isinstance(payment_intent, dict):
+            payment_intent_id = payment_intent.get("id")
+            client_secret = payment_intent.get("client_secret")
+            
+        if isinstance(customer_session, dict):
+            customer_session_client_secret = customer_session.get(
+                "client_secret"
+            )    
+
+        if (
+            not payment_intent_id
+            or not client_secret
+            or not customer_session_client_secret
+        ):
+            payment.status = Payment.Status.CANCELED
+            payment.save(update_fields=["status"])
+
+            return error_response(
+                message="Stripe mobile payment response was incomplete.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="mobile_payment_session_invalid_response",
+            )
+
+        payment.stripe_payment_intent_id = str(payment_intent_id)
+        payment.status = Payment.Status.REQUIRES_PAYMENT
+        payment.save(
+            update_fields=[
+                "stripe_payment_intent_id",
+                "status",
+            ]
+        )
+
+        return ok_response(
+            {
+                "payment_id": payment.id,
+                "payment_intent_id": str(payment_intent_id),
+                "client_secret": client_secret,
+                "customer_id": customer_id,
+                "customer_session_client_secret": customer_session_client_secret,
+                "publishable_key": getattr(
+                    settings,
+                    "STRIPE_PUBLISHABLE_KEY",
+                    "",
+                ),
+            },
+            message="Payment intent created successfully.",
+            status_code=status.HTTP_200_OK,
+        )
 
 
 

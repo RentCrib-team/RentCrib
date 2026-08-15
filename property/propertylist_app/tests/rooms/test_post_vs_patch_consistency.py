@@ -5,7 +5,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from propertylist_app.models import Room
+from propertylist_app.models import Room, AvailabilitySlot, Booking
 
 
 # --- Local fixtures so this file is self-contained ---
@@ -185,3 +185,176 @@ def test_patch_switch_from_custom_to_everyday_clears_dates(auth_client, valid_st
     room = Room.objects.get(pk=room_id)
     assert room.view_available_days_mode == "everyday"
     assert room.view_available_custom_dates == []
+    
+    
+    
+@pytest.mark.django_db
+def test_patch_room_with_cancelled_booking_on_old_slot_does_not_return_409(
+    auth_client,
+    landlord_user,
+    valid_step1_payload,
+):
+    url_list = reverse("api:room-list")
+
+    create_payload = {
+        **valid_step1_payload,
+        "action": "next",
+    }
+
+    create_resp = auth_client.post(
+        url_list,
+        create_payload,
+        format="json",
+    )
+
+    assert create_resp.status_code == status.HTTP_201_CREATED, create_resp.data
+
+    room_id = create_resp.data["data"]["id"]
+    room = Room.objects.get(id=room_id)
+
+    slot = (
+        AvailabilitySlot.objects
+        .filter(room=room)
+        .order_by("start")
+        .first()
+    )
+
+    assert slot is not None
+
+    Booking.objects.create(
+        user=landlord_user,
+        room=room,
+        slot=slot,
+        start=slot.start,
+        end=slot.end,
+        status=Booking.STATUS_ACTIVE,
+        canceled_at=slot.start,
+        is_deleted=False,
+    )
+
+    url_detail = reverse(
+        "api:room-detail",
+        args=[room_id],
+    )
+
+    patch_resp = auth_client.patch(
+        url_detail,
+        {
+            "title": "Updated patch test room",
+        },
+        format="json",
+    )
+
+    assert patch_resp.status_code == status.HTTP_200_OK, patch_resp.data
+
+    room.refresh_from_db()
+
+    assert room.title == "Updated patch test room"
+
+    assert AvailabilitySlot.objects.filter(
+        id=slot.id,
+    ).exists()
+
+    assert Booking.objects.filter(
+        slot_id=slot.id,
+    ).exists()
+    
+    
+    
+@pytest.mark.django_db
+def test_unpublished_room_remains_accessible_to_owner_and_can_be_republished(
+    auth_client,
+    valid_step1_payload,
+):
+    url_list = reverse("api:room-list")
+
+    create_payload = {
+        **valid_step1_payload,
+        "action": "next",
+    }
+
+    create_resp = auth_client.post(
+        url_list,
+        create_payload,
+        format="json",
+    )
+
+    assert create_resp.status_code == status.HTTP_201_CREATED, create_resp.data
+
+    room_id = create_resp.data["data"]["id"]
+
+    unpublish_url = reverse(
+        "api:room-unpublish",
+        args=[room_id],
+    )
+
+    unpublish_resp = auth_client.post(
+        unpublish_url,
+        {},
+        format="json",
+    )
+
+    assert unpublish_resp.status_code == status.HTTP_200_OK, unpublish_resp.data
+    assert unpublish_resp.data["data"]["status"] == "hidden"
+
+    # Hidden room must still be returned in the owner's own room list.
+    mine_url = reverse("api:rooms-mine")
+
+    mine_resp = auth_client.get(mine_url)
+
+    assert mine_resp.status_code == status.HTTP_200_OK, mine_resp.data
+
+    mine_data = mine_resp.data
+
+    if isinstance(mine_data, dict) and "results" in mine_data:
+        mine_data = mine_data["results"]
+
+    assert any(
+        room["id"] == room_id
+        for room in mine_data
+    )
+
+    # Owner must still be able to retrieve the hidden room directly.
+    detail_url = reverse(
+        "api:room-detail",
+        args=[room_id],
+    )
+
+    get_resp = auth_client.get(detail_url)
+
+    assert get_resp.status_code == status.HTTP_200_OK, get_resp.data
+
+    # Owner must still be able to edit it while unpublished.
+    patch_resp = auth_client.patch(
+        detail_url,
+        {
+            "price_per_month": "850.00",
+        },
+        format="json",
+    )
+
+    assert patch_resp.status_code == status.HTTP_200_OK, patch_resp.data
+
+    room = Room.objects.get(id=room_id)
+
+    assert room.status == "hidden"
+    assert str(room.price_per_month) == "850.00"
+
+    # Owner can publish it again.
+    publish_url = reverse(
+        "api:room-publish",
+        args=[room_id],
+    )
+
+    publish_resp = auth_client.post(
+        publish_url,
+        {},
+        format="json",
+    )
+
+    assert publish_resp.status_code == status.HTTP_200_OK, publish_resp.data
+    assert publish_resp.data["data"]["status"] == "active"
+
+    room.refresh_from_db()
+
+    assert room.status == "active"    

@@ -17,7 +17,10 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_seriali
 
 from propertylist_app.models import Tenancy, Review
 from propertylist_app.tasks import task_send_tenancy_notification
-from propertylist_app.services.tenancy_dates import compute_review_window
+from propertylist_app.services.tenancy_dates import (
+    compute_end_date,
+    compute_review_window,
+)
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import standard_response_serializer
 from propertylist_app.api.serializers import (
@@ -306,12 +309,54 @@ class TenancyExtensionCreateView(APIView):
             raise PermissionDenied("Forbidden.")
 
         # Disallow if ended
-        ended_statuses = {
-            getattr(Tenancy, "STATUS_ENDED", "ended"),
+        # Cancelled tenancies can never be renewed.
+        cancelled_statuses = {
+            getattr(Tenancy, "STATUS_CANCELLED", "cancelled"),
             getattr(Tenancy, "STATUS_CANCELED", "canceled"),
         }
-        if getattr(tenancy, "status", None) in ended_statuses:
-            raise ValidationError({"detail": "Cannot extend an ended tenancy."})
+
+        if getattr(tenancy, "status", None) in cancelled_statuses:
+            raise ValidationError({
+                "detail": "A cancelled tenancy cannot be updated."
+            })
+
+        now = timezone.now()
+
+        # TEMPORARY QA RULE:
+        # Timer 2 marks the start of the tenancy-update window.
+        # The window remains open until the QA review stage begins.
+        #
+        # PRODUCTION:
+        # Tenancy information can be updated/renewed from
+        # 7 days before the real tenancy end date until the end date.
+        #
+        # Once the tenancy has genuinely ended, renewal is no longer
+        # allowed and the room becomes available for reletting.
+        update_window_start = tenancy.still_living_check_at
+        update_window_end = tenancy.review_open_at
+
+        if not update_window_start or not update_window_end:
+            raise ValidationError({
+                "detail": (
+                    "Tenancy update window is not available yet."
+                )
+            })
+
+        if now < update_window_start:
+            raise ValidationError({
+                "detail": (
+                    "You can update this tenancy information "
+                    "within the allowed update period."
+                )
+            })
+
+        if now >= update_window_end:
+            raise ValidationError({
+                "detail": (
+                    "The time allowed to update this tenancy "
+                    "has expired."
+                )
+            })
 
         ser = TenancyExtensionCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)

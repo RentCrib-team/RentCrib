@@ -19,6 +19,7 @@ from rest_framework.exceptions import ValidationError
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse,inline_serializer
 
+from propertylist_app.services.deep_links import build_absolute_url
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.models import Booking, IdempotencyKey, Room, AvailabilitySlot, UserProfile, Notification
 from propertylist_app.validators import ensure_idempotency, validate_no_booking_conflict
@@ -597,7 +598,7 @@ class BookingRescheduleView(APIView):
     """
     PATCH /api/v1/bookings/{id}/reschedule/
 
-    Landlord can change viewing date/time.
+    Landlord or seeker can change viewing date/time.
     """
 
     permission_classes = [IsAuthenticated]
@@ -613,7 +614,7 @@ class BookingRescheduleView(APIView):
             403: OpenApiResponse(response=ErrorResponseSerializer),
             404: OpenApiResponse(response=ErrorResponseSerializer),
         },
-        description="Reschedule a viewing. Only the room owner can reschedule.",
+        description="Reschedule a viewing. The landlord or seeker for the booking can reschedule.",
     )
     def patch(self, request, pk):
 
@@ -622,11 +623,14 @@ class BookingRescheduleView(APIView):
             pk=pk,
         )
 
-        if booking.room.property_owner != request.user:
+        landlord = booking.room.property_owner
+        seeker = booking.user
+
+        if request.user not in {landlord, seeker}:
             return error_response(
-                message="Only the landlord can reschedule this viewing.",
+                message="Only the landlord or seeker for this viewing can reschedule it.",
                 status_code=status.HTTP_403_FORBIDDEN,
-                code="not_booking_owner",
+                code="not_booking_participant",
             )
 
         if booking.status != Booking.STATUS_ACTIVE:
@@ -669,8 +673,12 @@ class BookingRescheduleView(APIView):
         booking.save(update_fields=["start", "end"])
 
 
-        # Queue email notification to tenant after successful reschedule
+        # Notify the other party after a successful reschedule.
+        # Landlord changes time -> seeker receives the notification.
+        # Seeker changes time -> landlord receives the notification.
         from notifications.models import NotificationTemplate, OutboundNotification
+
+        recipient = seeker if request.user == landlord else landlord
 
         template_exists = NotificationTemplate.objects.filter(
             key="booking.updated",
@@ -678,14 +686,22 @@ class BookingRescheduleView(APIView):
             is_active=True,
         ).exists()
 
-        if template_exists:
+        if template_exists and recipient:
             OutboundNotification.objects.create(
-                user=booking.user,
+                user=recipient,
                 channel=NotificationTemplate.CHANNEL_EMAIL,
                 template_key="booking.updated",
                 context={
                     "user": {
-                        "first_name": booking.user.first_name,
+                        "first_name": recipient.first_name,
+                    },
+                    "changed_by": {
+                        "name": (
+                            request.user.get_full_name().strip()
+                            or request.user.username
+                            or request.user.first_name
+                            or "The other party"
+                        ),
                     },
                     "room": {
                         "title": booking.room.title,
@@ -693,7 +709,15 @@ class BookingRescheduleView(APIView):
                     "booking_id": booking.id,
                     "new_start": booking.start.isoformat(),
                     "new_end": booking.end.isoformat(),
-                    "cta_url": f"/app/bookings/{booking.id}",
+
+                    # Mobile app deep link.
+                    "deep_link": f"/app/bookings/{booking.id}",
+
+                    # Web/Vercel route used by email action buttons.
+                    "cta_url": build_absolute_url(
+                        f"/viewings/{booking.id}",
+                        force_login=True,
+                    ),
                 },
             )
 

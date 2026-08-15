@@ -38,10 +38,18 @@ def test_task_backfills_review_window_fields_for_existing_tenancy(user_factory, 
     assert t.still_living_check_at is not None
 
 
-def test_task_marks_tenancy_ended_when_end_date_passed(user_factory, room_factory):
+def test_task_marks_tenancy_ended_when_end_date_passed(
+    user_factory,
+    room_factory,
+):
     landlord = user_factory(username="ll_auto_end")
     tenant = user_factory(username="tt_auto_end")
+
     room = room_factory(property_owner=landlord)
+
+    # A rented room is unavailable while the tenancy is active.
+    room.is_available = False
+    room.save(update_fields=["is_available"])
 
     t = Tenancy.objects.create(
         room=room,
@@ -58,4 +66,10 @@ def test_task_marks_tenancy_ended_when_end_date_passed(user_factory, room_factor
     task_refresh_tenancy_status_and_review_windows()
 
     t.refresh_from_db()
+    room.refresh_from_db()
+
+    # Real tenancy has ended.
     assert t.status == Tenancy.STATUS_ENDED
+
+    # Room is immediately released for reletting.
+    assert room.is_available is True

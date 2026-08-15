@@ -209,8 +209,13 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         sender=sender,
     )
 
+   # Mobile app deep link.
     thread_deep_link = f"/app/threads/{thread.id}"
-    thread_cta_url = build_absolute_url(thread_deep_link)
+
+    # Web/Vercel route used by email action buttons.
+    thread_cta_url = build_absolute_url(
+        f"/messages?thread={thread.id}"
+    )
 
     def _maybe_queue(user, template_key: str, extra_context: dict | None = None):
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -605,13 +610,11 @@ def task_tenancy_prompts_sweep() -> int:
     
     Message = apps.get_model("propertylist_app", "Message")
 
-    def _tenancy_thread_deep_link(tenancy):
+    def _tenancy_thread_links(tenancy):
         """
-        Return the existing inbox thread created for this tenancy.
+        Return separate mobile and web links for this tenancy conversation.
+        """
 
-        Tenancy proposal, update and confirmation messages store the
-        tenancy ID inside Message.metadata.
-        """
         tenancy_message = (
             Message.objects
             .select_related("thread")
@@ -621,11 +624,21 @@ def task_tenancy_prompts_sweep() -> int:
         )
 
         if tenancy_message and tenancy_message.thread_id:
-            return f"/app/threads/{tenancy_message.thread_id}"
+            # Mobile app deep link.
+            deep_link = f"/app/threads/{tenancy_message.thread_id}"
 
-        # Safe fallback for older tenancy records that may not yet have
-        # an inbox-thread message.
-        return f"/app/tenancies/{tenancy.id}"
+            # Web/Vercel route used by email action buttons.
+            cta_path = f"/messages?thread={tenancy_message.thread_id}"
+
+            return deep_link, cta_path
+
+        # Mobile fallback for older tenancy records with no conversation yet.
+        deep_link = f"/app/tenancies/{tenancy.id}"
+
+        # No confirmed web tenancy route available here yet.
+        cta_path = None
+
+        return deep_link, cta_path
     
     
     
@@ -719,6 +732,7 @@ def task_tenancy_prompts_sweep() -> int:
         template_key: str,
         *,
         deep_link: str,
+        cta_path: str,
         room_title: str,
         tenancy_id=None,
     ):
@@ -740,7 +754,7 @@ def task_tenancy_prompts_sweep() -> int:
             "room_title": room_title,
             "deep_link": deep_link,
             "cta_url": build_absolute_url(
-                deep_link
+                cta_path
             ),
         }
 
@@ -862,7 +876,8 @@ def task_tenancy_prompts_sweep() -> int:
             )
             continue
 
-        deep_link = _tenancy_thread_deep_link(tenancy)
+        # Separate mobile and web destinations.
+        deep_link, cta_path = _tenancy_thread_links(tenancy)
 
         title = "Your tenancy is ending soon"
         body = (
@@ -883,8 +898,12 @@ def task_tenancy_prompts_sweep() -> int:
         )
 
         if prompt_thread is not None:
+            # Mobile app deep link.
             deep_link = f"/app/threads/{prompt_thread.id}"
-        
+
+            # Web/Vercel route used by email action buttons.
+            cta_path = f"/messages?thread={prompt_thread.id}"
+                
         
 
         def _notify_user(user, template_key):
@@ -947,6 +966,7 @@ def task_tenancy_prompts_sweep() -> int:
                 user,
                 template_key,
                 deep_link=deep_link,
+                cta_path=cta_path,
                 room_title=tenancy.room.title,
                 tenancy_id=tenancy.id,
             )
@@ -985,8 +1005,8 @@ def task_tenancy_prompts_sweep() -> int:
             and reminder_created
         ):
             # TEMPORARY QA RULE:
-            # Open reviews 10 minutes after the ending reminder,
-            # then keep the private review window open for 5 minutes.
+            # QA: Open reviews 10 minutes after the ending reminder,
+            # then keep the private/double-blind review window open for 10 minutes.
             #
             # PRODUCTION RULE:
             # review_deadline_at must be:
@@ -999,7 +1019,7 @@ def task_tenancy_prompts_sweep() -> int:
 
             tenancy.review_deadline_at = (
                 tenancy.review_open_at
-                + timedelta(minutes=5)
+                + timedelta(minutes=10)
             )
             tenancy.save(
                 update_fields=[
@@ -1065,13 +1085,8 @@ def task_tenancy_prompts_sweep() -> int:
             available_action="leave_review",
         )
 
-        # Email and in-app notification should open the exact tenancy thread.
-        # Older tenancies without a thread use the safe fallback.
-        review_deep_link = (
-            f"/app/threads/{prompt_thread.id}"
-            if prompt_thread is not None
-            else _tenancy_thread_deep_link(t)
-        )
+        # Mobile app deep link.
+        review_deep_link = f"/app/tenancies/{t.id}/reviews"
 
         # Notify the landlord only if the landlord has not reviewed.
         if not landlord_done:
@@ -1096,6 +1111,7 @@ def task_tenancy_prompts_sweep() -> int:
                     t.landlord,
                     "tenancy.review_available",
                     deep_link=review_deep_link,
+                    cta_path="/leave-a-review",
                     room_title=t.room.title,
                 )
                 count += 1
@@ -1123,6 +1139,7 @@ def task_tenancy_prompts_sweep() -> int:
                     t.tenant,
                     "tenancy.review_available",
                     deep_link=review_deep_link,
+                    cta_path="/leave-a-review",
                     room_title=t.room.title,
                 )
                 count += 1
@@ -1137,13 +1154,68 @@ def task_tenancy_prompts_sweep() -> int:
     # -------------------------------------------------
 
     # 3a) Reveal any reviews whose reveal time has passed
-    to_reveal = Review.objects.filter(
+    to_reveal = list(
+    Review.objects
+    .filter(
         active=False,
         reveal_at__isnull=False,
         reveal_at__lte=now,
     )
+    .select_related(
+        "reviewee",
+        "tenancy",
+        "tenancy__room",
+    )
+    )
 
-    revealed_count = to_reveal.update(active=True)
+    revealed_count = 0
+
+    for review in to_reveal:
+        review.active = True
+        review.save(update_fields=["active"])
+
+        revealed_count += 1
+
+        tenancy = review.tenancy
+        reviewee = review.reviewee
+
+        if not reviewee:
+            continue
+
+        # The review has just become visible.
+        # Because only active=False reviews enter to_reveal,
+        # this notification/email is sent only once.
+        _, notification_created = Notification.objects.get_or_create(
+            user=reviewee,
+            type="review_revealed",
+            target_type="tenancy_review",
+            target_id=review.id,
+            defaults={
+                "title": "Review now available",
+                "body": (
+                    f"A review from your tenancy at "
+                    f"{tenancy.room.title} is now available to view."
+                ),
+            },
+        )
+
+        if notification_created:
+            _maybe_queue_reminder(
+                reviewee,
+                "tenancy.review_revealed",
+
+                # Mobile app deep link.
+                deep_link=f"/app/tenancies/{tenancy.id}/reviews",
+
+                # Web/Vercel route used by email button.
+                cta_path=f"/reviews/{review.id}",
+
+                room_title=tenancy.room.title,
+                tenancy_id=tenancy.id,
+            )
+            count += 1
+            
+            
     if revealed_count:
         # refresh tenant ratings for tenants affected by newly revealed landlord->tenant reviews
         affected_tenant_ids = (
@@ -1214,14 +1286,44 @@ def task_refresh_tenancy_status_and_review_windows():
 
     today = timezone.localdate()
 
-    for t in Tenancy.objects.exclude(status=Tenancy.STATUS_CANCELLED).iterator():
-        if t.status == Tenancy.STATUS_CONFIRMED and t.move_in_date <= today:
+    for t in (
+        Tenancy.objects
+        .select_related("room")
+        .exclude(status=Tenancy.STATUS_CANCELLED)
+        .iterator()
+    ):
+        if (
+            t.status == Tenancy.STATUS_CONFIRMED
+            and t.move_in_date <= today
+        ):
             t.status = Tenancy.STATUS_ACTIVE
 
-        end_date = compute_end_date(t.move_in_date, t.duration_months)
+        end_date = compute_end_date(
+            t.move_in_date,
+            t.duration_months,
+        )
 
-        if t.status in (Tenancy.STATUS_CONFIRMED, Tenancy.STATUS_ACTIVE) and end_date < today:
+        if (
+            t.status in (
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            )
+            and end_date < today
+        ):
             t.status = Tenancy.STATUS_ENDED
+
+            # The tenancy has genuinely ended.
+            # Make the room available immediately for reletting.
+            room = t.room
+
+            if not room.is_available:
+                room.is_available = True
+                room.save(
+                    update_fields=[
+                        "is_available",
+                        "updated_at",
+                    ]
+                )
 
         if (
             t.review_open_at is None
@@ -1232,8 +1334,11 @@ def task_refresh_tenancy_status_and_review_windows():
                 t.move_in_date,
                 t.duration_months,
             )
+
             t.review_open_at = t.review_open_at or ro
             t.review_deadline_at = t.review_deadline_at or rd
-            t.still_living_check_at = t.still_living_check_at or sl
+            t.still_living_check_at = (
+                t.still_living_check_at or sl
+            )
 
         t.save()

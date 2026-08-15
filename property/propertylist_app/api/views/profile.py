@@ -170,16 +170,26 @@ class MyProfilePageView(APIView):
         landlord_avg = landlord_qs.aggregate(a=Avg("overall_rating")).get("a")
         tenant_avg = tenant_qs.aggregate(a=Avg("overall_rating")).get("a")
 
-        total = landlord_count + tenant_count
+        # The current profile role determines which reputation belongs on this page.
+        #
+        # Review roles describe the direction of the review:
+        # - tenant_to_landlord = review ABOUT the user as a landlord
+        # - landlord_to_tenant = review ABOUT the user as a tenant/seeker
+        if profile.role == "landlord":
+            current_role_qs = landlord_qs
+            total = landlord_count
+            overall = landlord_avg
+        else:
+            current_role_qs = tenant_qs
+            total = tenant_count
+            overall = tenant_avg
 
-        overall = None
-        if total > 0:
-            la = float(landlord_avg or 0)
-            ta = float(tenant_avg or 0)
-            overall = ((la * landlord_count) + (ta * tenant_count)) / total
-
-        preview_qs = qs.order_by("-submitted_at")[:2]
-        preview = ReviewSerializer(preview_qs, many=True, context={"request": request}).data
+        preview_qs = current_role_qs.order_by("-submitted_at")[:2]
+        preview = ReviewSerializer(
+            preview_qs,
+            many=True,
+            context={"request": request},
+        ).data
 
         age = None
         if profile.date_of_birth:

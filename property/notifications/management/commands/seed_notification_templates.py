@@ -3,50 +3,64 @@ from notifications.models import NotificationTemplate
 
 TEMPLATES = [
     {
-        "key": "message.new",
-        "subject": "New message from {{ sender.name }} on RentCrib",
-        "body": """
-    {% extends "emails/base.html" %}
+    "key": "message.new",
+    "subject": "New message from {{ sender.name }} on RentCrib",
+    "body": """
+{% extends "emails/base.html" %}
 
-    {% block content %}
+{% block content %}
 
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    You have a new message
-    </h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding:0;">
 
-    <p>
-    Hi {{ user.first_name }},
-    </p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:620px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe5ee;border-radius:5px;">
+                <tr>
+                    <td style="padding:34px 34px 32px;">
 
-    <p>
-    <strong>{{ sender.name }}</strong> has sent you a new message on RentCrib.
-    </p>
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;text-align:center;color:#357af0;">
+                            NEW MESSAGE
+                        </p>
 
-    <p style="
-    background:#f5f5f5;
-    padding:15px;
-    border-radius:6px;
-    font-family:Arial,sans-serif;
-    ">
-    {{ snippet }}
-    </p>
+                        <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-0.4px;text-align:center;color:#172033;">
+                            You have a new message
+                        </h1>
 
-    <p>
-    Reply to continue your conversation and arrange your next steps.
-    </p>
+                        <p style="margin:10px 0 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;text-align:center;color:#5f6b7a;">
+                            Open your conversation to read and reply.
+                        </p>
 
-    {% include "emails/components/button.html" with button_url=thread_url button_text="Reply to message" %}
+                        <p>Hi {{ user.first_name|default:"there" }},</p>
 
-    <p>
-    Thanks for using RentCrib.
-    </p>
+                        <p>
+                            <strong>{{ sender.name }}</strong> has sent you a new message on RentCrib.
+                        </p>
 
-    {% endblock %}
-    """,
-    },
+                        <p>
+                            <strong>{{ snippet }}</strong>
+                        </p>
+
+                        <p>
+                            Open the conversation to continue your chat.
+                        </p>
+
+                        {% include "emails/components/button.html" with button_url=cta_url button_text="Open conversation" %}
+
+                        <p>
+                            Thank you for using RentCrib.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
 {
     "key": "booking.new",
     "subject": "New viewing request for {{ room.title }}",
@@ -764,58 +778,90 @@ You can respond to this viewing request from your RentCrib account.
 """,
 },
     {
-            "key": "booking.updated",
-            "subject": "Your viewing time has been updated for {{ room.title }}",
-            "body": """
-            {% extends "emails/base.html" %}
+    "key": "booking.updated",
+    "subject": "Your viewing time has been updated for {{ room.title }}",
+    "body": """
+{% extends "emails/base.html" %}
 
-        {% block content %}
+{% block content %}
 
-        <h2 style="
-        font-family:Arial,sans-serif;
-        color:#333333;
-        ">
-        Your viewing time has been updated
-        </h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="width:100%;border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding:0;">
 
-        <p>
-        Hi {{ user.first_name }},
-        </p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="width:100%;max-width:620px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe5ee;border-radius:5px;">
+                <tr>
+                    <td style="padding:34px 34px 32px;">
 
-        <p>
-        The landlord has updated the viewing time for:
-        </p>
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;text-align:center;color:#357af0;">
+                            VIEWING UPDATE
+                        </p>
 
-        <p>
-        <strong>{{ room.title }}</strong>
-        </p>
+                        <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-0.4px;text-align:center;color:#172033;">
+                            Your viewing time has been updated
+                        </h1>
 
-        <p>
-        Your new viewing time is:
-        </p>
+                        <p style="margin:10px 0 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;text-align:center;color:#5f6b7a;">
+                            The viewing time for this property has changed.
+                        </p>
 
-        <p>
-        <strong>{{ new_start }}</strong>
-        <br>
-        to
-        <br>
-        <strong>{{ new_end }}</strong>
-        </p>
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            Hi {{ user.first_name|default:"there" }},
+                        </p>
 
-        <p>
-        Please check the updated viewing details through RentCrib.
-        </p>
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            <strong style="color:#172033;">{{ changed_by.name }}</strong>
+                            has updated the viewing time for:
+                        </p>
 
-        {% include "emails/components/button.html" with button_url=cta_url button_text="View updated booking" %}
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.6;font-weight:700;color:#172033;">
+                            {{ room.title }}
+                        </p>
 
-        <p>
-        Thanks for using RentCrib.
-        </p>
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="width:100%;border-collapse:separate;background-color:#f7f9fc;border:1px solid #dfe6ef;border-radius:4px;">
+                            <tr>
+                                <td style="padding:20px 22px;">
 
-        {% endblock %}
-        """,
-    },
-       
+                                    <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#7a8497;">
+                                        Updated viewing time
+                                    </p>
+
+                                    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;font-weight:700;color:#172033;">
+                                        {{ new_start }}
+                                    </p>
+
+                                    <p style="margin:6px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#566176;">
+                                        until {{ new_end }}
+                                    </p>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        <p style="margin:20px 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#566176;">
+                            Open the viewing to check the updated details.
+                        </p>
+
+                        {% include "emails/components/button.html" with button_url=cta_url button_text="View updated booking" %}
+
+                        <p style="margin:24px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.65;text-align:center;color:#8892a3;">
+                            Thank you for using RentCrib.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
        
     {
     "key": "booking.completed",
@@ -2095,6 +2141,13 @@ You can respond to this viewing request from your RentCrib account.
 {% include "emails/tenancy/review_available.html" %}
 """,
     },
+    {
+    "key": "tenancy.review_revealed",
+    "subject": "A review about you is now available for {{ room_title }}",
+    "body": """
+{% include "emails/tenancy/review_revealed.html" %}
+""",
+},
 
     # -------------------------
     # Tenancy extension

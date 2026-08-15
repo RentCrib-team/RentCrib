@@ -83,3 +83,49 @@ def test_expired_room_hidden_after_scheduler():
 
     room.refresh_from_db()
     assert room.status == "hidden"
+    
+    
+@pytest.mark.django_db
+def test_paid_active_but_unavailable_room_not_in_public_search():
+    cat = RoomCategorie.objects.create(
+        name="Unavailable Search Test",
+        active=True,
+    )
+
+    User = get_user_model()
+
+    owner = User.objects.create_user(
+        username="unavailable_search_owner",
+        password="pass12345",
+    )
+
+    room = Room.objects.create(
+        title="Already Rented Paid Room",
+        category=cat,
+        property_owner=owner,
+        price_per_month=900,
+        location="London",
+        status="active",
+        is_available=False,
+        paid_until=timezone.now().date() + timedelta(days=30),
+    )
+
+    client = APIClient()
+
+    response = client.get(
+        "/api/v1/search/rooms/",
+        {"q": "Already Rented Paid Room"},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    if isinstance(data, dict) and "data" in data:
+        data = data["data"]
+
+    results = data.get("results", data) if isinstance(data, dict) else data
+
+    ids = {item["id"] for item in results}
+
+    assert room.id not in ids    

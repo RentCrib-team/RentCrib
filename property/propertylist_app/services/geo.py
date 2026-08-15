@@ -23,7 +23,12 @@ def geocode_postcode_cached(postcode_raw: str) -> Tuple[float, float]:
         raise ValueError("Postcode required")
 
     normal = normalize_uk_postcode(postcode_raw)
-    key = f"{CACHE_PREFIX}{normal}"
+
+    # Keep the canonical postcode for geocoding, but remove whitespace from
+    # the cache key so both "SW1A 1AA" and "SW1A1AA" map to the same
+    # Memcached-safe entry.
+    cache_postcode = "".join(normal.split())
+    key = f"{CACHE_PREFIX}{cache_postcode}"
 
     cached = cache.get(key)
     if cached and isinstance(cached, (list, tuple)) and len(cached) == 2:

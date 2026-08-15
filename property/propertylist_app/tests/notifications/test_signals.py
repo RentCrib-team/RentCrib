@@ -1,7 +1,16 @@
 import pytest
 from unittest.mock import patch
+from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
-from propertylist_app.models import MessageThread, Message, Room, RoomCategorie, Notification as InAppNotification
+from propertylist_app.models import (
+    MessageThread,
+    Message,
+    MessageRead,
+    MessageThreadState,
+    Room,
+    RoomCategorie,
+    Notification as InAppNotification,
+)
 from notifications.models import NotificationTemplate, OutboundNotification
 from django.utils import timezone
 from datetime import timedelta
@@ -32,6 +41,66 @@ def test_new_message_signal_queues_emails_and_inapp():
 
     # In-app notification created
     assert InAppNotification.objects.filter(user=recipient, thread=t, message=msg).exists()
+    
+    
+def test_new_message_signal_emits_realtime_message_and_notification():
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, recipient)
+
+    NotificationTemplate.objects.create(
+        key="message.new",
+        channel="email",
+        subject="New message",
+        body="Message",
+        is_active=True,
+    )
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        msg = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Realtime test message",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_message",
+        {
+            "message_id": msg.id,
+            "thread_id": thread.id,
+            "sender_id": sender.id,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_notification",
+        {
+            "kind": "message",
+            "message_id": msg.id,
+            "thread_id": thread.id,
+        },
+    )
+
+    assert realtime.call_count == 2
+
+    assert InAppNotification.objects.filter(
+        user=recipient,
+        thread=thread,
+        message=msg,
+    ).exists()
+
+    assert OutboundNotification.objects.filter(
+        user=recipient,
+        template_key="message.new",
+    ).count() == 1    
+    
+    
 
 def test_new_booking_signal_queues_owner_and_booker_emails():
     owner, booker = make_users(2)
@@ -58,3 +127,116 @@ def test_new_booking_signal_queues_owner_and_booker_emails():
 
     assert OutboundNotification.objects.filter(template_key="booking.new", user=owner).exists()
     assert OutboundNotification.objects.filter(template_key="booking.confirmation", user=booker).exists()
+    
+    
+def test_new_message_restores_recipient_binned_thread_and_returns_it_in_messages_api():
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, recipient)
+
+    MessageThreadState.objects.create(
+        user=recipient,
+        thread=thread,
+        in_bin=True,
+    )
+
+    # Confirm the thread starts in the recipient's bin.
+    state = MessageThreadState.objects.get(
+        user=recipient,
+        thread=thread,
+    )
+    assert state.in_bin is True
+
+    # A genuine incoming message should restore the conversation.
+    Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="Fresh incoming message",
+        message_type=Message.TYPE_TEXT,
+    )
+
+    state.refresh_from_db()
+
+    # The thread must automatically leave the recipient's bin.
+    assert state.in_bin is False
+
+    # It must also be returned by the normal Messages API again.
+    client = APIClient()
+    client.force_authenticate(user=recipient)
+
+    response = client.get(
+        "/api/v1/messages/threads/",
+        {"limit": 100},
+    )
+
+    assert response.status_code == 200
+
+    payload = response.data.get("data", [])
+
+    assert any(
+        item["id"] == thread.id
+        for item in payload
+    )
+    
+    
+def test_thread_mark_read_emits_realtime_read_and_unread_count():
+    sender, reader = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, reader)
+
+    msg1 = Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="First unread",
+        message_type=Message.TYPE_TEXT,
+    )
+    msg2 = Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="Second unread",
+        message_type=Message.TYPE_TEXT,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=reader)
+
+    with patch(
+        "propertylist_app.api.views.messaging.push_user_realtime_event"
+    ) as realtime:
+        response = client.post(
+            f"/api/v1/messages/threads/{thread.id}/read/"
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["data"]["marked"] == 2
+
+    assert MessageRead.objects.filter(
+        user=reader,
+        message__in=[msg1, msg2],
+    ).count() == 2
+
+    realtime.assert_any_call(
+        sender.id,
+        "message_read",
+        {
+            "thread_id": thread.id,
+            "reader_id": reader.id,
+            "message_ids": [msg1.id, msg2.id],
+        },
+    )
+
+    realtime.assert_any_call(
+        reader.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "unread_count": 0,
+        },
+    )
+
+    assert realtime.call_count == 2    

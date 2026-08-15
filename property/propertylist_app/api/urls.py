@@ -11,6 +11,8 @@ from drf_spectacular.utils import extend_schema
 
 from .views.identity_verification import MyIdentityVerificationView
 
+from .views.realtime import RealtimeTicketView
+
 from propertylist_app.api import views
 
 from .views import EmailOTPVerifyView, EmailOTPResendView,PhoneOTPStartView, PhoneOTPVerifyView,RoomListAlt
@@ -58,15 +60,15 @@ from propertylist_app.api.views import (
 
 
     # Soft delete
-    RoomSoftDeleteView,RoomUnpublishView,
+    RoomSoftDeleteView, RoomUnpublishView, RoomPublishView,
 
     #Account deletion
     #DeleteAccountRequestView,DeleteAccountCancelView,
-    
-    
+
+
 
     # Payments
-    CreateListingCheckoutSessionView, stripe_webhook, StripeSuccessView, StripeCancelView, SavedCardsListView, CreateSetupIntentView,DetachSavedCardView,
+    CreateListingCheckoutSessionView, CreateListingPaymentIntentView, stripe_webhook, StripeSuccessView, StripeCancelView, SavedCardsListView, CreateSetupIntentView,DetachSavedCardView,
     PaymentTransactionsListView,PaymentTransactionDetailView,SetDefaultSavedCardView,
 
     # Webhooks
@@ -90,7 +92,7 @@ from propertylist_app.api.views import (
     ContactMessageCreateView,
 
     MyListingsView,
-    
+
     MyLandlordVerificationRequestView,
 
 
@@ -117,7 +119,7 @@ urlpatterns = [
     path("room-categories/",           RoomCategorieAV.as_view(),         name="roomcategory-list"),
     path("room-categories/<int:pk>/",  RoomCategorieDetailAV.as_view(),   name="roomcategory-detail"),
 
-  
+
 
     path("users/<int:user_id>/review-summary/", UserReviewSummaryView.as_view(), name="user-review-summary"),
     path("users/<int:user_id>/reviews/", UserReviewsView.as_view(), name="user-reviews"),
@@ -152,6 +154,15 @@ urlpatterns = [
     path("rooms/<int:pk>/save/",           RoomSaveView.as_view(),       name="room-save"),
     path("rooms/<int:pk>/save-toggle/",    RoomSaveToggleView.as_view(), name="room-save-toggle"),
     path("users/me/saved/rooms/",          MySavedRoomsView.as_view(),   name="my-saved-rooms"),
+    
+    
+        # Realtime / WebSocket authentication
+    path(
+        "realtime/ticket/",
+        RealtimeTicketView.as_view(),
+        name="realtime-ticket",
+    ),
+    
 
     # --- Messaging ---
     path("messages/threads/",                              MessageThreadListCreateView.as_view(), name="message-threads"),
@@ -234,8 +245,22 @@ urlpatterns = [
 
 
     # --- Soft delete room ---
-    path("rooms/<int:pk>/soft-delete/", RoomSoftDeleteView.as_view(), name="room-soft-delete"),
-    path("rooms/<int:pk>/unpublish/", RoomUnpublishView.as_view(), name="room-unpublish"),
+    # --- Room lifecycle actions ---
+    path(
+        "rooms/<int:pk>/soft-delete/",
+        RoomSoftDeleteView.as_view(),
+        name="room-soft-delete",
+    ),
+    path(
+        "rooms/<int:pk>/unpublish/",
+        RoomUnpublishView.as_view(),
+        name="room-unpublish",
+    ),
+    path(
+        "rooms/<int:pk>/publish/",
+        RoomPublishView.as_view(),
+        name="room-publish",
+    ),
 
     # --- Account deletion ---
     # --- Account deletion: scheduled soft-deletion flow ---
@@ -269,6 +294,11 @@ urlpatterns = [
 
     # --- Payments (Stripe) ---
     path("payments/checkout/rooms/<int:pk>/", CreateListingCheckoutSessionView.as_view(), name="payments-checkout-room"),
+    path(
+    "payments/payment-intent/rooms/<int:pk>/",
+    CreateListingPaymentIntentView.as_view(),
+    name="payments-payment-intent-room",
+    ),
     path("payments/webhook/",                 stripe_webhook,                         name="stripe-webhook"),
     path("payments/success/",                 StripeSuccessView.as_view(),            name="payments-success"),
     path("payments/cancel/",                  StripeCancelView.as_view(),             name="payments-cancel"),
@@ -318,7 +348,7 @@ urlpatterns = [
     path("auth/resend-otp/", EmailOTPResendView.as_view(), name="auth-resend-otp"),
     path("auth/phone/start/", PhoneOTPStartView.as_view(), name="auth-phone-start"),
     path("auth/phone/verify/", PhoneOTPVerifyView.as_view(), name="auth-phone-verify"),
-    
+
     path("users/me/identity-verification/", MyIdentityVerificationView.as_view(), name="my-identity-verification",),
 
 

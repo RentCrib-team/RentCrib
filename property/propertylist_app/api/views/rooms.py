@@ -366,6 +366,29 @@ class RoomAV(APIView):
 class RoomDetailAV(APIView):
     permission_classes = [IsOwnerOrReadOnly]
     http_method_names = ["get", "put", "patch", "delete"]
+    
+    def _get_room(self, request, pk):
+        """
+        Owners may access their own unpublished/hidden room.
+
+        Everyone else continues to see only non-hidden, non-deleted rooms.
+        """
+        if request.user.is_authenticated:
+            owned_room = Room.objects.filter(
+                pk=pk,
+                property_owner=request.user,
+                is_deleted=False,
+            ).first()
+
+            if owned_room is not None:
+                return owned_room
+
+        return get_object_or_404(
+            Room.objects.alive(),
+            pk=pk,
+        )
+    
+    
 
     @extend_schema(
         operation_id="api_v1_rooms_retrieve",
@@ -386,7 +409,7 @@ class RoomDetailAV(APIView):
         description="Retrieve a room by id. Returns ok_response envelope.",
     )
     def get(self, request, pk, *args, **kwargs):
-        room = get_object_or_404(Room.objects.alive(), pk=pk)
+        room = self._get_room(request, pk)
         serializer = RoomSerializer(room, context={"request": request})
         return ok_response(serializer.data, status_code=status.HTTP_200_OK)
 
@@ -403,7 +426,7 @@ class RoomDetailAV(APIView):
         description="Replace room fields (owner-only).",
     )
     def put(self, request, pk, *args, **kwargs):
-        room = get_object_or_404(Room.objects.alive(), pk=pk)
+        room = self._get_room(request, pk)
         self.check_object_permissions(request, room)
 
         data = request.data.copy()
@@ -430,10 +453,10 @@ class RoomDetailAV(APIView):
             400: OpenApiResponse(response=ErrorResponseSerializer),
             404: OpenApiResponse(response=ErrorResponseSerializer),
         },
-        description="Partial update (owner-only). If action=preview, requires at least 3 photos.",
+        description="Partial update (owner-only). Draft listings may be previewed before publishing.",
     )
     def patch(self, request, pk, *args, **kwargs):
-        room = get_object_or_404(Room.objects.alive(), pk=pk)
+        room = self._get_room(request, pk)
         self.check_object_permissions(request, room)
 
         data = request.data.copy()
@@ -453,32 +476,7 @@ class RoomDetailAV(APIView):
         ser.is_valid(raise_exception=True)
         ser.save()
 
-        if action == "preview":
-            approved_photo_count = (
-                RoomImage.objects
-                .filter(
-                    room=room,
-                    status="approved",
-                )
-                .exclude(image="")
-                .count()
-            )
-
-            if approved_photo_count < 3:
-                return Response(
-                    {
-                        "ok": False,
-                        "message": (
-                            "Please upload at least 3 approved photos "
-                            "before previewing your listing."
-                        ),
-                        "errors": {
-                            "photos_min_required": 3,
-                            "photos_current": approved_photo_count,
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        
 
         return ok_response(
             ser.data,
@@ -496,7 +494,7 @@ class RoomDetailAV(APIView):
     description="Soft-delete a room (owner-only).",
     )
     def delete(self, request, pk, *args, **kwargs):
-        room = get_object_or_404(Room.objects.alive(), pk=pk)
+        room = self._get_room(request, pk)
         self.check_object_permissions(request, room)
         room.soft_delete()
 
@@ -646,6 +644,82 @@ class RoomUnpublishView(APIView):
             message="Room unpublished successfully.",
             status_code=status.HTTP_200_OK,
         )  
+
+
+
+class RoomPublishView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: inline_serializer(
+                name="RoomPublishOkResponse",
+                fields={
+                    "ok": serializers.BooleanField(),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
+                    "data": inline_serializer(
+                        name="RoomPublishData",
+                        fields={
+                            "id": serializers.IntegerField(),
+                            "status": serializers.CharField(),
+                            "listing_state": serializers.CharField(),
+                        },
+                    ),
+                },
+            ),
+            401: OpenApiResponse(
+                description="Authentication required."
+            ),
+            403: DetailResponseSerializer,
+            404: DetailResponseSerializer,
+        },
+        description=(
+            "Publish an unpublished room listing owned "
+            "by the authenticated user."
+        ),
+    )
+    def post(self, request, pk, *args, **kwargs):
+        room = get_object_or_404(
+            Room.objects.filter(is_deleted=False),
+            pk=pk,
+        )
+
+        if room.property_owner != request.user:
+            return Response(
+                {
+                    "detail": (
+                        "You are not allowed to publish this listing."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if room.status != "active":
+            room.status = "active"
+            room.save(
+                update_fields=[
+                    "status",
+                    "updated_at",
+                ]
+            )
+
+        return ok_response(
+            {
+                "id": room.id,
+                "status": room.status,
+                "listing_state": _listing_state_for_room(room),
+            },
+            message="Room published successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+
+
         
         
 class RoomPhotoUploadView(APIView):
@@ -963,7 +1037,13 @@ class MyRoomsView(generics.ListAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Room.objects.none()
-        return Room.objects.alive().filter(property_owner=self.request.user)    
+
+        # Owner's own listings must include unpublished/hidden rooms.
+        # Only genuinely soft-deleted rooms are excluded.
+        return Room.objects.filter(
+            property_owner=self.request.user,
+            is_deleted=False,
+        ).order_by("-updated_at")  
       
       
       
@@ -1278,18 +1358,28 @@ class MyListingsView(generics.ListAPIView):
                 # Rented/unavailable must take priority over payment lifecycle.
                 When(is_available=False, then=Value("rented")),
 
-                # Draft: no paid_until at all.
+                # Explicit draft status must remain draft.
+                When(status="draft", then=Value("draft")),
+
+                # Never paid / not yet listed.
                 When(paid_until__isnull=True, then=Value("draft")),
-                # expired: paid_until in the past OR hidden + past paid_until
-                When(
-                    Q(status="hidden") & Q(paid_until__lt=today),
-                    then=Value("expired"),
-                ),
+
+                # Paid period has ended.
                 When(paid_until__lt=today, then=Value("expired")),
-                # hidden, but not clearly expired
+
+                # Explicitly hidden/unpublished while payment is still valid.
                 When(status="hidden", then=Value("hidden")),
-                # anything else = active
-                default=Value("active"),
+
+                # Only an explicitly active, available, currently-paid room is live.
+                When(
+                    Q(status="active")
+                    & Q(is_available=True)
+                    & Q(paid_until__gte=today),
+                    then=Value("active"),
+                ),
+
+                # Anything else must not accidentally appear as live.
+                default=Value("draft"),
                 output_field=CharField(),
             )
         )

@@ -38,6 +38,12 @@ def _inbox_link() -> str:
     """
     return f"{_frontend_base_url()}/inbox"
 
+def _my_listings_link() -> str:
+    """
+    Web/Vercel page where a landlord can manually renew a listing.
+    """
+    return f"{_frontend_base_url()}/my-listings"
+
 
 def _html_email(subject: str, body_text: str, button_url: str, button_text: str = "Open inbox") -> str:
     """
@@ -86,7 +92,7 @@ def _enrich_context(ctx: dict) -> dict:
     ctx = dict(ctx or {})
 
     # Ensure common URLs exist
-    ctx.setdefault("renew_url", _inbox_link())
+    ctx.setdefault("renew_url", _my_listings_link())
     ctx.setdefault("cta_url", _inbox_link())
 
     # Build nested room dict if template expects {{ room.title }}
@@ -115,11 +121,19 @@ def _allowed_to_send_template(*, profile: UserProfile, template_key: str) -> boo
 
 
 @shared_task(name="notifications.tasks.notify_listing_expiring")
-def notify_listing_expiring(days_ahead: int = 3) -> None:
+def notify_listing_expiring(
+    days_ahead: int = 3,
+    room_id: int | None = None,
+) -> None:
     """
-    Queue EMAIL notifications for listings expiring within `days_ahead` days.
-    - Uses NotificationTemplate with key="listing.expiring" and is_active=True
-    - Creates OutboundNotification rows with status=queued (default)
+    Queue one expiry-reminder email per active paid listing.
+
+    Production:
+    - Celery Beat runs this once daily at 07:00.
+    - A listing receives one reminder when it falls within three days of expiry.
+
+    QA:
+    - `room_id` allows one specific staging listing to be targeted safely.
     """
     template = (
         NotificationTemplate.objects.filter(
@@ -131,27 +145,71 @@ def notify_listing_expiring(days_ahead: int = 3) -> None:
     if not template:
         return
 
-    cutoff = date.today() + timedelta(days=days_ahead)
-    rooms = Room.objects.select_related("property_owner").filter(paid_until__lte=cutoff)
+    today = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+
+    rooms = (
+        Room.objects.select_related("property_owner")
+        .filter(
+            status=Room.Lifecycle.ACTIVE,
+            paid_until__gte=today,
+            paid_until__lte=cutoff,
+        )
+    )
+
+    if room_id is not None:
+        rooms = rooms.filter(pk=room_id)
 
     for room in rooms:
         owner = room.property_owner
         profile, _ = UserProfile.objects.get_or_create(user=owner)
 
-        if _allowed_to_send_template(profile=profile, template_key=template.key):
+        expiry_key = str(room.paid_until)
+
+        # Prevent duplicate reminders for the same room and paid period.
+        # A later renewal receives another reminder because paid_until changes.
+        already_queued = OutboundNotification.objects.filter(
+            user=owner,
+            channel=template.CHANNEL_EMAIL,
+            template_key=template.key,
+            context__room_id=room.pk,
+            context__paid_until=expiry_key,
+        ).exists()
+
+        if (
+            not already_queued
+            and _allowed_to_send_template(
+                profile=profile,
+                template_key=template.key,
+            )
+        ):
             OutboundNotification.objects.create(
                 user=owner,
                 channel=template.CHANNEL_EMAIL,
                 template_key=template.key,
-                # schedule immediately; your beat task will deliver it
                 scheduled_for=timezone.now(),
                 context={
-                    "room_title": getattr(room, "title", ""),
-                    "paid_until": str(getattr(room, "paid_until", "")),
-                    "cta_url": _inbox_link(),
+                    "user": {
+                        "first_name": owner.first_name or owner.username,
+                    },
+                    "room": {
+                        "id": room.pk,
+                        "title": room.title,
+                        "paid_until": expiry_key,
+                    },
+
+                    # Used to prevent duplicate reminders.
+                    "room_id": room.pk,
+                    "paid_until": expiry_key,
+
+                    # Mobile app deep link, kept separate for mobile navigation.
+                    "deep_link": f"/app/listings/{room.pk}",
+
+                    # Web/Vercel route used by the email action button.
+                    "renew_url": _my_listings_link(),
+                    "cta_url": _my_listings_link(),
                 },
             )
-
 
 @shared_task(name="notifications.tasks.send_due_notifications")
 def send_due_notifications() -> dict:
@@ -298,7 +356,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                         "booking_id": booking.id,
                         "room_title": room_title,
                         "ended_at": start_str,
-                        "cta_url": f"{_frontend_base_url()}/my-bookings/{booking.id}",
+                        "cta_url": f"{_frontend_base_url()}/viewings/{booking.id}",
                     },
                 )
                 timer_one_created = True
