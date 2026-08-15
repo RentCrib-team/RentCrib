@@ -149,11 +149,16 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
         )
 
         # 1. Create the in-app reminder once per booking.
-        already_in_app = Notification.objects.filter(
-            user=user,
-            type="booking_reminder",
-            body__icontains=f"(booking_id={booking.id})",
-        ).exists()
+        already_in_app = (
+            Notification.objects
+            .filter(
+                user=user,
+                type="booking_reminder",
+                body__icontains=f"(booking_id={booking.id})",
+            )
+            .filter(body__icontains=start_str)
+            .exists()
+        )
 
         if not already_in_app:
             Notification.objects.create(
@@ -170,6 +175,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                 template_key="booking.reminder",
                 channel=NotificationTemplate.CHANNEL_EMAIL,
                 context__booking_id=booking.id,
+                context__starts_at=start_str,
             ).exists()
 
             if not already_queued:
