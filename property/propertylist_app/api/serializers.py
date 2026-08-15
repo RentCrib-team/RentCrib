@@ -433,6 +433,12 @@ class ReviewCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         # tenancy_id is only an input field; tenancy is already in validated_data
         validated_data.pop("tenancy_id", None)
+
+        # Tenancy reviews remain private until reveal_at.
+        # The reveal sweep activates them and sends the
+        # tenancy.review_revealed notification/email.
+        validated_data["active"] = False
+
         return Review.objects.create(**validated_data)
 
 
