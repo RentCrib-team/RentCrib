@@ -295,7 +295,7 @@ def generate_unique_username_from_email(email: str) -> str:
 
 
 class RegistrationView(generics.CreateAPIView):
-    
+
     serializer_class = RegistrationSerializer
     permission_classes = [AllowAny]
     throttle_classes = [RegisterAnonThrottle]
@@ -383,7 +383,7 @@ class RegistrationView(generics.CreateAPIView):
 
                 masked = (
                     existing_user.email[:2]
-                    + "â€¢â€¢â€¢@"
+                    + "Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢@"
                     + existing_user.email.split("@")[-1]
                 )
 
@@ -436,9 +436,9 @@ class RegistrationView(generics.CreateAPIView):
     #         raise ValidationError("Security check failed")
 
     #     serializer.save()
+
         
-        
-        
+
         
     # TEMPORARY (STAGING ONLY)
     # Turnstile enforcement is disabled while frontend/mobile complete integration.
@@ -459,9 +459,9 @@ class RegistrationView(generics.CreateAPIView):
                 raise ValidationError("Security check failed")
 
         serializer.save()
-        
+
     
-    
+
 
 def build_login_payload(user):
     profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -488,7 +488,7 @@ def _mask_email(email):
     if "@" not in email:
         return ""
     local, domain = email.split("@", 1)
-    return f"{local[:2]}•••@{domain}"
+    return f"{local[:2]}â€¢â€¢â€¢@{domain}"
 
 
 def _send_account_reactivation_otp(user):
@@ -892,12 +892,12 @@ class LoginView(APIView):
             "Returns JWT refresh/access tokens on success."
         ),
     )
-    
+
     
     def post(self, request, *args, **kwargs):
+
         
-        
-        
+
 
         # turnstile_token = request.data.get("turnstile_token")
 
@@ -917,9 +917,9 @@ class LoginView(APIView):
         # TEMPORARY (STAGING ONLY)
         # Turnstile enforcement is disabled while frontend/mobile complete integration.
         # Re-enable before production launch.
+
         
-        
-        
+
         if getattr(settings, "TURNSTILE_REQUIRED", False):
             turnstile_token = request.data.get("turnstile_token")
 
@@ -960,14 +960,7 @@ class LoginView(APIView):
                     code="lockout",
                 )
 
-            if getattr(settings, "ENABLE_CAPTCHA", False):
-                token = (data.get("captcha_token") or "").strip()
-                if not views_mod.verify_captcha(token, ip):
-                    logger.warning("login_captcha_failed ip=%s identifier=%s", ip, (identifier_for_lock or "-"))
-                    return error_response(
-                        message="CAPTCHA verification failed.",
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
+
 
             ser = LoginSerializer(data=data)
             ser.is_valid(raise_exception=True)
@@ -982,9 +975,9 @@ class LoginView(APIView):
                     lookup_username = u.username
                 except get_user_model().DoesNotExist:
                     pass
+
                 
-                
-                
+
                 
             candidate_user = None
             UserModel = get_user_model()
@@ -1297,7 +1290,7 @@ class TokenRefreshView(APIView):
             )
 
         try:
-            
+
             refresh_claims = RefreshToken(refresh_str)
             user_id = refresh_claims.get("user_id")
             User = get_user_model()
@@ -1389,7 +1382,7 @@ class PasswordResetRequestView(APIView):
         email = ser.validated_data["email"].strip()
         UserModel = get_user_model()
 
-        # Always return a generic response (donâ€™t reveal if email exists)
+        # Always return a generic response (donÃ¢â‚¬â„¢t reveal if email exists)
         generic_response = ok_response(
             {"detail": "If that email exists, a reset code has been sent."},
             status_code=status.HTTP_200_OK,
