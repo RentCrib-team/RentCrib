@@ -37,10 +37,6 @@ TEMPLATES = [
                         </p>
 
                         <p>
-                            <strong>{{ snippet }}</strong>
-                        </p>
-
-                        <p>
                             Open the conversation to continue your chat.
                         </p>
 
