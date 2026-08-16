@@ -1,6 +1,8 @@
 services:
   - type: web
     name: rentout-staging-v2
+    branch: staging
+    autoDeployTrigger: commit
     runtime: python
     rootDir: property
     plan: starter
@@ -70,6 +72,8 @@ services:
 
   - type: worker
     name: rentout-staging-worker
+    branch: staging
+    autoDeployTrigger: commit
     runtime: python
     rootDir: property
     plan: starter
@@ -83,6 +87,8 @@ services:
 
   - type: worker
     name: rentout-staging-beat
+    branch: staging
+    autoDeployTrigger: commit
     runtime: python
     rootDir: property
     plan: starter
@@ -93,5 +99,3 @@ services:
         value: property.settings
       - key: DJANGO_DEBUG
         value: "false"
-
-        
