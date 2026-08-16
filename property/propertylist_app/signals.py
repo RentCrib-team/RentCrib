@@ -1,5 +1,5 @@
 ﻿from django.apps import apps
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -128,6 +128,120 @@ def booking_created_queue_emails(
     room = instance.room
     owner = getattr(room, "property_owner", None)
     booker = instance.user
+    
+    # ---------------------------------------------------------
+    # Shared RentCrib inbox/envelope event for the new viewing.
+    # ---------------------------------------------------------
+    thread = None
+    system_message = None
+
+    if owner and booker:
+        thread = (
+            MessageThread.objects
+            .filter(room=room)
+            .filter(participants=owner)
+            .filter(participants=booker)
+            .distinct()
+            .first()
+        )
+
+        if thread is None:
+            thread = MessageThread.objects.create(
+                room=room,
+            )
+            thread.participants.set(
+                [owner, booker]
+            )
+
+        event_key = f"booking:{instance.id}:created"
+
+        system_message = (
+            Message.objects
+            .filter(
+                metadata__event_key=event_key,
+            )
+            .first()
+        )
+
+        if system_message is None:
+            system_message = Message.objects.create(
+                thread=thread,
+                sender=booker,
+                body=(
+                    "Viewing booked\n\n"
+                    f"A viewing has been booked for {room.title}.\n\n"
+                    f"Viewing time: "
+                    f"{timezone.localtime(instance.start).strftime('%d %b %Y, %H:%M')}"
+                ),
+                message_type=Message.TYPE_TEXT,
+                metadata={
+                    "system_event": True,
+                    "event_type": "booking_created",
+                    "event_key": event_key,
+                    "booking_id": instance.id,
+                    "room_id": room.id,
+                    "room_title": room.title,
+                    "start": instance.start.isoformat(),
+                    "end": (
+                        instance.end.isoformat()
+                        if instance.end
+                        else None
+                    ),
+                },
+            )
+
+            # Both parties' envelope/inbox should update immediately.
+            for user in (owner, booker):
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                        "sender_id": system_message.sender_id,
+                    },
+                )
+
+        # Landlord bell notification.
+        owner_profile, _ = UserProfile.objects.get_or_create(
+            user=owner,
+        )
+
+        if getattr(
+            owner_profile,
+            "notify_confirmations",
+            True,
+        ):
+            owner_notification, owner_notification_created = (
+                Notification.objects.get_or_create(
+                    user=owner,
+                    type="booking_created",
+                    target_type="message",
+                    target_id=system_message.id,
+                    defaults={
+                        "thread": thread,
+                        "message": system_message,
+                        "title": "New viewing booked",
+                        "body": (
+                            f"A viewing has been booked for "
+                            f"{room.title}."
+                        ),
+                    },
+                )
+            )
+
+            if owner_notification_created:
+                push_user_realtime_event(
+                    owner.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_created",
+                        "notification_id": owner_notification.id,
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                    },
+                )
+    
 
     # Mobile app deep link.
     booking_deep_link = f"/app/bookings/{instance.id}"
@@ -395,6 +509,96 @@ def tenancy_extension_notifications(
         force_login=True,
     )
 
+
+    def create_extension_system_message(event_type: str, body: str):
+        landlord = tenancy.landlord
+        tenant = tenancy.tenant
+
+        if not landlord or not tenant:
+            return None, None
+
+        thread = (
+            MessageThread.objects
+            .filter(Q(room=tenancy.room) | Q(room__isnull=True))
+            .filter(participants=landlord)
+            .filter(participants=tenant)
+            .distinct()
+            .first()
+        )
+
+        if thread is None:
+            thread = MessageThread.objects.create(
+                room=tenancy.room,
+            )
+            thread.participants.set(
+                [landlord, tenant]
+            )
+
+        elif thread.room_id is None:
+            thread.room = tenancy.room
+            thread.save(
+                update_fields=["room"]
+            )
+
+        event_key = (
+            f"tenancy_extension:{instance.id}:"
+            f"{event_type}"
+        )
+
+        message = (
+            Message.objects
+            .filter(
+                metadata__event_key=event_key,
+            )
+            .first()
+        )
+
+        if message is None:
+            message_sender = (
+                instance.proposed_by
+                or landlord
+            )
+
+            message = Message.objects.create(
+                thread=thread,
+                sender=message_sender,
+                body=body,
+                message_type=Message.TYPE_TEXT,
+                metadata={
+                    "system_event": True,
+                    "event_type": event_type,
+                    "event_key": event_key,
+                    "tenancy_id": tenancy.id,
+                    "extension_id": instance.id,
+                    "room_id": tenancy.room_id,
+                    "room_title": tenancy.room.title,
+                },
+            )
+
+            # Shared conversation changed for both parties.
+            for user in (
+                landlord,
+                tenant,
+            ):
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": message.id,
+                        "thread_id": thread.id,
+                        "sender_id": message.sender_id,
+                    },
+                )
+
+        return thread, message
+
+
+
+
+
+
+
+
     def maybe_queue_email(user, template_key: str) -> None:
         if not user:
             return
@@ -519,29 +723,57 @@ def tenancy_extension_notifications(
         if not other_party:
             return
 
-        Notification.objects.get_or_create(
-            user=other_party,
-            type="tenancy_extension_proposed",
-            target_type="tenancy_extension",
-            target_id=instance.id,
-            defaults={
-                "title": "Tenancy renewal proposed",
-                "body": (
-                    f"A renewal has been proposed for "
-                    f"{tenancy.room.title}, starting "
-                    f"{proposed_start_date_text} for "
-                    f"{duration_text}. Review the renewal "
-                    "information and respond."
-                ),
-            },
+        thread, message = create_extension_system_message(
+            "tenancy_extension_proposed",
+            (
+                "Tenancy renewal proposed\n\n"
+                f"A renewal has been proposed for "
+                f"{tenancy.room.title}, starting "
+                f"{proposed_start_date_text} for "
+                f"{duration_text}.\n\n"
+                "Review the renewal information and respond."
+            ),
         )
+
+        notification, notification_created = (
+            Notification.objects.get_or_create(
+                user=other_party,
+                type="tenancy_extension_proposed",
+                target_type="tenancy_extension",
+                target_id=instance.id,
+                defaults={
+                    "thread": thread,
+                    "message": message,
+                    "title": "Tenancy renewal proposed",
+                    "body": (
+                        f"A renewal has been proposed for "
+                        f"{tenancy.room.title}, starting "
+                        f"{proposed_start_date_text} for "
+                        f"{duration_text}. Review the renewal "
+                        "information and respond."
+                    ),
+                },
+            )
+        )
+
+        if notification_created and thread and message:
+            push_user_realtime_event(
+                other_party.id,
+                "new_notification",
+                {
+                    "kind": "tenancy_extension_proposed",
+                    "notification_id": notification.id,
+                    "message_id": message.id,
+                    "thread_id": thread.id,
+                },
+            )
 
         maybe_queue_email(
             other_party,
             "tenancy.extension.proposed",
         )
-        return
 
+        return
     old_status = getattr(
         instance,
         "_old_status",
@@ -553,6 +785,17 @@ def tenancy_extension_notifications(
         return
 
     if new_status == instance.STATUS_ACCEPTED:
+        thread, message = create_extension_system_message(
+            "tenancy_extension_accepted",
+            (
+                "Tenancy renewal accepted\n\n"
+                f"The renewal for {tenancy.room.title} has been accepted.\n\n"
+                f"The new tenancy period starts "
+                f"{proposed_start_date_text} and continues "
+                f"for {duration_text}."
+            ),
+        )
+
         for user in (
             tenancy.landlord,
             tenancy.tenant,
@@ -560,22 +803,38 @@ def tenancy_extension_notifications(
             if not user:
                 continue
 
-            Notification.objects.get_or_create(
-                user=user,
-                type="tenancy_extension_accepted",
-                target_type="tenancy_extension",
-                target_id=instance.id,
-                defaults={
-                    "title": "Tenancy renewal accepted",
-                    "body": (
-                        f"The renewal for "
-                        f"{tenancy.room.title} has been "
-                        f"accepted. The new tenancy period "
-                        f"starts {proposed_start_date_text} "
-                        f"and continues for {duration_text}."
-                    ),
-                },
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=user,
+                    type="tenancy_extension_accepted",
+                    target_type="tenancy_extension",
+                    target_id=instance.id,
+                    defaults={
+                        "thread": thread,
+                        "message": message,
+                        "title": "Tenancy renewal accepted",
+                        "body": (
+                            f"The renewal for "
+                            f"{tenancy.room.title} has been "
+                            f"accepted. The new tenancy period "
+                            f"starts {proposed_start_date_text} "
+                            f"and continues for {duration_text}."
+                        ),
+                    },
+                )
             )
+
+            if notification_created and thread and message:
+                push_user_realtime_event(
+                    user.id,
+                    "new_notification",
+                    {
+                        "kind": "tenancy_extension_accepted",
+                        "notification_id": notification.id,
+                        "message_id": message.id,
+                        "thread_id": thread.id,
+                    },
+                )
 
             maybe_queue_email(
                 user,
@@ -588,23 +847,50 @@ def tenancy_extension_notifications(
         if not proposer:
             return
 
-        Notification.objects.get_or_create(
-            user=proposer,
-            type="tenancy_extension_rejected",
-            target_type="tenancy_extension",
-            target_id=instance.id,
-            defaults={
-                "title": "Tenancy renewal declined",
-                "body": (
-                    f"The proposed renewal for "
-                    f"{tenancy.room.title}, starting "
-                    f"{proposed_start_date_text} for "
-                    f"{duration_text}, was declined. "
-                    "The existing tenancy information "
-                    "remains unchanged."
-                ),
-            },
+        thread, message = create_extension_system_message(
+            "tenancy_extension_rejected",
+            (
+                "Tenancy renewal declined\n\n"
+                f"The proposed renewal for {tenancy.room.title}, "
+                f"starting {proposed_start_date_text} for "
+                f"{duration_text}, was declined.\n\n"
+                "The existing tenancy information remains unchanged."
+            ),
         )
+
+        notification, notification_created = (
+            Notification.objects.get_or_create(
+                user=proposer,
+                type="tenancy_extension_rejected",
+                target_type="tenancy_extension",
+                target_id=instance.id,
+                defaults={
+                    "thread": thread,
+                    "message": message,
+                    "title": "Tenancy renewal declined",
+                    "body": (
+                        f"The proposed renewal for "
+                        f"{tenancy.room.title}, starting "
+                        f"{proposed_start_date_text} for "
+                        f"{duration_text}, was declined. "
+                        "The existing tenancy information "
+                        "remains unchanged."
+                    ),
+                },
+            )
+        )
+
+        if notification_created and thread and message:
+            push_user_realtime_event(
+                proposer.id,
+                "new_notification",
+                {
+                    "kind": "tenancy_extension_rejected",
+                    "notification_id": notification.id,
+                    "message_id": message.id,
+                    "thread_id": thread.id,
+                },
+            )
 
         maybe_queue_email(
             proposer,

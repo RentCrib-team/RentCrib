@@ -6,6 +6,7 @@ from celery import shared_task
 from django.conf import settings
 from django.template import Context, Template
 from django.utils import timezone
+from django.db.models import Q
 
 from notifications.models import (
     DeliveryAttempt,
@@ -16,11 +17,14 @@ from notifications.models import (
 from notifications.services import send_mail
 from propertylist_app.models import (
     Booking,
+    Message,
+    MessageThread,
     Notification,
     Room,
     UserProfile,
 )
 from propertylist_app.notifications.utils import create_in_app_notification_if_allowed
+from propertylist_app.services.realtime import push_user_realtime_event
 
 
 def _frontend_base_url() -> str:
@@ -166,8 +170,52 @@ def notify_listing_expiring(
 
         expiry_key = str(room.paid_until)
 
-        # Prevent duplicate reminders for the same room and paid period.
-        # A later renewal receives another reminder because paid_until changes.
+        allowed = _allowed_to_send_template(
+            profile=profile,
+            template_key=template.key,
+        )
+
+        # ---------------------------------------------------------
+        # 1. BELL NOTIFICATION
+        # Dedupe by room + this exact paid_until period so a later
+        # renewal can receive a new expiry reminder.
+        # ---------------------------------------------------------
+        bell_exists = Notification.objects.filter(
+            user=owner,
+            type="listing_expiring",
+            target_type="room",
+            target_id=room.pk,
+            body__icontains=expiry_key,
+        ).exists()
+
+        if allowed and not bell_exists:
+            listing_expiring_notification = Notification.objects.create(
+                user=owner,
+                type="listing_expiring",
+                target_type="room",
+                target_id=room.pk,
+                title="Your listing is expiring soon",
+                body=(
+                    f"Your listing '{room.title}' is expiring on "
+                    f"{expiry_key}. Renew it to keep it visible."
+                ),
+            )
+
+            push_user_realtime_event(
+                owner.id,
+                "new_notification",
+                {
+                    "kind": "listing_expiring",
+                    "notification_id": listing_expiring_notification.id,
+                    "target_type": "room",
+                    "target_id": room.pk,
+                },
+            )
+
+        # ---------------------------------------------------------
+        # 2. EMAIL
+        # Existing email dedupe remains based on room + paid_until.
+        # ---------------------------------------------------------
         already_queued = OutboundNotification.objects.filter(
             user=owner,
             channel=template.CHANNEL_EMAIL,
@@ -176,13 +224,7 @@ def notify_listing_expiring(
             context__paid_until=expiry_key,
         ).exists()
 
-        if (
-            not already_queued
-            and _allowed_to_send_template(
-                profile=profile,
-                template_key=template.key,
-            )
-        ):
+        if allowed and not already_queued:
             OutboundNotification.objects.create(
                 user=owner,
                 channel=template.CHANNEL_EMAIL,
@@ -202,15 +244,14 @@ def notify_listing_expiring(
                     "room_id": room.pk,
                     "paid_until": expiry_key,
 
-                    # Mobile app deep link, kept separate for mobile navigation.
+                    # Mobile app deep link.
                     "deep_link": f"/app/listings/{room.pk}",
 
-                    # Web/Vercel route used by the email action button.
+                    # Web/Vercel action button.
                     "renew_url": _my_listings_link(),
                     "cta_url": _my_listings_link(),
                 },
             )
-
 @shared_task(name="notifications.tasks.send_due_notifications")
 def send_due_notifications() -> dict:
     """
@@ -316,6 +357,111 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
         )
 
 
+
+        # ---------- SHARED RENTCRIB INBOX / ENVELOPE MESSAGE ----------
+        landlord = (
+            getattr(room, "property_owner", None)
+            if room
+            else None
+        )
+
+        thread = None
+        system_message = None
+
+        if landlord:
+            thread = (
+                MessageThread.objects
+                .filter(
+                    Q(room=room)
+                    | Q(room__isnull=True)
+                )
+                .filter(participants=landlord)
+                .filter(participants=user)
+                .distinct()
+                .first()
+            )
+
+            if thread is None:
+                thread = MessageThread.objects.create(
+                    room=room,
+                )
+                thread.participants.set(
+                    [landlord, user]
+                )
+
+            elif thread.room_id is None:
+                thread.room = room
+                thread.save(
+                    update_fields=["room"]
+                )
+
+            event_key = (
+                f"booking:{booking.id}:"
+                f"{booking.start.isoformat()}:"
+                "viewing_completed"
+            )
+
+            system_message = (
+                Message.objects
+                .filter(
+                    metadata__event_key=event_key,
+                )
+                .first()
+            )
+
+            if system_message is None:
+                system_message = Message.objects.create(
+                    thread=thread,
+
+                    # The landlord satisfies the Message sender FK,
+                    # while system_event=True makes this a RentCrib
+                    # logic message rather than human chat.
+                    sender=landlord,
+
+                    body=(
+                        "Viewing completed\n\n"
+                        f"The viewing for {room_title} "
+                        f"scheduled for {start_str} "
+                        "has now been completed."
+                    ),
+
+                    message_type=Message.TYPE_TEXT,
+
+                    metadata={
+                        "system_event": True,
+                        "event_type": "booking_completed",
+                        "event_key": event_key,
+                        "booking_id": booking.id,
+                        "room_id": (
+                            room.id
+                            if room
+                            else None
+                        ),
+                        "room_title": room_title,
+                        "starts_at": start_str,
+                    },
+                )
+
+                # The shared conversation changed for both parties.
+                for realtime_user in (
+                    user,
+                    landlord,
+                ):
+                    if not realtime_user:
+                        continue
+
+                    push_user_realtime_event(
+                        realtime_user.id,
+                        "new_message",
+                        {
+                            "message_id": system_message.id,
+                            "thread_id": thread.id,
+                            "sender_id": system_message.sender_id,
+                        },
+                    )
+
+
+
         timer_one_created = False
         # ---------- 1) IN-APP (dedupe by booking_id) ----------
         already_in_app = Notification.objects.filter(
@@ -325,13 +471,26 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
         ).exists()
 
         if not already_in_app:
-            create_in_app_notification_if_allowed(
+            notification = create_in_app_notification_if_allowed(
                 user=user,
                 notification_type="booking_completed",
                 title=title,
                 body=body,
                 preference_field="notify_confirmations",
             )
+
+            if notification and system_message and thread:
+                push_user_realtime_event(
+                    user.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_completed",
+                        "notification_id": notification.id,
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                    },
+                )
+
             timer_one_created = True
 
         # ---------- 2) EMAIL QUEUE (dedupe by booking_id) ----------
@@ -360,6 +519,109 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                     },
                 )
                 timer_one_created = True
+
+
+        # ---------- 3) LANDLORD BELL + REALTIME BELL ----------
+        if landlord:
+            landlord_profile, _ = UserProfile.objects.get_or_create(
+                user=landlord,
+            )
+
+            if getattr(
+                landlord_profile,
+                "notify_confirmations",
+                True,
+            ):
+                landlord_notification_exists = Notification.objects.filter(
+                    user=landlord,
+                    type="booking_completed_landlord",
+                    target_type="booking",
+                    target_id=booking.id,
+                ).exists()
+
+                if not landlord_notification_exists:
+                    landlord_notification = Notification.objects.create(
+                        user=landlord,
+                        type="booking_completed_landlord",
+                        target_type="booking",
+                        target_id=booking.id,
+                        thread=thread,
+                        message=system_message,
+                        title="Viewing completed",
+                        body=(
+                            f"The viewing for '{room_title}' "
+                            f"scheduled for {start_str} has been completed."
+                        ),
+                    )
+
+                    if system_message and thread:
+                        push_user_realtime_event(
+                            landlord.id,
+                            "new_notification",
+                            {
+                                "kind": "booking_completed_landlord",
+                                "notification_id": landlord_notification.id,
+                                "message_id": system_message.id,
+                                "thread_id": thread.id,
+                            },
+                        )
+                
+                
+                
+                
+                # ---------- 4) LANDLORD EMAIL ----------
+                landlord_template = (
+                    NotificationTemplate.objects.filter(
+                        key="booking.completed_landlord",
+                        is_active=True,
+                        channel=NotificationTemplate.CHANNEL_EMAIL,
+                    ).first()
+                )
+
+                if landlord_template:
+                    landlord_email_exists = (
+                        OutboundNotification.objects.filter(
+                            user=landlord,
+                            template_key="booking.completed_landlord",
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            context__booking_id=booking.id,
+                        ).exists()
+                    )
+
+                    if not landlord_email_exists:
+                        OutboundNotification.objects.create(
+                            user=landlord,
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            template_key="booking.completed_landlord",
+                            scheduled_for=now,
+                            context={
+                                "user": {
+                                    "first_name": landlord.first_name,
+                                },
+                                "booking_id": booking.id,
+                                "room_title": room_title,
+                                "ended_at": start_str,
+
+                                # Mobile app destination.
+                                "deep_link": (
+                                    f"/app/threads/{thread.id}"
+                                    if thread
+                                    else f"/app/bookings/{booking.id}"
+                                ),
+
+                                # Web/Vercel action button.
+                                "cta_url": (
+                                    f"{_frontend_base_url()}/messages"
+                                    f"?thread={thread.id}"
+                                    if thread
+                                    else (
+                                        f"{_frontend_base_url()}"
+                                        f"/viewings/{booking.id}"
+                                    )
+                                ),
+                            },
+                        )
+
 
 
                 

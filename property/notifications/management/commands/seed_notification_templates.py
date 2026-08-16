@@ -858,7 +858,204 @@ You can respond to this viewing request from your RentCrib account.
 {% endblock %}
 """,
 },
-       
+   {
+    "key": "booking.cancelled",
+    "subject": "Your viewing has been cancelled for {{ room.title }}",
+    "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="width:100%;border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding:0;">
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="width:100%;max-width:620px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe5ee;border-radius:5px;">
+                <tr>
+                    <td style="padding:34px 34px 32px;">
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;text-align:center;color:#357af0;">
+                            VIEWING UPDATE
+                        </p>
+
+                        <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-0.4px;text-align:center;color:#172033;">
+                            Your viewing has been cancelled
+                        </h1>
+
+                        <p style="margin:10px 0 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;text-align:center;color:#5f6b7a;">
+                            A scheduled viewing for this property has been cancelled.
+                        </p>
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            Hi {{ user.first_name|default:"there" }},
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            <strong style="color:#172033;">{{ cancelled_by_name }}</strong>
+                            cancelled the viewing for:
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.6;font-weight:700;color:#172033;">
+                            {{ room.title }}
+                        </p>
+
+                        <p style="margin:20px 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#566176;">
+                            Open the conversation to view the latest information.
+                        </p>
+
+                        {% include "emails/components/button.html" with button_url=cta_url button_text="Open conversation" %}
+
+                        <p style="margin:24px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.65;text-align:center;color:#8892a3;">
+                            Thank you for using RentCrib.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
+ {
+    "key": "booking.suspended",
+    "subject": "Your viewing has been suspended for {{ room.title }}",
+    "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="width:100%;border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding:0;">
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="width:100%;max-width:620px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe5ee;border-radius:5px;">
+                <tr>
+                    <td style="padding:34px 34px 32px;">
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;text-align:center;color:#357af0;">
+                            VIEWING UPDATE
+                        </p>
+
+                        <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-0.4px;text-align:center;color:#172033;">
+                            Your viewing has been suspended
+                        </h1>
+
+                        <p style="margin:10px 0 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;text-align:center;color:#5f6b7a;">
+                            A scheduled viewing for this property has been suspended.
+                        </p>
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            Hi {{ user.first_name|default:"there" }},
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            The viewing for:
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.6;font-weight:700;color:#172033;">
+                            {{ room.title }}
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            has been suspended.
+                        </p>
+
+                        <p style="margin:20px 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#566176;">
+                            Open the conversation to view the latest information.
+                        </p>
+
+                        {% include "emails/components/button.html" with button_url=cta_url button_text="Open conversation" %}
+
+                        <p style="margin:24px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.65;text-align:center;color:#8892a3;">
+                            Thank you for using RentCrib.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},
+   
+ {
+    "key": "booking.deleted",
+    "subject": "Your viewing has been removed for {{ room.title }}",
+    "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="width:100%;border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding:0;">
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="width:100%;max-width:620px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe5ee;border-radius:5px;">
+                <tr>
+                    <td style="padding:34px 34px 32px;">
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;text-align:center;color:#357af0;">
+                            VIEWING UPDATE
+                        </p>
+
+                        <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-0.4px;text-align:center;color:#172033;">
+                            Viewing removed
+                        </h1>
+
+                        <p style="margin:10px 0 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;text-align:center;color:#5f6b7a;">
+                            A scheduled viewing has been removed.
+                        </p>
+
+                        <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            Hi {{ user.first_name|default:"there" }},
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.7;color:#4f5b70;">
+                            <strong style="color:#172033;">{{ deleted_by_name }}</strong>
+                            removed the viewing for:
+                        </p>
+
+                        <p style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.6;font-weight:700;color:#172033;">
+                            {{ room.title }}
+                        </p>
+
+                        <p style="margin:20px 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#566176;">
+                            Open the conversation to view the latest information.
+                        </p>
+
+                        {% include "emails/components/button.html" with button_url=cta_url button_text="Open conversation" %}
+
+                        <p style="margin:24px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.65;text-align:center;color:#8892a3;">
+                            Thank you for using RentCrib.
+                        </p>
+
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+</table>
+
+{% endblock %}
+""",
+},   
+    
+    
     {
     "key": "booking.completed",
     "subject": "Your viewing has been completed for {{ room_title }}",
@@ -1181,7 +1378,588 @@ You can respond to this viewing request from your RentCrib account.
     {% endblock %}
     """,
     },    
-        
+     {
+    "key": "booking.completed_landlord",
+    "subject": "A viewing has been completed for {{ room_title }}",
+    "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+<tr>
+<td align="center">
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        max-width:620px;
+        background:#ffffff;
+        border:1px solid #e1e7ef;
+        border-radius:5px;
+    "
+>
+
+<tr>
+<td style="padding:34px 34px 32px;">
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:1.4px;
+    text-transform:uppercase;
+    text-align:center;
+    color:#357af0;
+">
+VIEWING UPDATE
+</p>
+
+<h1 style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:28px;
+    line-height:1.3;
+    font-weight:700;
+    text-align:center;
+    color:#172033;
+">
+A viewing has been completed
+</h1>
+
+<p style="
+    margin:10px 0 30px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    text-align:center;
+    color:#6b7689;
+">
+The scheduled viewing time for your property has now passed.
+</p>
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+The viewing for
+<strong style="color:#172033;">
+{{ room_title }}
+</strong>
+has now been marked as completed.
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:26px;
+        background:#f7f9fc;
+        border:1px solid #dfe6ef;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:20px 22px;">
+
+<p style="
+    margin:0 0 6px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+VIEWING DETAILS
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:17px;
+    font-weight:700;
+    color:#172033;
+">
+{{ room_title }}
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        margin-top:16px;
+        border-collapse:collapse;
+    "
+>
+<tr>
+
+<td
+    valign="top"
+    style="
+        width:50%;
+        padding:14px 12px 0 0;
+        border-top:1px solid #e4e9f0;
+    "
+>
+<p style="
+    margin:0 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Completed
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ ended_at }}
+</p>
+</td>
+
+<td
+    valign="top"
+    style="
+        width:50%;
+        padding:14px 0 0 12px;
+        border-top:1px solid #e4e9f0;
+        border-left:1px solid #e4e9f0;
+    "
+>
+<p style="
+    margin:0 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Reference
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ booking_id }}
+</p>
+</td>
+
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:20px;
+        background:#f4f8ff;
+        border:1px solid #dce8fb;
+        border-left:4px solid #357af0;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:16px 18px;">
+
+<p style="
+    margin:0 0 5px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    font-weight:700;
+    color:#172033;
+">
+Keep the conversation going
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.65;
+    color:#566176;
+">
+If you and the viewer agree to move forward, continue the conversation and complete the tenancy information when appropriate.
+</p>
+
+</td>
+</tr>
+</table>
+
+<table
+    role="presentation"
+    align="center"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="margin-top:28px;"
+>
+<tr>
+<td
+    bgcolor="#357af0"
+    style="
+        background:#357af0;
+        border-radius:4px;
+    "
+>
+<a
+    href="{{ cta_url }}"
+    style="
+        display:inline-block;
+        padding:15px 30px;
+        font-family:Arial, Helvetica, sans-serif;
+        font-size:15px;
+        font-weight:700;
+        color:#ffffff;
+        text-decoration:none;
+        border-radius:4px;
+    "
+>
+Open conversation
+</a>
+</td>
+</tr>
+</table>
+
+<p style="
+    margin:22px 0 0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:13px;
+    line-height:1.6;
+    text-align:center;
+    color:#8892a3;
+">
+This completion is based on the scheduled viewing end time.
+</p>
+
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+{% endblock %}
+""",
+},   
+   
+{
+    "key": "payment.confirmed",
+    "subject": "Your RentCrib payment has been confirmed",
+    "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+<tr>
+<td align="center">
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        max-width:620px;
+        background:#ffffff;
+        border:1px solid #e1e7ef;
+        border-radius:5px;
+    "
+>
+<tr>
+<td style="padding:34px 34px 32px;">
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:1.4px;
+    text-transform:uppercase;
+    text-align:center;
+    color:#357af0;
+">
+PAYMENT CONFIRMATION
+</p>
+
+<h1 style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:28px;
+    line-height:1.3;
+    font-weight:700;
+    text-align:center;
+    color:#172033;
+">
+Your payment has been confirmed
+</h1>
+
+<p style="
+    margin:10px 0 30px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    text-align:center;
+    color:#6b7689;
+">
+Your RentCrib listing payment was successful.
+</p>
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Your payment for
+<strong style="color:#172033;">
+{{ room.title }}
+</strong>
+has been confirmed and your listing is active.
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:26px;
+        background:#f7f9fc;
+        border:1px solid #dfe6ef;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:20px 22px;">
+
+<p style="
+    margin:0 0 6px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+LISTING DETAILS
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:17px;
+    font-weight:700;
+    color:#172033;
+">
+{{ room.title }}
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        margin-top:16px;
+        border-collapse:collapse;
+    "
+>
+<tr>
+
+<td
+    valign="top"
+    style="
+        width:50%;
+        padding:14px 12px 0 0;
+        border-top:1px solid #e4e9f0;
+    "
+>
+<p style="
+    margin:0 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Status
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+Active
+</p>
+</td>
+
+<td
+    valign="top"
+    style="
+        width:50%;
+        padding:14px 0 0 12px;
+        border-top:1px solid #e4e9f0;
+        border-left:1px solid #e4e9f0;
+    "
+>
+<p style="
+    margin:0 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Payment reference
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ payment_id }}
+</p>
+</td>
+
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+<p style="
+    margin:20px 0 22px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.65;
+    color:#566176;
+">
+You can manage your listing from My Listings.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="View my listings" %}
+
+<p style="
+    margin:24px 0 0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:13px;
+    line-height:1.65;
+    text-align:center;
+    color:#8892a3;
+">
+Thank you for using RentCrib.
+</p>
+
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+{% endblock %}
+""",
+},   
+   
+   
         
        {
         "key": "listing.expiring",
@@ -1489,6 +2267,197 @@ Thank you for using RentCrib.
 {% endblock %}
         """,
     },
+    
+    
+    
+    {
+    "key": "listing.expired",
+    "subject": "Your RentCrib listing has expired",
+    "body": """
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+<tr>
+<td align="center">
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        max-width:620px;
+        background:#ffffff;
+        border:1px solid #e1e7ef;
+        border-radius:5px;
+    "
+>
+<tr>
+<td style="padding:34px 34px 32px;">
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:1.4px;
+    text-transform:uppercase;
+    text-align:center;
+    color:#357af0;
+">
+LISTING UPDATE
+</p>
+
+<h1 style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:28px;
+    line-height:1.3;
+    font-weight:700;
+    text-align:center;
+    color:#172033;
+">
+Your listing has expired
+</h1>
+
+<p style="
+    margin:10px 0 30px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    text-align:center;
+    color:#6b7689;
+">
+Your listing is no longer visible to room seekers.
+</p>
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Your listing for
+<strong style="color:#172033;">
+{{ room.title }}
+</strong>
+has expired and is now hidden.
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:26px;
+        background:#f7f9fc;
+        border:1px solid #dfe6ef;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:20px 22px;">
+
+<p style="
+    margin:0 0 6px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+LISTING DETAILS
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:17px;
+    font-weight:700;
+    color:#172033;
+">
+{{ room.title }}
+</p>
+
+<p style="
+    margin:16px 0 0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.6;
+    color:#566176;
+">
+Expired on {{ paid_until }}
+</p>
+
+</td>
+</tr>
+</table>
+
+<p style="
+    margin:20px 0 22px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.65;
+    color:#566176;
+">
+Renew the listing to make it visible to room seekers again.
+</p>
+
+{% include "emails/components/button.html" with button_url=cta_url button_text="Renew listing" %}
+
+<p style="
+    margin:24px 0 0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:13px;
+    line-height:1.65;
+    text-align:center;
+    color:#8892a3;
+">
+Thank you for using RentCrib.
+</p>
+
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+{% endblock %}
+""",
+},
+    
+    
+    
     
         # -------------------------
     # Tenancy lifecycle

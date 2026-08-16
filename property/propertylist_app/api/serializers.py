@@ -434,8 +434,8 @@ class ReviewCreateSerializer(serializers.Serializer):
         # tenancy_id is only an input field; tenancy is already in validated_data
         validated_data.pop("tenancy_id", None)
 
-        # Tenancy reviews remain private until reveal_at.
-        # The reveal sweep activates them and sends the
+        # Tenancy reviews are double-blind until reveal_at.
+        # The reveal sweep activates them and then queues the
         # tenancy.review_revealed notification/email.
         validated_data["active"] = False
 

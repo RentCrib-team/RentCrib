@@ -14,16 +14,28 @@ User = get_user_model()
 class DummyPaymentIntent:
     id = "pi_mobile_test_123"
     client_secret = "pi_mobile_test_123_secret_abc"
-    
-    
-class DummyCustomerSession:
-    id = "cuss_mobile_test_123"
-    client_secret = "cuss_mobile_test_123_secret_abc"    
 
 
 class DummyCustomerSession:
     id = "cuss_mobile_test_123"
     client_secret = "cuss_mobile_test_123_secret_abc"
+
+
+class DummyPaymentIntentAPI:
+    @staticmethod
+    def create(**kwargs):
+        return DummyPaymentIntent()
+
+
+class DummyCustomerSessionAPI:
+    @staticmethod
+    def create(**kwargs):
+        return DummyCustomerSession()
+
+
+class DummyStripe:
+    PaymentIntent = DummyPaymentIntentAPI
+    CustomerSession = DummyCustomerSessionAPI
 
 
 def test_owner_can_create_mobile_listing_payment_intent(monkeypatch):
@@ -49,16 +61,11 @@ def test_owner_can_create_mobile_listing_payment_intent(monkeypatch):
         price_per_month=500,
     )
 
+    # Patch the exact Stripe resolver used by the production endpoint.
     monkeypatch.setattr(
-        payments_views.stripe.CustomerSession,
-        "create",
-        lambda **kwargs: DummyCustomerSession(),
-    )
-
-    monkeypatch.setattr(
-        payments_views.stripe.PaymentIntent,
-        "create",
-        lambda **kwargs: DummyPaymentIntent(),
+        payments_views,
+        "_stripe_mod",
+        lambda: DummyStripe,
     )
 
     client = APIClient()
@@ -90,6 +97,7 @@ def test_owner_can_create_mobile_listing_payment_intent(monkeypatch):
     assert payment.stripe_payment_intent_id == "pi_mobile_test_123"
     assert payment.status == Payment.Status.REQUIRES_PAYMENT
 
+
 def test_non_owner_cannot_create_mobile_listing_payment_intent(monkeypatch):
     owner = User.objects.create_user(
         username="owner",
@@ -102,11 +110,11 @@ def test_non_owner_cannot_create_mobile_listing_payment_intent(monkeypatch):
         email="other@example.com",
         password="testpass123",
     )
-    
+
     cat = RoomCategorie.objects.create(
-      name="Mobile Owner Paid",
-      active=True,
-      )
+        name="Mobile Owner Paid",
+        active=True,
+    )
 
     room = Room.objects.create(
         property_owner=owner,
@@ -117,14 +125,20 @@ def test_non_owner_cannot_create_mobile_listing_payment_intent(monkeypatch):
 
     called = {"value": False}
 
-    def fake_payment_intent_create(**kwargs):
-        called["value"] = True
-        return DummyPaymentIntent()
+    class TrackingPaymentIntentAPI:
+        @staticmethod
+        def create(**kwargs):
+            called["value"] = True
+            return DummyPaymentIntent()
+
+    class TrackingStripe:
+        PaymentIntent = TrackingPaymentIntentAPI
+        CustomerSession = DummyCustomerSessionAPI
 
     monkeypatch.setattr(
-        payments_views.stripe.PaymentIntent,
-        "create",
-        fake_payment_intent_create,
+        payments_views,
+        "_stripe_mod",
+        lambda: TrackingStripe,
     )
 
     client = APIClient()
@@ -138,5 +152,10 @@ def test_non_owner_cannot_create_mobile_listing_payment_intent(monkeypatch):
 
     assert response.status_code == 403
     assert called["value"] is False
-    assert Payment.objects.filter(room=room, user=other_user).exists() is False
-    
+    assert (
+        Payment.objects.filter(
+            room=room,
+            user=other_user,
+        ).exists()
+        is False
+    )

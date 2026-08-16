@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.conf import settings
 from celery import shared_task
 from notifications.models import NotificationTemplate, OutboundNotification
+from propertylist_app.services.realtime import push_user_realtime_event
 from propertylist_app.models import (
     Room,
     Message,
@@ -44,12 +45,68 @@ def expire_paid_listings(today: Optional[date] = None) -> int:
 
                 # Respect Account -> Notifications -> Reminders toggle
                 if getattr(profile, "notify_reminders", True):
-                    Notification.objects.create(
+                    listing_expired_notification = Notification.objects.create(
                         user=room.property_owner,
                         type="listing_expired",
                         title="Your listing has expired",
-                        body=f"Room '{room.title}' is now hidden because the payment period ended.",
+                        body=(
+                            f"Room '{room.title}' is now hidden because "
+                            "the payment period ended."
+                        ),
                     )
+
+                    push_user_realtime_event(
+                        room.property_owner.id,
+                        "new_notification",
+                        {
+                            "kind": "listing_expired",
+                            "notification_id": listing_expired_notification.id,
+                            "target_type": "room",
+                            "target_id": room.id,
+                        },
+                    )
+
+                    template_exists = (
+                        NotificationTemplate.objects.filter(
+                            key="listing.expired",
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            is_active=True,
+                        ).exists()
+                    )
+
+                    if template_exists:
+                        OutboundNotification.objects.create(
+                            user=room.property_owner,
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            template_key="listing.expired",
+                            scheduled_for=timezone.now(),
+                            context={
+                                "user": {
+                                    "first_name": (
+                                        room.property_owner.first_name
+                                        or room.property_owner.username
+                                    ),
+                                },
+                                "room": {
+                                    "id": room.id,
+                                    "title": room.title,
+                                },
+                                "paid_until": (
+                                    room.paid_until.isoformat()
+                                    if room.paid_until
+                                    else ""
+                                ),
+
+                                # Mobile app destination.
+                                "deep_link": f"/app/listings/{room.id}",
+
+                                # Web/Vercel action button.
+                                "cta_url": build_absolute_url(
+                                    "/my-listings",
+                                    force_login=True,
+                                ),
+                            },
+                        )
             except Exception:
                 # Never let a notification failure block the job
                 pass
@@ -78,12 +135,11 @@ def send_new_message_email(message_id: int) -> int:
     if not recipient.email:
         return 0
 
-    subject = f"New message from {msg.sender.username}"
+    subject = f"New message from {msg.sender.username} on RentCrib"
     body = (
-        f"You have a new message in your RentOut inbox.\n\n"
-        f"From: {msg.sender.username}\n"
-        f"Message: {msg.body}\n"
-        f"\nLog in to reply."
+        "You have a new message on RentCrib.\n\n"
+        "Open your conversation to read and reply.\n\n"
+        "The message content is only available inside RentCrib."
     )
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@example.com")
 
@@ -337,7 +393,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                     thread.room = room
                     thread.save(update_fields=["room"])
 
-                Message.objects.create(
+                system_message = Message.objects.create(
                     thread=thread,
 
                     # A real sender is required by the model, but
@@ -364,6 +420,49 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                         "viewer_name": seeker_name,
                     },
                 )
+
+                # The shared inbox/envelope message exists for both parties,
+                # regardless of their bell/email notification preferences.
+                for user in (seeker, landlord):
+                    if not user:
+                        continue
+
+                    push_user_realtime_event(
+                        user.id,
+                        "new_message",
+                        {
+                            "message_id": system_message.id,
+                            "thread_id": thread.id,
+                            "sender_id": system_message.sender_id,
+                        },
+                    )
+
+                # Realtime bell update only where a bell notification
+                # actually exists for that user.
+                if getattr(seeker_profile, "notify_reminders", True):
+                    push_user_realtime_event(
+                        seeker.id,
+                        "new_notification",
+                        {
+                            "kind": "booking_reminder",
+                            "message_id": system_message.id,
+                            "thread_id": thread.id,
+                        },
+                    )
+
+                if (
+                    landlord
+                    and getattr(landlord_profile, "notify_reminders", True)
+                ):
+                    push_user_realtime_event(
+                        landlord.id,
+                        "new_notification",
+                        {
+                            "kind": "booking_reminder_landlord",
+                            "message_id": system_message.id,
+                            "thread_id": thread.id,
+                        },
+                    )
 
         processed += 1
 
