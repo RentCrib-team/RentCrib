@@ -4,11 +4,20 @@ from typing import Optional
 
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.conf import settings
 from celery import shared_task
 from notifications.models import NotificationTemplate, OutboundNotification
-from propertylist_app.models import Room, Message, Notification, UserProfile,Booking
+from propertylist_app.models import (
+    Room,
+    Message,
+    MessageThread,
+    Notification,
+    UserProfile,
+    Booking,
+)
+from propertylist_app.services.deep_links import build_absolute_url
 
 
 def expire_paid_listings(today: Optional[date] = None) -> int:
@@ -89,18 +98,23 @@ def send_new_message_email(message_id: int) -> int:
 @shared_task
 def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
     """
-    Queue an upcoming-viewing reminder shortly before the viewing starts.
+    Queue upcoming-viewing reminders shortly before the viewing starts.
 
-    Temporary staging/testing rule:
+    Temporary staging / QA rule:
     - Reminder becomes eligible 5 minutes before booking.start.
 
-    Production rule later:
-    - Change the default to 24 hours:
-      minutes_ahead = 24 * 60
+    Production rule:
+    - Change Celery Beat args to 60 so reminders are sent 1 hour before viewing.
 
-    Creates only once per booking:
-      1) in-app notification
-      2) queued booking.reminder email
+    Each viewing can generate:
+      1) seeker in-app reminder
+      2) seeker booking.reminder email
+      3) landlord in-app reminder
+      4) landlord booking.reminder_landlord email
+      5) one shared RentCrib system message in the conversation
+
+    Reminders are deduplicated by booking + current viewing start time,
+    so rescheduling the same booking can generate a fresh reminder.
     """
     now = timezone.now()
     window_end = now + timedelta(minutes=minutes_ahead)
@@ -113,12 +127,24 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
             start__gte=now,
             start__lte=window_end,
         )
-        .select_related("user", "room")
+        .select_related(
+            "user",
+            "room",
+            "room__property_owner",
+        )
     )
 
-    template = (
+    seeker_template = (
         NotificationTemplate.objects.filter(
             key="booking.reminder",
+            is_active=True,
+            channel=NotificationTemplate.CHANNEL_EMAIL,
+        ).first()
+    )
+
+    landlord_template = (
+        NotificationTemplate.objects.filter(
+            key="booking.reminder_landlord",
             is_active=True,
             channel=NotificationTemplate.CHANNEL_EMAIL,
         ).first()
@@ -127,82 +153,218 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
     processed = 0
 
     for booking in bookings:
-        user = getattr(booking, "user", None)
-        if not user:
-            continue
-
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-
-        if not getattr(profile, "notify_reminders", True):
-            continue
-
+        seeker = getattr(booking, "user", None)
         room = getattr(booking, "room", None)
-        room_title = getattr(room, "title", "your room")
+
+        if not seeker or not room:
+            continue
+
+        landlord = getattr(room, "property_owner", None)
+        room_title = getattr(room, "title", "your property")
 
         start_local = timezone.localtime(booking.start)
         start_str = start_local.strftime("%d %b %Y, %H:%M")
 
-        title = "Upcoming viewing"
-        body = (
-            f"Reminder: your viewing for '{room_title}' starts on "
-            f"{start_str}. (booking_id={booking.id})"
+        booking_url = build_absolute_url(
+            f"/viewings/{booking.id}",
+            force_login=True,
         )
 
-        # 1. Create the in-app reminder once per booking.
-        already_in_app = (
-            Notification.objects
-            .filter(
-                user=user,
-                type="booking_reminder",
-                body__icontains=f"(booking_id={booking.id})",
-            )
-            .filter(body__icontains=start_str)
-            .exists()
+        seeker_name = (
+            seeker.get_full_name().strip()
+            or seeker.username
+            or seeker.first_name
+            or "A prospective tenant"
         )
 
-        if not already_in_app:
-            Notification.objects.create(
-                user=user,
-                type="booking_reminder",
-                title=title,
-                body=body,
+        # ---------------------------------------------------------
+        # 1. SEEKER / TENANT REMINDER
+        # ---------------------------------------------------------
+        seeker_profile, _ = UserProfile.objects.get_or_create(
+            user=seeker,
+        )
+
+        if getattr(seeker_profile, "notify_reminders", True):
+            seeker_title = "Upcoming viewing"
+            seeker_body = (
+                f"Reminder: your viewing for '{room_title}' starts on "
+                f"{start_str}. (booking_id={booking.id})"
             )
 
-        # 2. Queue the email once per booking.
-        if template:
-            already_queued = OutboundNotification.objects.filter(
-                user=user,
-                template_key="booking.reminder",
-                channel=NotificationTemplate.CHANNEL_EMAIL,
-                context__booking_id=booking.id,
-                context__starts_at=start_str,
-            ).exists()
+            seeker_in_app_exists = (
+                Notification.objects
+                .filter(
+                    user=seeker,
+                    type="booking_reminder",
+                    body__icontains=f"(booking_id={booking.id})",
+                )
+                .filter(body__icontains=start_str)
+                .exists()
+            )
 
-            if not already_queued:
-                frontend_base_url = getattr(
-                    settings,
-                    "FRONTEND_BASE_URL",
-                    "http://localhost:3000",
-                ).rstrip("/")
+            if not seeker_in_app_exists:
+                Notification.objects.create(
+                    user=seeker,
+                    type="booking_reminder",
+                    title=seeker_title,
+                    body=seeker_body,
+                )
 
-                OutboundNotification.objects.create(
-                    user=user,
-                    channel=NotificationTemplate.CHANNEL_EMAIL,
-                    template_key="booking.reminder",
-                    scheduled_for=now,
-                    context={
-                        "user": {
-                            "first_name": user.first_name,
+            if seeker_template:
+                seeker_email_exists = (
+                    OutboundNotification.objects.filter(
+                        user=seeker,
+                        template_key="booking.reminder",
+                        channel=NotificationTemplate.CHANNEL_EMAIL,
+                        context__booking_id=booking.id,
+                        context__starts_at=start_str,
+                    ).exists()
+                )
+
+                if not seeker_email_exists:
+                    OutboundNotification.objects.create(
+                        user=seeker,
+                        channel=NotificationTemplate.CHANNEL_EMAIL,
+                        template_key="booking.reminder",
+                        scheduled_for=now,
+                        context={
+                            "user": {
+                                "first_name": seeker.first_name,
+                            },
+                            "booking_id": booking.id,
+                            "room_title": room_title,
+                            "starts_at": start_str,
+                            "cta_url": booking_url,
                         },
+                    )
+
+        # ---------------------------------------------------------
+        # 2. LANDLORD REMINDER
+        # ---------------------------------------------------------
+        if landlord:
+            landlord_profile, _ = UserProfile.objects.get_or_create(
+                user=landlord,
+            )
+
+            if getattr(landlord_profile, "notify_reminders", True):
+                landlord_title = "Upcoming property viewing"
+                landlord_body = (
+                    f"Reminder: {seeker_name} will be viewing your property "
+                    f"'{room_title}' on {start_str}. "
+                    f"(booking_id={booking.id})"
+                )
+
+                landlord_in_app_exists = (
+                    Notification.objects
+                    .filter(
+                        user=landlord,
+                        type="booking_reminder_landlord",
+                        body__icontains=f"(booking_id={booking.id})",
+                    )
+                    .filter(body__icontains=start_str)
+                    .exists()
+                )
+
+                if not landlord_in_app_exists:
+                    Notification.objects.create(
+                        user=landlord,
+                        type="booking_reminder_landlord",
+                        title=landlord_title,
+                        body=landlord_body,
+                    )
+
+                if landlord_template:
+                    landlord_email_exists = (
+                        OutboundNotification.objects.filter(
+                            user=landlord,
+                            template_key="booking.reminder_landlord",
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            context__booking_id=booking.id,
+                            context__starts_at=start_str,
+                        ).exists()
+                    )
+
+                    if not landlord_email_exists:
+                        OutboundNotification.objects.create(
+                            user=landlord,
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            template_key="booking.reminder_landlord",
+                            scheduled_for=now,
+                            context={
+                                "user": {
+                                    "first_name": landlord.first_name,
+                                },
+                                "booker": {
+                                    "name": seeker_name,
+                                },
+                                "booking_id": booking.id,
+                                "room_title": room_title,
+                                "starts_at": start_str,
+                                "cta_url": booking_url,
+                            },
+                        )
+
+        # ---------------------------------------------------------
+        # 3. ONE SHARED RENTCRIB MESSAGE / ENVELOPE REMINDER
+        # ---------------------------------------------------------
+        if landlord:
+            event_key = (
+                f"booking:{booking.id}:"
+                f"{booking.start.isoformat()}:viewing_reminder"
+            )
+
+            existing_system_message = (
+                Message.objects
+                .filter(metadata__event_key=event_key)
+                .first()
+            )
+
+            if existing_system_message is None:
+                thread = (
+                    MessageThread.objects
+                    .filter(Q(room=room) | Q(room__isnull=True))
+                    .filter(participants=landlord)
+                    .filter(participants=seeker)
+                    .distinct()
+                    .first()
+                )
+
+                if thread is None:
+                    thread = MessageThread.objects.create(room=room)
+                    thread.participants.set([landlord, seeker])
+
+                elif thread.room_id is None:
+                    thread.room = room
+                    thread.save(update_fields=["room"])
+
+                Message.objects.create(
+                    thread=thread,
+
+                    # A real sender is required by the model, but
+                    # system_event=True marks this as RentCrib logic.
+                    sender=landlord,
+
+                    body=(
+                        "Viewing reminder\n\n"
+                        f"The viewing for {room_title} is scheduled for "
+                        f"{start_str}.\n\n"
+                        f"Viewer: {seeker_name}"
+                    ),
+
+                    message_type=Message.TYPE_TEXT,
+
+                    metadata={
+                        "system_event": True,
+                        "event_type": "booking_reminder",
+                        "event_key": event_key,
                         "booking_id": booking.id,
+                        "room_id": room.id,
                         "room_title": room_title,
                         "starts_at": start_str,
-                        "cta_url": f"{frontend_base_url}/inbox",
+                        "viewer_name": seeker_name,
                     },
                 )
 
         processed += 1
 
     return processed
-                
-                

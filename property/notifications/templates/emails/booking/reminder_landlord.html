@@ -1,0 +1,233 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="width:100%;border-collapse:collapse;"
+>
+<tr>
+<td align="center">
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        max-width:620px;
+        background:#ffffff;
+        border:1px solid #e1e7ef;
+        border-radius:5px;
+    "
+>
+<tr>
+<td style="padding:34px 34px 32px;">
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:1.4px;
+    text-transform:uppercase;
+    text-align:center;
+    color:#357af0;
+">
+VIEWING REMINDER
+</p>
+
+<h1 style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:28px;
+    line-height:1.3;
+    font-weight:700;
+    text-align:center;
+    color:#172033;
+">
+You have a viewing coming up
+</h1>
+
+<p style="
+    margin:10px 0 30px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    text-align:center;
+    color:#6b7689;
+">
+Here is a reminder about an upcoming viewing at your property.
+</p>
+
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Hi {{ user.first_name|default:"there" }},
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+This is a reminder that
+<strong style="color:#172033;">{{ booker.name }}</strong>
+will be viewing your property,
+<strong style="color:#172033;">{{ room_title }}</strong>,
+at
+<strong style="color:#172033;">{{ starts_at }}</strong>.
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:26px;
+        background:#f7f9fc;
+        border:1px solid #dfe6ef;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:20px 22px;">
+
+<p style="
+    margin:0 0 6px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+VIEWING DETAILS
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:17px;
+    font-weight:700;
+    color:#172033;
+">
+{{ room_title }}
+</p>
+
+<p style="
+    margin:16px 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Prospective tenant
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ booker.name }}
+</p>
+
+<p style="
+    margin:16px 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Viewing time
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ starts_at }}
+</p>
+
+</td>
+</tr>
+</table>
+
+<table
+    role="presentation"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    align="center"
+    style="margin:28px auto 0;"
+>
+<tr>
+<td
+    align="center"
+    bgcolor="#357af0"
+    style="border-radius:4px;"
+>
+<a
+    href="{{ cta_url }}"
+    style="
+        display:inline-block;
+        padding:13px 22px;
+        font-family:Arial, Helvetica, sans-serif;
+        font-size:15px;
+        font-weight:700;
+        color:#ffffff;
+        text-decoration:none;
+    "
+>
+View booking
+</a>
+</td>
+</tr>
+</table>
+
+<p style="
+    margin:26px 0 0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:13px;
+    line-height:1.6;
+    text-align:center;
+    color:#7a8497;
+">
+Thank you for using RentCrib.
+</p>
+
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+{% endblock %}

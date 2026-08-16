@@ -2181,6 +2181,13 @@ You can respond to this viewing request from your RentCrib account.
         {% include "emails/booking/reminder.html" %}
         """,
     },
+     {
+    "key": "booking.reminder_landlord",
+    "subject": "Reminder: {{ booker.name }} is viewing {{ room_title }} soon",
+    "body": """
+    {% include "emails/booking/reminder_landlord.html" %}
+    """,
+   },   
 
     {
         "key": "identity_verification.received",
