@@ -1183,51 +1183,312 @@ You can respond to this viewing request from your RentCrib account.
     },    
         
         
-    {
+       {
         "key": "listing.expiring",
         "subject": "Your RentCrib listing is expiring soon",
         "body": """
-    {% extends "emails/base.html" %}
+{% extends "emails/base.html" %}
 
-    {% block content %}
+{% block content %}
 
-    <h2 style="
-    font-family:Arial,sans-serif;
-    color:#333333;
-    ">
-    Your listing is expiring soon
-    </h2>
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        border-collapse:collapse;
+    "
+>
+<tr>
+<td align="center">
 
-    <p>
-    Hi {{ user.first_name }},
-    </p>
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        max-width:620px;
+        background:#ffffff;
+        border:1px solid #e1e7ef;
+        border-radius:5px;
+    "
+>
+<tr>
+<td style="padding:34px 34px 32px;">
 
-    <p>
-    Your listing:
-    </p>
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:1.4px;
+    text-transform:uppercase;
+    text-align:center;
+    color:#357af0;
+">
+LISTING REMINDER
+</p>
 
-    <p>
-    <strong>{{ room.title }}</strong>
-    </p>
+<h1 style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:28px;
+    line-height:1.3;
+    font-weight:700;
+    text-align:center;
+    color:#172033;
+">
+Your listing is expiring soon
+</h1>
 
-    <p>
-    is due to expire on <strong>{{ room.paid_until }}</strong>.
-    </p>
+<p style="
+    margin:10px 0 30px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    text-align:center;
+    color:#6b7689;
+">
+Renew your listing to keep it visible to room seekers on RentCrib.
+</p>
 
-    <p>
-    Renew your listing to keep it visible to room seekers on RentCrib.
-    </p>
+<p style="
+    margin:0 0 16px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Hi {{ user.first_name|default:"there" }},
+</p>
 
-    {% include "emails/components/button.html" with button_url=renew_url button_text="Renew listing" %}
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    color:#4f5b70;
+">
+Your listing
+<strong style="color:#172033;">{{ room.title }}</strong>
+is due to expire soon.
+</p>
 
-    <p>
-    Thank you for using RentCrib.
-    </p>
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:26px;
+        background:#f7f9fc;
+        border:1px solid #dfe6ef;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:20px 22px;">
 
-    {% endblock %}
-    """,
+<p style="
+    margin:0 0 6px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+LISTING DETAILS
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:17px;
+    font-weight:700;
+    color:#172033;
+">
+{{ room.title }}
+</p>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        margin-top:16px;
+        border-collapse:collapse;
+    "
+>
+<tr>
+
+<td
+    valign="top"
+    style="
+        width:50%;
+        padding:14px 12px 0 0;
+        border-top:1px solid #e4e9f0;
+    "
+>
+<p style="
+    margin:0 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Expires
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ room.paid_until }}
+</p>
+</td>
+
+<td
+    valign="top"
+    style="
+        width:50%;
+        padding:14px 0 0 12px;
+        border-top:1px solid #e4e9f0;
+        border-left:1px solid #e4e9f0;
+    "
+>
+<p style="
+    margin:0 0 4px;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    color:#7a8497;
+">
+Listing ID
+</p>
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    font-weight:600;
+    color:#3f4b5f;
+">
+{{ room.id }}
+</p>
+</td>
+
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        margin-top:20px;
+        background:#f4f8ff;
+        border:1px solid #dce8fb;
+        border-left:4px solid #357af0;
+        border-radius:4px;
+    "
+>
+<tr>
+<td style="padding:16px 18px;">
+
+<p style="
+    margin:0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:14px;
+    line-height:1.6;
+    color:#4f5b70;
+">
+Renew before the expiry date to keep your listing visible without interruption.
+</p>
+
+</td>
+</tr>
+</table>
+
+<table
+    role="presentation"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    align="center"
+    style="margin:28px auto 0;"
+>
+<tr>
+<td
+    align="center"
+    bgcolor="#357af0"
+    style="border-radius:4px;"
+>
+<a
+    href="{{ renew_url }}"
+    style="
+        display:inline-block;
+        padding:13px 22px;
+        font-family:Arial, Helvetica, sans-serif;
+        font-size:15px;
+        font-weight:700;
+        color:#ffffff;
+        text-decoration:none;
+    "
+>
+Renew listing
+</a>
+</td>
+</tr>
+</table>
+
+<p style="
+    margin:26px 0 0;
+    font-family:Arial, Helvetica, sans-serif;
+    font-size:13px;
+    line-height:1.6;
+    text-align:center;
+    color:#7a8497;
+">
+Thank you for using RentCrib.
+</p>
+
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+{% endblock %}
+        """,
     },
-    
     
         # -------------------------
     # Tenancy lifecycle
