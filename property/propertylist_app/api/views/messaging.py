@@ -146,7 +146,13 @@ class InboxListView(APIView):
                 last_msg_at=Max("messages__created"),
                 unread_count=Count(
                     "messages",
-                    filter=~Q(messages__sender=user) & ~Q(messages__reads__user=user),
+                    filter=(
+                        (
+                            Q(messages__metadata__system_event=True)
+                            | ~Q(messages__sender=user)
+                        )
+                        & ~Q(messages__reads__user=user)
+                    ),
                     distinct=True,
                 ),
             )
@@ -458,7 +464,13 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 .annotate(
                     unread_count=Count(
                         "messages",
-                        filter=~Q(messages__sender=user) & ~Q(messages__reads__user=user),
+                        filter=(
+                            (
+                                Q(messages__metadata__system_event=True)
+                                | ~Q(messages__sender=user)
+                            )
+                            & ~Q(messages__reads__user=user)
+                        ),
                         distinct=True,
                     ),
                 )
@@ -1028,13 +1040,21 @@ class ThreadMarkReadView(APIView):
             pk=thread_id,
         )
 
-        # Materialise before creating MessageRead rows.
-        # Otherwise re-evaluating the queryset afterwards can incorrectly
-        # report zero because the messages have just become read.
+        # A normal human message is inbound when someone else sent it.
+        #
+        # A RentCrib system message is addressed to the thread participants
+        # regardless of which real user had to be stored in Message.sender.
+        #
+        # Therefore system_event messages must be markable as read by BOTH
+        # participants, including the user whose id happens to be in sender_id.
         messages_to_mark = list(
             thread.messages
-            .exclude(sender=request.user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
             .exclude(reads__user=request.user)
+            .distinct()
         )
 
         MessageRead.objects.bulk_create(
@@ -1048,10 +1068,17 @@ class ThreadMarkReadView(APIView):
             ignore_conflicts=True,
         )
 
-        # Tell each original sender which of their messages were read.
+        # Only genuine human messages produce read receipts back to their
+        # original sender. RentCrib system events do not have a meaningful
+        # human sender even though the model requires one.
         message_ids_by_sender = {}
 
         for message in messages_to_mark:
+            metadata = message.metadata or {}
+
+            if metadata.get("system_event") is True:
+                continue
+
             message_ids_by_sender.setdefault(
                 message.sender_id,
                 [],
@@ -1068,8 +1095,11 @@ class ThreadMarkReadView(APIView):
                 },
             )
 
-        # Use the same unread definition as MessageStatsView:
-        # participant threads, excluding threads this user placed in Bin.
+        # Calculate the global unread-envelope count using exactly the same rule:
+        #
+        # - normal messages count when another user sent them
+        # - system_event messages count for every participant until that
+        #   participant has their own MessageRead row
         base_threads = MessageThread.objects.filter(
             participants=request.user,
         )
@@ -1094,8 +1124,12 @@ class ThreadMarkReadView(APIView):
         total_unread = (
             Message.objects
             .filter(thread__in=base_threads)
-            .exclude(sender=request.user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
             .exclude(reads__user=request.user)
+            .distinct()
             .count()
         )
 
@@ -1114,8 +1148,6 @@ class ThreadMarkReadView(APIView):
             },
             status_code=status.HTTP_200_OK,
         )
-
-
 
 
 class ThreadSetLabelView(APIView):

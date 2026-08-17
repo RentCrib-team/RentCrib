@@ -442,12 +442,61 @@ class TenancyExtensionRespondView(APIView):
             raise PermissionDenied("Proposer cannot respond.")
 
         if ext.status != TenancyExtension.STATUS_PROPOSED:
-            raise ValidationError({"detail": "Extension is not open."})
-
-        ser = TenancyExtensionRespondSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
+            raise ValidationError({
+                "detail": "Extension is not open."
+            })
 
         now = timezone.now()
+
+        # ---------------------------------------------------------
+        # TENANCY UPDATE WINDOW GUARD
+        # ---------------------------------------------------------
+        # A renewal proposal may only be accepted/rejected while the
+        # tenancy update window is still open.
+        #
+        # TEMPORARY QA RULE:
+        # still_living_check_at -> review_open_at = 10-minute window.
+        #
+        # Once review_open_at is reached, the tenancy lifecycle has
+        # moved into the review phase and no tenancy mutation may occur.
+        update_window_start = tenancy.still_living_check_at
+        update_window_end = tenancy.review_open_at
+
+        if tenancy.status == Tenancy.STATUS_ENDED:
+            raise ValidationError({
+                "detail": (
+                    "This tenancy has ended. "
+                    "The renewal can no longer be changed."
+                )
+            })
+
+        if not update_window_start or not update_window_end:
+            raise ValidationError({
+                "detail": (
+                    "Tenancy update window is not available."
+                )
+            })
+
+        if now < update_window_start:
+            raise ValidationError({
+                "detail": (
+                    "The tenancy update period has not started yet."
+                )
+            })
+
+        if now >= update_window_end:
+            raise ValidationError({
+                "detail": (
+                    "The time allowed to respond to this renewal "
+                    "has expired."
+                )
+            })
+
+        ser = TenancyExtensionRespondSerializer(
+            data=request.data,
+        )
+        ser.is_valid(raise_exception=True)
+
         action = ser.validated_data["action"]
 
         if action == "reject":

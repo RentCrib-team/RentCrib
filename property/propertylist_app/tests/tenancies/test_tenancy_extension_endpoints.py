@@ -1067,12 +1067,21 @@ def test_extension_create_endpoint_triggers_proposed_notifications(
         == 7
     )
 
-    assert not Notification.objects.filter(
+    proposer_notification = Notification.objects.get(
         user=landlord,
         type="tenancy_extension_proposed",
         target_type="tenancy_extension",
         target_id=extension.id,
-    ).exists()    
+    )
+
+    assert (
+        proposer_notification.title
+        == "Tenancy renewal proposed"
+    )
+
+    assert room.title in proposer_notification.body
+
+    assert "has been sent" in proposer_notification.body   
     
 def test_extension_accept_endpoint_triggers_accepted_notifications(
     user_factory,

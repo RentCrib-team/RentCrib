@@ -319,10 +319,10 @@ def message_created_create_notifications(
 ) -> None:
     if not created:
         return
-    
+
     if instance.message_type != Message.TYPE_TEXT:
         return
-    
+
     metadata = instance.metadata or {}
 
     if metadata.get("system_event") is True:
@@ -331,13 +331,9 @@ def message_created_create_notifications(
     thread: MessageThread = instance.thread
 
     recipients = thread.participants.exclude(
-    pk=instance.sender_id
+        pk=instance.sender_id
     ).all()
 
-    # A genuine new incoming message must restore the conversation
-    # for its recipients. Otherwise a thread previously placed in the
-    # bin remains hidden even though the recipient has received a new
-    # message, notification and email.
     MessageThreadState.objects.filter(
         user__in=recipients,
         thread=thread,
@@ -345,6 +341,9 @@ def message_created_create_notifications(
     ).update(
         in_bin=False,
     )
+    # ---------------------------------------------------------
+    # ORDINARY HUMAN CHAT MESSAGE
+    # ---------------------------------------------------------
 
     notifications_to_create = []
 
@@ -365,20 +364,9 @@ def message_created_create_notifications(
     message_snippet = instance.body[:200] if instance.body else ""
 
     for user in recipients:
-        # Realtime chat delivery is independent of email/in-app notification
-        # preferences. The actual message must still arrive instantly.
-        push_user_realtime_event(
-            user.id,
-            "new_message",
-            {
-                "message_id": instance.id,
-                "thread_id": thread.id,
-                "sender_id": instance.sender_id,
-            },
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
         )
-
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile, _ = UserProfile.objects.get_or_create(user=user)
 
         if not getattr(profile, "notify_messages", True):
             continue
@@ -393,8 +381,7 @@ def message_created_create_notifications(
                 body=message_snippet,
             )
         )
-        
-        
+
         push_user_realtime_event(
             user.id,
             "new_notification",
@@ -404,10 +391,6 @@ def message_created_create_notifications(
                 "thread_id": thread.id,
             },
         )
-        
-        
-        
-        
 
         _queue_email(
             user=user,
@@ -435,8 +418,8 @@ def message_created_create_notifications(
             notifications_to_create,
             ignore_conflicts=True,
         )
-
-
+        
+        
 # -------------------------------------------------------------------
 # TenancyExtension notifications
 # -------------------------------------------------------------------
@@ -503,14 +486,23 @@ def tenancy_extension_notifications(
 
     tenancy = instance.tenancy
 
+    # Mobile app destination.
     deep_link = f"/app/tenancies/{tenancy.id}"
+
+    # Web/Vercel destination.
     cta_url = build_absolute_url(
-        deep_link,
+        f"/tenancies/{tenancy.id}",
         force_login=True,
     )
 
 
-    def create_extension_system_message(event_type: str, body: str):
+    def create_extension_system_message(
+        event_type: str,
+        body: str,
+        *,
+        available_actions=None,
+        responder_user_id=None,
+    ):
         landlord = tenancy.landlord
         tenant = tenancy.tenant
 
@@ -559,23 +551,35 @@ def tenancy_extension_notifications(
                 or landlord
             )
 
+            metadata = {
+                "system_event": True,
+                "event_type": event_type,
+                "event_key": event_key,
+                "tenancy_id": tenancy.id,
+                "extension_id": instance.id,
+                "room_id": tenancy.room_id,
+                "room_title": tenancy.room.title,
+            }
+
+            if available_actions:
+                metadata["available_actions"] = list(
+                    available_actions
+                )
+
+            if responder_user_id is not None:
+                metadata["responder_user_id"] = (
+                    responder_user_id
+                )
+
             message = Message.objects.create(
                 thread=thread,
                 sender=message_sender,
                 body=body,
                 message_type=Message.TYPE_TEXT,
-                metadata={
-                    "system_event": True,
-                    "event_type": event_type,
-                    "event_key": event_key,
-                    "tenancy_id": tenancy.id,
-                    "extension_id": instance.id,
-                    "room_id": tenancy.room_id,
-                    "room_title": tenancy.room.title,
-                },
+                metadata=metadata,
             )
 
-            # Shared conversation changed for both parties.
+            # Shared RentCrib envelope event for both parties.
             for user in (
                 landlord,
                 tenant,
@@ -719,8 +723,9 @@ def tenancy_extension_notifications(
 
     if created:
         other_party = _ext_other_party(instance)
+        proposer = instance.proposed_by
 
-        if not other_party:
+        if not other_party or not proposer:
             return
 
         thread, message = create_extension_system_message(
@@ -733,9 +738,17 @@ def tenancy_extension_notifications(
                 f"{duration_text}.\n\n"
                 "Review the renewal information and respond."
             ),
+            available_actions=[
+                "accept",
+                "reject",
+            ],
+            responder_user_id=other_party.id,
         )
 
-        notification, notification_created = (
+        # ---------------------------------------------------------
+        # RESPONDER BELL
+        # ---------------------------------------------------------
+        responder_notification, responder_created = (
             Notification.objects.get_or_create(
                 user=other_party,
                 type="tenancy_extension_proposed",
@@ -756,24 +769,68 @@ def tenancy_extension_notifications(
             )
         )
 
-        if notification_created and thread and message:
+        if responder_created and thread and message:
             push_user_realtime_event(
                 other_party.id,
                 "new_notification",
                 {
                     "kind": "tenancy_extension_proposed",
-                    "notification_id": notification.id,
+                    "notification_id": (
+                        responder_notification.id
+                    ),
                     "message_id": message.id,
                     "thread_id": thread.id,
+                    "extension_id": instance.id,
                 },
             )
 
+        # ---------------------------------------------------------
+        # PROPOSER CONFIRMATION BELL
+        # ---------------------------------------------------------
+        proposer_notification, proposer_created = (
+            Notification.objects.get_or_create(
+                user=proposer,
+                type="tenancy_extension_proposed",
+                target_type="tenancy_extension",
+                target_id=instance.id,
+                defaults={
+                    "thread": thread,
+                    "message": message,
+                    "title": "Tenancy renewal proposed",
+                    "body": (
+                        f"Your renewal proposal for "
+                        f"{tenancy.room.title}, starting "
+                        f"{proposed_start_date_text} for "
+                        f"{duration_text}, has been sent."
+                    ),
+                },
+            )
+        )
+
+        if proposer_created and thread and message:
+            push_user_realtime_event(
+                proposer.id,
+                "new_notification",
+                {
+                    "kind": "tenancy_extension_proposed",
+                    "notification_id": (
+                        proposer_notification.id
+                    ),
+                    "message_id": message.id,
+                    "thread_id": thread.id,
+                    "extension_id": instance.id,
+                },
+            )
+
+        # Only the OTHER party receives the action email.
         maybe_queue_email(
             other_party,
             "tenancy.extension.proposed",
         )
 
         return
+    
+    
     old_status = getattr(
         instance,
         "_old_status",

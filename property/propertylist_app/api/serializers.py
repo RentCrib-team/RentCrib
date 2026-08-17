@@ -3,7 +3,7 @@ User = get_user_model()
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 import re
-
+from django.db.models import Q
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
@@ -3992,9 +3992,16 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         if hasattr(obj, "unread_count"):
             return obj.unread_count
 
-        return obj.messages.exclude(sender=request.user).exclude(
-            reads__user=request.user
-        ).count()
+        return (
+            obj.messages
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
+            .exclude(reads__user=request.user)
+            .distinct()
+            .count()
+        )
 
     def _get_state_for_user(self, obj):
         """

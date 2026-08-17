@@ -13,6 +13,7 @@ from propertylist_app.models import (
     Room,
     Review,
     MessageThreadState,
+     Message,
 )
 
 from propertylist_app.services.tasks import (
@@ -371,12 +372,52 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         return 1
 
     if event == "confirmed":
+        # Use the existing tenancy conversation so the confirmation bell
+        # opens the exact conversation associated with this tenancy.
+        tenancy_message = (
+            Message.objects
+            .select_related("thread")
+            .filter(metadata__tenancy_id=tenancy.id)
+            .order_by("-created")
+            .first()
+        )
+
+        confirmation_thread = (
+            tenancy_message.thread
+            if tenancy_message and tenancy_message.thread_id
+            else None
+        )
+
         for user in (tenancy.landlord, tenancy.tenant):
-            _create_notification(
+            notification = Notification.objects.create(
                 user=user,
-                notification_type="tenancy_confirmed",
+                type="tenancy_confirmed",
+                target_type="tenancy",
+                target_id=tenancy.id,
+                thread=confirmation_thread,
+                message=tenancy_message,
                 title="Tenancy confirmed",
                 body=f"Tenancy confirmed for: {room_title}.",
+            )
+
+            push_user_realtime_event(
+                user.id,
+                "new_notification",
+                {
+                    "kind": "tenancy_confirmed",
+                    "notification_id": notification.id,
+                    "tenancy_id": tenancy.id,
+                    "thread_id": (
+                        confirmation_thread.id
+                        if confirmation_thread
+                        else None
+                    ),
+                    "message_id": (
+                        tenancy_message.id
+                        if tenancy_message
+                        else None
+                    ),
+                },
             )
 
             _maybe_queue(
@@ -385,7 +426,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             )
 
         return 2
-    
+        
     
     if event == "rejected_unverified":
         tenant_name = (
@@ -1078,21 +1119,101 @@ def task_tenancy_prompts_sweep() -> int:
             
     
     
-    # TEMPORARY QA RULE:
-    # If neither party updates the tenancy after the ending reminder,
-    # the tenancy ends automatically when the 10-minute review window opens.
-    Tenancy.objects.filter(
-        status__in=[
-            Tenancy.STATUS_CONFIRMED,
-            Tenancy.STATUS_ACTIVE,
-        ],
-        review_open_at__isnull=False,
-        review_open_at__lte=now,
-        still_living_confirmed_at__isnull=True,
-    ).update(
-        status=Tenancy.STATUS_ENDED,
-    ) 
-     
+    # ---------------------------------------------------------
+    # QA: CLOSE TENANCY UPDATE WINDOW
+    # ---------------------------------------------------------
+    # Once review_open_at is reached:
+    #
+    # 1. unresolved renewal proposals expire
+    # 2. renewal Accept/Reject actions disappear
+    # 3. Update tenancy actions disappear
+    # 4. tenancy becomes ended
+    # 5. the review phase can begin
+    #
+    # The API also independently rejects stale renewal actions,
+    # so keeping an old browser tab open cannot bypass this rule.
+    tenancies_reaching_review = (
+        Tenancy.objects
+        .filter(
+            status__in=[
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            ],
+            review_open_at__isnull=False,
+            review_open_at__lte=now,
+            still_living_confirmed_at__isnull=True,
+        )
+    )
+
+    for tenancy in tenancies_reaching_review:
+        # -----------------------------------------------------
+        # Expire any unresolved renewal proposal.
+        # -----------------------------------------------------
+        open_extensions = tenancy.extensions.filter(
+            status="proposed",
+        )
+
+        extension_ids = list(
+            open_extensions.values_list(
+                "id",
+                flat=True,
+            )
+        )
+
+        if extension_ids:
+            open_extensions.update(
+                status="canceled",
+            )
+
+            # Remove Accept / Reject from the proposal messages.
+            extension_messages = Message.objects.filter(
+                metadata__extension_id__in=extension_ids,
+                metadata__event_type="tenancy_extension_proposed",
+                metadata__system_event=True,
+            )
+
+            for message in extension_messages:
+                metadata = dict(
+                    message.metadata or {}
+                )
+                metadata["available_actions"] = []
+
+                message.metadata = metadata
+                message.save(
+                    update_fields=["metadata"]
+                )
+
+        # -----------------------------------------------------
+        # Remove Update tenancy from the ending-soon message.
+        # -----------------------------------------------------
+        ending_messages = Message.objects.filter(
+            metadata__tenancy_id=tenancy.id,
+            metadata__event_type="still_living_check",
+            metadata__system_event=True,
+        )
+
+        for message in ending_messages:
+            metadata = dict(
+                message.metadata or {}
+            )
+            metadata["available_actions"] = []
+
+            message.metadata = metadata
+            message.save(
+                update_fields=["metadata"]
+            )
+
+        # -----------------------------------------------------
+        # Tenancy is now closed to all further mutations.
+        # -----------------------------------------------------
+        tenancy.status = Tenancy.STATUS_ENDED
+        tenancy.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        ) 
+        
      
             
             
@@ -1183,8 +1304,9 @@ def task_tenancy_prompts_sweep() -> int:
                     t.landlord,
                     "tenancy.review_available",
                     deep_link=review_deep_link,
-                    cta_path="/leave-a-review",
+                    cta_path=f"/leave-a-review?tenancy={t.id}",
                     room_title=t.room.title,
+                    tenancy_id=t.id,
                 )
 
                 count += 1
@@ -1237,8 +1359,9 @@ def task_tenancy_prompts_sweep() -> int:
                     t.tenant,
                     "tenancy.review_available",
                     deep_link=review_deep_link,
-                    cta_path="/leave-a-review",
+                    cta_path=f"/leave-a-review?tenancy={t.id}",
                     room_title=t.room.title,
+                    tenancy_id=t.id,
                 )
 
                 count += 1

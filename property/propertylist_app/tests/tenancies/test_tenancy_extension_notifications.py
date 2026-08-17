@@ -69,6 +69,22 @@ def test_extension_proposal_creates_notification_to_other_party(
         "propertylist_app",
         "Notification",
     )
+    
+    Message = _get_model(
+        "propertylist_app",
+        "Message",
+    )
+    
+    NotificationTemplate = _get_model(
+        "notifications",
+        "NotificationTemplate",
+    )
+
+    OutboundNotification = _get_model(
+        "notifications",
+        "OutboundNotification",
+    )
+    
 
     landlord = user_factory(
         username="extn_landlord1",
@@ -88,6 +104,17 @@ def test_extension_proposal_creates_notification_to_other_party(
     )
 
     renewal_start_date = _renewal_start_date()
+    
+    
+    NotificationTemplate.objects.update_or_create(
+        key="tenancy.extension.proposed",
+        channel="email",
+        defaults={
+            "subject": "Tenancy renewal proposed",
+            "body": "{{ room_title }} {{ cta_url }}",
+            "is_active": True,
+        },
+    )
 
     extension = TenancyExtension.objects.create(
         tenancy=tenancy,
@@ -103,29 +130,101 @@ def test_extension_proposal_creates_notification_to_other_party(
         target_id=extension.id,
     )
 
-    assert notifications.count() == 1
+    # Both parties now receive a proposal notification:
+    #
+    # - the other party gets the action notification
+    # - the proposer gets confirmation that the renewal proposal was sent
+    assert notifications.count() == 2
 
-    notification = notifications.get()
+    assert set(
+        notifications.values_list(
+            "user_id",
+            flat=True,
+        )
+    ) == {
+        landlord.id,
+        tenant.id,
+    }
 
-    assert notification.user_id == tenant.id
+    tenant_notification = notifications.get(
+        user=tenant,
+    )
+
     assert (
-        notification.title
+        tenant_notification.title
         == "Tenancy renewal proposed"
     )
-    assert room.title in notification.body
+
+    assert room.title in tenant_notification.body
+
     assert (
         renewal_start_date.strftime("%d %B %Y")
-        in notification.body
+        in tenant_notification.body
     )
-    assert "6 months" in notification.body
 
-    # The proposer must not receive their own proposal alert.
-    assert not Notification.objects.filter(
+    assert "6 months" in tenant_notification.body
+
+    landlord_notification = notifications.get(
         user=landlord,
-        type="tenancy_extension_proposed",
-        target_type="tenancy_extension",
-        target_id=extension.id,
-    ).exists()
+    )
+
+    assert (
+        landlord_notification.title
+        == "Tenancy renewal proposed"
+    )
+
+    assert room.title in landlord_notification.body
+
+    assert "has been sent" in landlord_notification.body
+    
+    
+    
+    message = Message.objects.get(
+    metadata__extension_id=extension.id,
+    metadata__event_type="tenancy_extension_proposed",
+    )
+
+    assert message.metadata["system_event"] is True
+    assert message.metadata["extension_id"] == extension.id
+    assert message.metadata["tenancy_id"] == tenancy.id
+
+    assert message.metadata["available_actions"] == [
+        "accept",
+        "reject",
+    ]
+
+    assert (
+        message.metadata["responder_user_id"]
+        == tenant.id
+    )
+    
+    
+    email = OutboundNotification.objects.get(
+        user=tenant,
+        template_key="tenancy.extension.proposed",
+        context__extension_id=extension.id,
+    )
+
+    cta_url = email.context["cta_url"]
+
+    assert f"/tenancies/{tenancy.id}" in cta_url
+    assert "/app/tenancies/" not in cta_url
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
 
 
 def test_extension_accept_creates_notifications_for_both(

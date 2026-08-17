@@ -480,6 +480,19 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
             )
 
             if notification and system_message and thread:
+                notification.target_type = "message"
+                notification.target_id = system_message.id
+                notification.thread = thread
+                notification.message = system_message
+                notification.save(
+                    update_fields=[
+                        "target_type",
+                        "target_id",
+                        "thread",
+                        "message",
+                    ]
+                )
+
                 push_user_realtime_event(
                     user.id,
                     "new_notification",
@@ -492,7 +505,8 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 )
 
             timer_one_created = True
-
+            
+            
         # ---------- 2) EMAIL QUEUE (dedupe by booking_id) ----------
         if template:
             already_queued = OutboundNotification.objects.filter(
@@ -543,8 +557,8 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                     landlord_notification = Notification.objects.create(
                         user=landlord,
                         type="booking_completed_landlord",
-                        target_type="booking",
-                        target_id=booking.id,
+                        target_type="message",
+                        target_id=system_message.id if system_message else booking.id,
                         thread=thread,
                         message=system_message,
                         title="Viewing completed",

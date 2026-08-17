@@ -281,7 +281,7 @@ class BookingListCreateView(generics.ListCreateAPIView):
                 if active >= slot_locked.max_bookings:
                     raise ValidationError({"detail": "This slot is fully booked."})
 
-                serializer.save(
+                booking = serializer.save(
                     user=self.request.user,
                     room=slot_locked.room,
                     slot=slot_locked,
@@ -294,6 +294,8 @@ class BookingListCreateView(generics.ListCreateAPIView):
                 notification = Notification.objects.create(
                     user=self.request.user,
                     type="confirmation",
+                    target_type="booking",
+                    target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
                 )
@@ -304,6 +306,8 @@ class BookingListCreateView(generics.ListCreateAPIView):
                     {
                         "kind": "booking_confirmation",
                         "notification_id": notification.id,
+                        "target_type": "booking",
+                        "target_id": booking.id,
                     },
                 )
             return
@@ -333,13 +337,18 @@ class BookingListCreateView(generics.ListCreateAPIView):
             if conflicts:
                 raise ValidationError({"detail": "Selected dates clash with an existing booking."})
 
-            serializer.save(user=self.request.user, room=room)
+            booking = serializer.save(
+                user=self.request.user,
+                room=room,
+            )
 
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         if getattr(profile, "notify_confirmations", True):
                 notification = Notification.objects.create(
                     user=self.request.user,
                     type="confirmation",
+                    target_type="booking",
+                    target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
                 )
@@ -350,6 +359,8 @@ class BookingListCreateView(generics.ListCreateAPIView):
                     {
                         "kind": "booking_confirmation",
                         "notification_id": notification.id,
+                        "target_type": "booking",
+                        "target_id": booking.id,
                     },
                 )
     @extend_schema(
