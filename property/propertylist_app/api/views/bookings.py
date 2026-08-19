@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q
-
+from datetime import timedelta
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -571,40 +571,66 @@ class LandlordViewingsListView(generics.ListAPIView):
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
 
+        def serialize_with_effective_status(objects):
+            serializer = self.get_serializer(objects, many=True)
+            data = list(serializer.data)
+            now = timezone.now()
+
+            booking_by_id = {
+                booking.id: booking
+                for booking in objects
+            }
+
+            for row in data:
+                booking = booking_by_id.get(row.get("id"))
+
+                if not booking:
+                    continue
+
+                if row.get("status") == "cancelled":
+                    continue
+
+                if (
+                    booking.start
+                    and now >= booking.start + timedelta(minutes=10)
+                ):
+                    row["status"] = "completed"
+
+            return data
+
         page = self.paginate_queryset(queryset)
+
         if page is not None:
-            serializer = self.get_serializer(page, many=True)
+            data = serialize_with_effective_status(page)
             meta = _pagination_meta(self.paginator)
 
             return Response(
                 {
                     "ok": True,
                     "message": None,
-                    "data": serializer.data,
+                    "data": data,
                     "meta": meta,
                     "count": meta.get("count"),
                     "next": meta.get("next"),
                     "previous": meta.get("previous"),
-                    "results": serializer.data,
+                    "results": data,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        serializer = self.get_serializer(queryset, many=True)
+        data = serialize_with_effective_status(queryset)
 
         return Response(
             {
                 "ok": True,
                 "message": None,
-                "data": serializer.data,
-                "results": serializer.data,
+                "data": data,
+                "results": data,
             },
             status=status.HTTP_200_OK,
         )
-
-
-
-
+        
+    
 class BookingDetailView(generics.RetrieveAPIView):
     """GET /api/bookings/<id>/ â†’ see my booking"""
     serializer_class = BookingSerializer
