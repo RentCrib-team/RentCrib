@@ -627,24 +627,8 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                                 ),
 
                                 # Web/Vercel action button.
-                                "cta_url": (
-                                    f"{_frontend_base_url()}/messages"
-                                    f"?thread={thread.id}"
-                                    if thread
-                                    else (
-                                        f"{_frontend_base_url()}"
-                                        "/viewings"
-                                    )
-                                ),
+                                # Viewing-completed email should open the Viewings page,
+                                # not the conversation inbox.
+                                "cta_url": f"{_frontend_base_url()}/viewings",
                             },
                         )
-
-
-
-                
-        processed += 1
-
-    return processed
-
-
-     
