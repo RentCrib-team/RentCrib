@@ -22,7 +22,8 @@ from drf_spectacular.types import OpenApiTypes
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-
+from django.db.models import Count, Exists, Max, OuterRef, Q, Subquery, Prefetch, IntegerField
+from django.db.models.functions import Coalesce
 
 
 
@@ -455,35 +456,46 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return MessageThread.objects.none()
+
         user = self.request.user
         params = self.request.query_params
 
-        qs = (
-                MessageThread.objects
-                .filter(participants=user)
-                .annotate(
-                    unread_count=Count(
-                        "messages",
-                        filter=(
-                            (
-                                Q(messages__metadata__system_event=True)
-                                | ~Q(messages__sender=user)
-                            )
-                            & ~Q(messages__reads__user=user)
-                        ),
-                        distinct=True,
-                    ),
-                )
-                .prefetch_related(
-                    "participants__profile",
-                    "messages",
-                )
+        unread_messages = (
+            Message.objects
+            .filter(thread=OuterRef("pk"))
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
             )
+            .exclude(reads__user=user)
+            .values("thread")
+            .annotate(total=Count("id", distinct=True))
+            .values("total")[:1]
+        )
+
+        qs = (
+            MessageThread.objects
+            .filter(participants=user)
+            .annotate(
+                unread_count=Coalesce(
+                    Subquery(
+                        unread_messages,
+                        output_field=IntegerField(),
+                    ),
+                    0,
+                ),
+            )
+            .prefetch_related(
+                "participants__profile",
+                "messages",
+            )
+        )
 
         folder = (params.get("folder") or "").strip().lower()
 
         bin_thread_ids = list(
-            MessageThreadState.objects.filter(user=user, in_bin=True)
+            MessageThreadState.objects
+            .filter(user=user, in_bin=True)
             .values_list("thread_id", flat=True)
         )
 
@@ -494,15 +506,21 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 qs = qs.exclude(id__in=bin_thread_ids)
 
             if folder == "new":
-                unread_exists = Message.objects.filter(
-                    thread=OuterRef("pk")
-                ).exclude(
-                    sender=user
-                ).exclude(
-                    reads__user=user
+                unread_exists = (
+                    Message.objects
+                    .filter(thread=OuterRef("pk"))
+                    .filter(
+                        Q(metadata__system_event=True)
+                        | ~Q(sender=user)
+                    )
+                    .exclude(reads__user=user)
                 )
-                qs = qs.annotate(has_unread=Exists(unread_exists))
-                qs = qs.filter(has_unread=True)
+
+                qs = qs.annotate(
+                    has_unread=Exists(unread_exists)
+                ).filter(
+                    has_unread=True
+                )
 
             elif folder == "sent":
                 last_sender_subq = (
@@ -511,19 +529,30 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                     .order_by("-created")
                     .values("sender_id")[:1]
                 )
-                qs = qs.annotate(last_sender_id=Subquery(last_sender_subq))
-                qs = qs.filter(last_sender_id=user.id)
+
+                qs = qs.annotate(
+                    last_sender_id=Subquery(last_sender_subq)
+                ).filter(
+                    last_sender_id=user.id
+                )
 
         label = (params.get("label") or "").strip()
+
         if label:
-            label_ids = MessageThreadState.objects.filter(
-                user=user,
-                label=label,
-                in_bin=False,
-            ).values_list("thread_id", flat=True)
+            label_ids = (
+                MessageThreadState.objects
+                .filter(
+                    user=user,
+                    label=label,
+                    in_bin=False,
+                )
+                .values_list("thread_id", flat=True)
+            )
+
             qs = qs.filter(id__in=label_ids)
 
         search = (params.get("q") or "").strip()
+
         if search:
             qs = qs.filter(
                 Q(messages__body__icontains=search)
@@ -546,8 +575,11 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 .values("username")[:1]
             )
 
-            qs = qs.annotate(other_username=Subquery(other_username_subq)).order_by(
-                "other_username", "-created_at"
+            qs = qs.annotate(
+                other_username=Subquery(other_username_subq)
+            ).order_by(
+                "other_username",
+                "-created_at",
             )
 
         else:
@@ -720,20 +752,29 @@ class MessageThreadDetailView(generics.RetrieveAPIView):
 
         user = self.request.user
 
+        unread_messages = (
+            Message.objects
+            .filter(thread=OuterRef("pk"))
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
+            .exclude(reads__user=user)
+            .values("thread")
+            .annotate(total=Count("id", distinct=True))
+            .values("total")[:1]
+        )
+
         return (
             MessageThread.objects
             .filter(participants=user)
             .annotate(
-                unread_count=Count(
-                    "messages",
-                    filter=(
-                        (
-                            Q(messages__metadata__system_event=True)
-                            | ~Q(messages__sender=user)
-                        )
-                        & ~Q(messages__reads__user=user)
+                unread_count=Coalesce(
+                    Subquery(
+                        unread_messages,
+                        output_field=IntegerField(),
                     ),
-                    distinct=True,
+                    0,
                 ),
             )
             .prefetch_related(
