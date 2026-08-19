@@ -77,7 +77,9 @@ from .messaging import (
     RoomSaveToggleView,
     MySavedRoomsView,
     ContactMessageCreateView,
-)
+    MessageThreadDetailView,
+    ThreadsBulkMarkReadView,
+    )
 
 from .bookings import (
     create_booking,

@@ -701,6 +701,66 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
 
 
 
+class MessageThreadDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/v1/messages/threads/<thread_id>/
+
+    Return one message thread when the authenticated user is a participant.
+    """
+
+    serializer_class = MessageThreadSerializer
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [UserRateThrottle, MessagingScopedThrottle]
+
+    lookup_url_kwarg = "thread_id"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return MessageThread.objects.none()
+
+        user = self.request.user
+
+        return (
+            MessageThread.objects
+            .filter(participants=user)
+            .annotate(
+                unread_count=Count(
+                    "messages",
+                    filter=(
+                        (
+                            Q(messages__metadata__system_event=True)
+                            | ~Q(messages__sender=user)
+                        )
+                        & ~Q(messages__reads__user=user)
+                    ),
+                    distinct=True,
+                ),
+            )
+            .prefetch_related(
+                "participants__profile",
+                "messages",
+            )
+            .distinct()
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        states = MessageThreadState.objects.filter(
+            user=request.user,
+            thread=instance,
+        ).first()
+
+        setattr(instance, "_state_for_user", states)
+
+        serializer = self.get_serializer(instance)
+
+        return ok_response(
+            serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
 
 
 class MessageThreadStateView(APIView):
@@ -1138,7 +1198,8 @@ class ThreadMarkReadView(APIView):
             "unread_count_changed",
             {
                 "thread_id": thread.id,
-                "unread_count": total_unread,
+                "thread_unread_count": 0,
+                "account_unread_total": total_unread,
             },
         )
 
@@ -1148,6 +1209,156 @@ class ThreadMarkReadView(APIView):
             },
             status_code=status.HTTP_200_OK,
         )
+        
+        
+class ThreadsBulkMarkReadView(APIView):
+    """
+    POST /api/v1/messages/threads/read/
+
+    Mark multiple message threads as read for the authenticated user.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        thread_ids = request.data.get("thread_ids") or []
+
+        if not isinstance(thread_ids, list) or not thread_ids:
+            raise ValidationError(
+                {"thread_ids": "Provide a non-empty list of thread ids."}
+            )
+
+        try:
+            thread_ids = list({int(thread_id) for thread_id in thread_ids})
+        except (TypeError, ValueError):
+            raise ValidationError(
+                {"thread_ids": "All thread ids must be integers."}
+            )
+
+        threads = list(
+            MessageThread.objects
+            .filter(
+                id__in=thread_ids,
+                participants=request.user,
+            )
+            .distinct()
+        )
+
+        found_ids = {thread.id for thread in threads}
+        missing_ids = sorted(set(thread_ids) - found_ids)
+
+        if missing_ids:
+            raise ValidationError(
+                {
+                    "thread_ids": (
+                        "One or more threads do not exist or do not belong "
+                        f"to this user: {missing_ids}"
+                    )
+                }
+            )
+
+        messages_to_mark = list(
+            Message.objects
+            .filter(thread__in=threads)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
+            .exclude(reads__user=request.user)
+            .distinct()
+        )
+
+        MessageRead.objects.bulk_create(
+            [
+                MessageRead(
+                    message=message,
+                    user=request.user,
+                )
+                for message in messages_to_mark
+            ],
+            ignore_conflicts=True,
+        )
+
+        message_ids_by_sender_and_thread = {}
+
+        for message in messages_to_mark:
+            metadata = message.metadata or {}
+
+            if metadata.get("system_event") is True:
+                continue
+
+            key = (message.sender_id, message.thread_id)
+
+            message_ids_by_sender_and_thread.setdefault(
+                key,
+                [],
+            ).append(message.id)
+
+        for (sender_id, thread_id), message_ids in message_ids_by_sender_and_thread.items():
+            push_user_realtime_event(
+                sender_id,
+                "message_read",
+                {
+                    "thread_id": thread_id,
+                    "reader_id": request.user.id,
+                    "message_ids": message_ids,
+                },
+            )
+
+        base_threads = MessageThread.objects.filter(
+            participants=request.user,
+        )
+
+        bin_thread_ids = list(
+            MessageThreadState.objects
+            .filter(
+                user=request.user,
+                in_bin=True,
+            )
+            .values_list(
+                "thread_id",
+                flat=True,
+            )
+        )
+
+        if bin_thread_ids:
+            base_threads = base_threads.exclude(
+                id__in=bin_thread_ids,
+            )
+
+        total_unread = (
+            Message.objects
+            .filter(thread__in=base_threads)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
+            .exclude(reads__user=request.user)
+            .distinct()
+            .count()
+        )
+
+        push_user_realtime_event(
+            request.user.id,
+            "unread_count_changed",
+            {
+                "thread_ids": thread_ids,
+                "thread_unread_counts": {
+                    str(thread_id): 0
+                    for thread_id in thread_ids
+                },
+                "account_unread_total": total_unread,
+            },
+        )
+
+        return ok_response(
+            {
+                "marked": len(messages_to_mark),
+                "thread_ids": thread_ids,
+                "account_unread_total": total_unread,
+            },
+            status_code=status.HTTP_200_OK,
+        )        
 
 
 class ThreadSetLabelView(APIView):
