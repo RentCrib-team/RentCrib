@@ -4355,7 +4355,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "booking_completed",
             "booking_completed_landlord",
         }:
-            return "/viewings"
+            return "/viewings?tab=completed"
 
         if getattr(obj, "thread_id", None):
             return f"/messages?thread={obj.thread_id}"

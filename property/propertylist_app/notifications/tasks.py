@@ -629,6 +629,6 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                                 # Web/Vercel action button.
                                 # Viewing-completed email should open the Viewings page,
                                 # not the conversation inbox.
-                                "cta_url": f"{_frontend_base_url()}/viewings",
+                                "cta_url": f"{_frontend_base_url()}/viewings?tab=completed",
                             },
                         )
