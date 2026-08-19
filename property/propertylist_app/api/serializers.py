@@ -4349,6 +4349,14 @@ class NotificationSerializer(serializers.ModelSerializer):
         Mobile continues to use deep_link.
         """
 
+        # Viewing-completed notifications should always open the general
+        # Viewings page, not a specific booking detail page.
+        if getattr(obj, "type", None) in {
+            "booking_completed",
+            "booking_completed_landlord",
+        }:
+            return "/viewings"
+
         if getattr(obj, "thread_id", None):
             return f"/messages?thread={obj.thread_id}"
 
