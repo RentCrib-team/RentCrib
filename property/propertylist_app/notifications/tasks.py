@@ -546,19 +546,22 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 "notify_confirmations",
                 True,
             ):
+                landlord_target_type = "message" if system_message else "booking"
+                landlord_target_id = system_message.id if system_message else booking.id
+
                 landlord_notification_exists = Notification.objects.filter(
                     user=landlord,
                     type="booking_completed_landlord",
-                    target_type="booking",
-                    target_id=booking.id,
+                    target_type=landlord_target_type,
+                    target_id=landlord_target_id,
                 ).exists()
 
                 if not landlord_notification_exists:
                     landlord_notification = Notification.objects.create(
                         user=landlord,
                         type="booking_completed_landlord",
-                        target_type="message",
-                        target_id=system_message.id if system_message else booking.id,
+                        target_type=landlord_target_type,
+                        target_id=landlord_target_id,
                         thread=thread,
                         message=system_message,
                         title="Viewing completed",
