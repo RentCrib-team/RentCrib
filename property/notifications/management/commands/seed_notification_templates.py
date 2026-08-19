@@ -1378,7 +1378,7 @@ You can respond to this viewing request from your RentCrib account.
     {% endblock %}
     """,
     },    
-     {
+    {
     "key": "booking.completed_landlord",
     "subject": "A viewing has been completed for {{ room_title }}",
     "body": """
@@ -1626,7 +1626,7 @@ Reference
     font-weight:700;
     color:#172033;
 ">
-Keep the conversation going
+If you and the viewer agree to rent
 </p>
 
 <p style="
@@ -1636,7 +1636,7 @@ Keep the conversation going
     line-height:1.65;
     color:#566176;
 ">
-If you and the viewer agree to move forward, continue the conversation and complete the tenancy information when appropriate.
+If you later agree that the viewer will rent this room, you can return to this completed booking and submit or review the tenancy information. No action is required now.
 </p>
 
 </td>
@@ -1672,7 +1672,7 @@ If you and the viewer agree to move forward, continue the conversation and compl
         border-radius:4px;
     "
 >
-Open conversation
+Update tenancy information
 </a>
 </td>
 </tr>
@@ -1699,8 +1699,7 @@ This completion is based on the scheduled viewing end time.
 
 {% endblock %}
 """,
-},   
-   
+},
 {
     "key": "payment.confirmed",
     "subject": "Your RentCrib payment has been confirmed",
