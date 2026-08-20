@@ -4349,25 +4349,40 @@ class NotificationSerializer(serializers.ModelSerializer):
         Mobile continues to use deep_link.
         """
 
-        # Viewing-completed notifications should always open the general
-        # Viewings page, not a specific booking detail page.
-        if getattr(obj, "type", None) in {
+        notification_type = getattr(obj, "type", None)
+        target_type = getattr(obj, "target_type", None)
+        target_id = getattr(obj, "target_id", None)
+
+        # Viewing-completed notifications open the Completed tab.
+        if notification_type in {
             "booking_completed",
             "booking_completed_landlord",
         }:
             return "/viewings?tab=completed"
 
+        # Tenancy expiry / still-living reminders must open the tenancy itself.
+        # Both tenant and landlord can act on the same tenancy record.
+        if target_type == "still_living_check" and target_id:
+            return f"/tenancies/{target_id}"
+
+        # Other tenancy notifications should also prefer their tenancy target
+        # over the associated message thread.
+        if target_type == "tenancy" and target_id:
+            return f"/tenancies/{target_id}"
+
+        if target_type == "tenancy_extension" and target_id:
+            return f"/tenancies/{target_id}"
+
+        if target_type == "tenancy_review" and target_id:
+            return "/leave-a-review"
+
+        # Message notifications/conversation-driven events can use the thread.
         if getattr(obj, "thread_id", None):
             return f"/messages?thread={obj.thread_id}"
 
-        if getattr(obj, "target_type", None) and getattr(obj, "target_id", None):
-            t = obj.target_type
-
-            if t == "booking":
-                return f"/viewings/{obj.target_id}"
-
-            if t == "tenancy_review":
-                return "/leave-a-review"
+        # Generic booking target.
+        if target_type == "booking" and target_id:
+            return f"/viewings/{target_id}"
 
         return self.get_deep_link(obj)
 
