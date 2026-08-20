@@ -13,7 +13,9 @@ from propertylist_app.models import (
     Room,
     Review,
     MessageThreadState,
-     Message,
+    Message,
+    Booking,
+     
 )
 
 from propertylist_app.services.tasks import (
@@ -1005,11 +1007,33 @@ def task_tenancy_prompts_sweep() -> int:
                     else tenancy.created_at
                 )
 
+            # Tenant keeps the existing tenancy target.
+            target_type = "still_living_check"
+            target_id = tenancy.id
+
+            # Landlord should open the completed viewing detail page because that is
+            # where the web app exposes "Update tenancy information".
+            if user.id == tenancy.landlord_id:
+                viewing_booking = (
+                    Booking.objects
+                    .filter(
+                        room=tenancy.room,
+                        user=tenancy.tenant,
+                        is_deleted=False,
+                    )
+                    .order_by("-start", "-id")
+                    .first()
+                )
+
+                if viewing_booking:
+                    target_type = "booking"
+                    target_id = viewing_booking.id
+
             reminder_exists = Notification.objects.filter(
                 user=user,
                 type="tenancy_still_living_check",
-                target_type="still_living_check",
-                target_id=tenancy.id,
+                target_type=target_type,
+                target_id=target_id,
                 created_at__gte=cycle_started_at,
             ).exists()
 
@@ -1019,8 +1043,8 @@ def task_tenancy_prompts_sweep() -> int:
             notification = Notification.objects.create(
                 user=user,
                 type="tenancy_still_living_check",
-                target_type="still_living_check",
-                target_id=tenancy.id,
+                target_type=target_type,
+                target_id=target_id,
                 thread=prompt_thread,
                 message=prompt_message,
                 title=title,

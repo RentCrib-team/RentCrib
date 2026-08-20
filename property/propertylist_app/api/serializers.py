@@ -4352,6 +4352,16 @@ class NotificationSerializer(serializers.ModelSerializer):
         notification_type = getattr(obj, "type", None)
         target_type = getattr(obj, "target_type", None)
         target_id = getattr(obj, "target_id", None)
+        
+        
+        # Landlord tenancy-expiry reminder targets the completed viewing because
+        # "Update tenancy information" lives on the viewing detail page.
+        if (
+            notification_type == "tenancy_still_living_check"
+            and target_type == "booking"
+            and target_id
+        ):
+            return f"/viewings/{target_id}"
 
         # Viewing-completed notifications open the Completed tab.
         if notification_type in {
