@@ -4417,7 +4417,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             return f"/tenancies/{target_id}"
 
         if target_type == "tenancy_review" and target_id:
-            return "/leave-a-review"
+            return f"/leave-a-review?tenancy={target_id}"
 
         # Message notifications/conversation-driven events can use the thread.
         if getattr(obj, "thread_id", None):
