@@ -433,6 +433,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             _maybe_queue(
                 user,
                 "tenancy.confirmed",
+                {
+                    "cta_url": build_absolute_url(
+                        f"/tenancies/{tenancy.id}"
+                    ),
+                },
             )
 
         return 2
