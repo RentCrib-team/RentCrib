@@ -264,6 +264,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         notification_type: str,
         title: str,
         body: str,
+        target_type: str = "message",
+        target_id=None,
     ):
         # Important tenancy actions must return the conversation to Inbox.
         thread_state, _ = MessageThreadState.objects.get_or_create(
@@ -286,8 +288,12 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             Notification.objects.get_or_create(
                 user=user,
                 type=notification_type,
-                target_type="message",
-                target_id=message.id,
+                target_type=target_type,
+                target_id=(
+                    target_id
+                    if target_id is not None
+                    else message.id
+                ),
                 defaults={
                     "thread": thread,
                     "message": message,
@@ -352,6 +358,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             notification_type="tenancy_proposed",
             title=notification_title,
             body=notification_body,
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
