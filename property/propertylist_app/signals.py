@@ -384,6 +384,16 @@ def message_created_create_notifications(
 
         push_user_realtime_event(
             user.id,
+            "new_message",
+            {
+                "message_id": instance.id,
+                "thread_id": thread.id,
+                "sender_id": instance.sender_id,
+            },
+        )
+
+        push_user_realtime_event(
+            user.id,
             "new_notification",
             {
                 "kind": "message",
