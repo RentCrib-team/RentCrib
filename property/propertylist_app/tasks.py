@@ -1452,7 +1452,7 @@ def task_tenancy_prompts_sweep() -> int:
 
         prompt_thread, prompt_message = _post_tenancy_prompt_message(
             tenancy,
-            event_type=f"review_revealed_{review.id}",
+            event_type="review_revealed",
             body=(
                 "A review from this tenancy is now available.\n\n"
                 "Open your reviews to view it."
