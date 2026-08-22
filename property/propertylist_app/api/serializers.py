@@ -103,7 +103,8 @@ class ReviewSerializer(serializers.ModelSerializer):
     display_summary = serializers.SerializerMethodField()
     positive_labels = serializers.SerializerMethodField()
     negative_labels = serializers.SerializerMethodField()
-
+    room_id = serializers.SerializerMethodField()
+    room_title = serializers.SerializerMethodField()
     reviewer_name = serializers.SerializerMethodField()
     reviewer_username = serializers.SerializerMethodField()
     reviewer_avatar = serializers.SerializerMethodField()
@@ -129,6 +130,8 @@ class ReviewSerializer(serializers.ModelSerializer):
             "submitted_at",
             "reveal_at",
             "active",
+            "room_id",
+            "room_title",
         ]
         read_only_fields = fields
 
@@ -256,6 +259,20 @@ class ReviewSerializer(serializers.ModelSerializer):
             self.FLAG_LABELS.get(k, k)
             for k in sorted(pos)
         ]
+        
+        
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_room_id(self, obj):
+        tenancy = getattr(obj, "tenancy", None)
+        return getattr(tenancy, "room_id", None)
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_room_title(self, obj) -> str:
+        tenancy = getattr(obj, "tenancy", None)
+        room = getattr(tenancy, "room", None)
+        return getattr(room, "title", "") or ""    
+        
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_negative_labels(self, obj) -> List[str]:
