@@ -1281,7 +1281,7 @@ class RoomSerializer(serializers.ModelSerializer):
     allow_null=True,
     write_only=True,
     )
-
+    avg_rating = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField(read_only=True)
     distance_miles = serializers.SerializerMethodField(read_only=True)
     allow_search_indexing_effective = serializers.SerializerMethodField(read_only=True)
@@ -1396,7 +1396,10 @@ class RoomSerializer(serializers.ModelSerializer):
 
 
 
-
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_avg_rating(self, obj):
+        value = getattr(obj, "avg_rating", 0) or 0
+        return round(float(value), 1)
 
 
     def validate(self, attrs):
