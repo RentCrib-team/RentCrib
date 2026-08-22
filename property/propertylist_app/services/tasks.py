@@ -222,7 +222,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
         start_str = start_local.strftime("%d %b %Y, %H:%M")
 
         booking_url = build_absolute_url(
-            f"/viewings/{booking.id}",
+            f"/my-bookings/{booking.id}",
             force_login=True,
         )
 
