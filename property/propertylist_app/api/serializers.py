@@ -3789,6 +3789,39 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_available_actions(self, obj):
         metadata = obj.metadata or {}
         event_type = metadata.get("event_type")
+        
+        if event_type == "booking_completed":
+            booking_id = metadata.get("booking_id")
+            if not booking_id:
+                return []
+
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+
+            if not user or not user.is_authenticated:
+                return []
+
+            try:
+                booking = Booking.objects.select_related(
+                    "room__property_owner"
+                ).get(id=booking_id)
+            except Booking.DoesNotExist:
+                return []
+
+            owner_id = booking.room.property_owner_id
+
+            if user.id not in {
+                booking.user_id,
+                owner_id,
+            }:
+                return []
+
+            return ["update_tenancy"]
+                
+                
+                
+                
+                
 
         # Timer 2 thread message.
         if event_type == "still_living_check":
