@@ -221,8 +221,13 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
         start_local = timezone.localtime(booking.start)
         start_str = start_local.strftime("%d %b %Y, %H:%M")
 
-        booking_url = build_absolute_url(
+        seeker_booking_url = build_absolute_url(
             f"/my-bookings/{booking.id}",
+            force_login=True,
+        )
+
+        landlord_booking_url = build_absolute_url(
+            f"/viewings/{booking.id}",
             force_login=True,
         )
 
@@ -290,7 +295,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                             "booking_id": booking.id,
                             "room_title": room_title,
                             "starts_at": start_str,
-                            "cta_url": booking_url,
+                            "cta_url": seeker_booking_url,
                         },
                     )
 
@@ -356,7 +361,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                                 "booking_id": booking.id,
                                 "room_title": room_title,
                                 "starts_at": start_str,
-                                "cta_url": booking_url,
+                                "cta_url": landlord_booking_url,
                             },
                         )
 
