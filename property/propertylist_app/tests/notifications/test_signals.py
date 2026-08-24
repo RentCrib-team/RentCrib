@@ -100,6 +100,60 @@ def test_new_message_signal_emits_realtime_message_and_notification():
         template_key="message.new",
     ).count() == 1    
     
+ 
+def test_new_message_realtime_delivery_ignores_notification_preference():
+    from propertylist_app.models import UserProfile
+
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, recipient)
+
+    profile, _ = UserProfile.objects.get_or_create(
+        user=recipient
+    )
+    profile.notify_messages = False
+    profile.save(update_fields=["notify_messages"])
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        msg = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Realtime delivery must remain enabled",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    realtime.assert_called_once_with(
+        recipient.id,
+        "new_message",
+        {
+            "message_id": msg.id,
+            "thread_id": thread.id,
+            "sender_id": sender.id,
+        },
+    )
+
+    assert not InAppNotification.objects.filter(
+        user=recipient,
+        thread=thread,
+        message=msg,
+    ).exists()
+
+    assert not OutboundNotification.objects.filter(
+        user=recipient,
+        template_key="message.new",
+    ).exists() 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
     
 
 def test_new_booking_signal_queues_owner_and_booker_emails():
@@ -180,7 +234,9 @@ def test_new_message_restores_recipient_binned_thread_and_returns_it_in_messages
     )
     
     
-def test_thread_mark_read_emits_realtime_read_and_unread_count():
+def test_thread_mark_read_emits_realtime_read_and_unread_count(
+    django_assert_max_num_queries,
+):
     sender, reader = make_users(2)
 
     thread = MessageThread.objects.create()
@@ -202,18 +258,22 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count():
     client = APIClient()
     client.force_authenticate(user=reader)
 
-    with patch(
-        "propertylist_app.api.views.messaging.push_user_realtime_event"
-    ) as realtime:
-        response = client.post(
-            f"/api/v1/messages/threads/{thread.id}/read/"
-        )
+    with django_assert_max_num_queries(10):
+        with patch(
+            "propertylist_app.api.views.messaging.push_user_realtime_event"
+        ) as realtime:
+            response = client.post(
+                f"/api/v1/messages/threads/{thread.id}/read/"
+            )
 
     assert response.status_code == 200
 
     payload = response.json()
     assert payload["ok"] is True
     assert payload["data"]["marked"] == 2
+    
+    assert payload["data"]["thread_unread_count"] == 0
+    assert payload["data"]["account_unread_total"] == 0
 
     assert MessageRead.objects.filter(
         user=reader,
@@ -235,8 +295,104 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count():
         "unread_count_changed",
         {
             "thread_id": thread.id,
-            "unread_count": 0,
+            "thread_unread_count": 0,
+            "account_unread_total": 0,
         },
     )
 
     assert realtime.call_count == 2    
+    
+    
+def test_bulk_thread_mark_read_updates_realtime_and_account_total(
+    django_assert_max_num_queries,
+):
+    sender, reader = make_users(2)
+
+    first_thread = MessageThread.objects.create()
+    first_thread.participants.add(sender, reader)
+
+    second_thread = MessageThread.objects.create()
+    second_thread.participants.add(sender, reader)
+
+    remaining_thread = MessageThread.objects.create()
+    remaining_thread.participants.add(sender, reader)
+
+    first_messages = [
+        Message.objects.create(
+            thread=first_thread,
+            sender=sender,
+            body=f"First thread {index}",
+            message_type=Message.TYPE_TEXT,
+        )
+        for index in range(2)
+    ]
+
+    second_messages = [
+        Message.objects.create(
+            thread=second_thread,
+            sender=sender,
+            body=f"Second thread {index}",
+            message_type=Message.TYPE_TEXT,
+        )
+        for index in range(2)
+    ]
+
+    remaining_message = Message.objects.create(
+        thread=remaining_thread,
+        sender=sender,
+        body="Must remain unread",
+        message_type=Message.TYPE_TEXT,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=reader)
+
+    with django_assert_max_num_queries(12):
+        with patch(
+            "propertylist_app.api.views.messaging.push_user_realtime_event"
+        ) as realtime:
+            response = client.post(
+                "/api/v1/messages/threads/read/",
+                {
+                    "thread_ids": [
+                        first_thread.id,
+                        second_thread.id,
+                    ],
+                },
+                format="json",
+            )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    data = payload["data"]
+
+    assert data["marked"] == 4
+    assert set(data["thread_ids"]) == {
+        first_thread.id,
+        second_thread.id,
+    }
+    assert data["account_unread_total"] == 1
+
+    assert MessageRead.objects.filter(
+        user=reader,
+        message__in=first_messages + second_messages,
+    ).count() == 4
+
+    assert not MessageRead.objects.filter(
+        user=reader,
+        message=remaining_message,
+    ).exists()
+
+    realtime.assert_any_call(
+        reader.id,
+        "unread_count_changed",
+        {
+            "thread_ids": data["thread_ids"],
+            "thread_unread_counts": {
+                str(thread_id): 0
+                for thread_id in data["thread_ids"]
+            },
+            "account_unread_total": 1,
+        },
+    )    

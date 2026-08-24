@@ -2,7 +2,16 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from propertylist_app.models import Notification
+
+
+
+from propertylist_app.models import (
+    Message,
+    MessageRead,
+    MessageThread,
+    Notification,
+)
+
 
 
 @pytest.mark.django_db
@@ -111,7 +120,137 @@ def test_f4_notifications_list_orders_unread_first(user_factory):
     ids = [row["id"] for row in data]
     assert n_unread.id in ids and n_read.id in ids    
     
-    
+@pytest.mark.django_db
+def test_f4_inbox_avoids_per_thread_queries(
+    user_factory,
+    django_assert_max_num_queries,
+):
+    client = APIClient()
+
+    user = user_factory(
+        username="inbox_query_owner",
+        email="inbox-query-owner@example.com",
+    )
+    other_user = user_factory(
+        username="inbox_query_contact",
+        email="inbox-query-contact@example.com",
+    )
+
+    expected_latest_bodies = set()
+
+    for thread_number in range(8):
+        thread = MessageThread.objects.create()
+        thread.participants.set([user, other_user])
+
+        for message_number in range(10):
+            body = (
+                f"Thread {thread_number} "
+                f"message {message_number}"
+            )
+
+            Message.objects.create(
+                thread=thread,
+                sender=(
+                    user
+                    if message_number % 2 == 0
+                    else other_user
+                ),
+                body=body,
+                metadata={
+                    "system_event": True,
+                },
+            )
+
+        expected_latest_bodies.add(
+            f"Thread {thread_number} message 9"
+        )
+
+    client.force_authenticate(user=user)
+    url = reverse("api:inbox-list")
+
+    # Warm up framework rendering before measuring queries.
+    warmup = client.get(url, {"limit": 100})
+    assert warmup.status_code == 200
+
+    with django_assert_max_num_queries(10):
+        response = client.get(
+            url,
+            {
+                "limit": 100,
+            },
+        )
+
+    assert response.status_code == 200
+
+    items = response.data.get("data") or []
+
+    thread_previews = {
+        item["preview"]
+        for item in items
+        if item.get("kind") == "thread"
+    }
+
+    assert thread_previews == expected_latest_bodies
+
+
+@pytest.mark.django_db
+def test_message_stats_counts_system_messages_consistently(
+    user_factory,
+):
+    client = APIClient()
+
+    user = user_factory(
+        username="stats_owner",
+        email="stats-owner@example.com",
+    )
+    other_user = user_factory(
+        username="stats_contact",
+        email="stats-contact@example.com",
+    )
+
+    thread = MessageThread.objects.create()
+    thread.participants.set([user, other_user])
+
+    # A system message may use the current user as its database sender,
+    # but it must remain unread until that user opens it.
+    system_message = Message.objects.create(
+        thread=thread,
+        sender=user,
+        body="RentCrib system update",
+        metadata={
+            "system_event": True,
+        },
+    )
+
+    client.force_authenticate(user=user)
+    url = reverse("api:messages-stats")
+
+    unread_response = client.get(url)
+    assert unread_response.status_code == 200
+
+    unread_payload = unread_response.data
+    unread_stats = unread_payload.get(
+        "data",
+        unread_payload,
+    )
+
+    assert unread_stats["total_unread"] == 1
+
+    MessageRead.objects.create(
+        message=system_message,
+        user=user,
+    )
+
+    read_response = client.get(url)
+    assert read_response.status_code == 200
+
+    read_payload = read_response.data
+    read_stats = read_payload.get(
+        "data",
+        read_payload,
+    )
+
+    assert read_stats["total_unread"] == 0    
     
     
     

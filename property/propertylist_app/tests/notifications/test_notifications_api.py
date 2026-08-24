@@ -1,5 +1,10 @@
 import pytest
+
+from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
+
+from propertylist_app.models import Notification
+
 
 pytestmark = pytest.mark.django_db
 
@@ -12,5 +17,56 @@ def url_notifications_list():
 
 def test_notifications_list_requires_auth():
     client = APIClient()
+
     res = client.get(url_notifications_list())
+
     assert res.status_code in (401, 403)
+
+
+def test_notifications_list_returns_unread_total_across_pages():
+    User = get_user_model()
+
+    user = User.objects.create_user(
+        username="notification-owner",
+        email="notification-owner@example.com",
+        password="pass12345",
+    )
+
+    notifications = []
+
+    for index in range(125):
+        notifications.append(
+            Notification(
+                user=user,
+                type=Notification.Type.MESSAGE,
+                title=f"Notification {index}",
+                body="Notification body",
+                is_read=index >= 117,
+            )
+        )
+
+    Notification.objects.bulk_create(notifications)
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get(
+        url_notifications_list(),
+        {
+            "limit": 100,
+            "offset": 0,
+        },
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["ok"] is True
+    assert len(payload["data"]) == 100
+    assert payload["count"] == 125
+
+    # There are 117 unread notifications in total, even though the
+    # current page contains only 100 records.
+    assert payload["unread_total"] == 117
+    assert payload["meta"]["unread_total"] == 117

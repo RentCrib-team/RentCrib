@@ -3919,6 +3919,51 @@ class MessageSerializer(serializers.ModelSerializer):
         )
 
         return serializer.data.get("available_actions", [])
+    
+    
+    
+    def _get_read_for_user(self, obj):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return None
+
+        user = request.user
+
+        if obj.sender_id == user.id:
+            return None
+
+        cached_user_id = getattr(
+            obj,
+            "_read_cache_user_id",
+            None,
+        )
+
+        if cached_user_id == user.id:
+            return getattr(obj, "_read_cache_value", None)
+
+        prefetched_reads = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get("reads")
+
+        if prefetched_reads is not None:
+            read = next(
+                (
+                    item
+                    for item in prefetched_reads
+                    if item.user_id == user.id
+                ),
+                None,
+            )
+        else:
+            read = obj.reads.filter(user=user).first()
+
+        obj._read_cache_user_id = user.id
+        obj._read_cache_value = read
+
+        return read
 
 
     def get_is_read(self, obj):
@@ -3927,11 +3972,10 @@ class MessageSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return False
 
-        # The sender has already "read" their own message.
         if obj.sender_id == request.user.id:
             return True
 
-        return obj.reads.filter(user=request.user).exists()
+        return self._get_read_for_user(obj) is not None
 
     def get_read_at(self, obj):
         request = self.context.get("request")
@@ -3939,11 +3983,10 @@ class MessageSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
 
-        # For sender's own message, no receiver read timestamp is available here.
         if obj.sender_id == request.user.id:
             return None
 
-        read = obj.reads.filter(user=request.user).first()
+        read = self._get_read_for_user(obj)
         return read.read_at if read else None
 
 
@@ -4021,17 +4064,33 @@ class MessageThreadSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(MessageSerializer(allow_null=True))
     def get_last_message(self, obj):
-        prefetched_messages = getattr(obj, "_prefetched_objects_cache", {}).get("messages")
+        prefetched_messages = getattr(
+            obj,
+            "_prefetched_last_messages",
+            None,
+        )
 
         if prefetched_messages is not None:
-            msg = max(prefetched_messages, key=lambda m: m.created, default=None)
+            msg = (
+                prefetched_messages[0]
+                if prefetched_messages
+                else None
+            )
         else:
-            msg = obj.messages.order_by("-created").first()
+            msg = (
+                obj.messages
+                .select_related("sender")
+                .prefetch_related("reads")
+                .order_by("-created")
+                .first()
+            )
 
         return (
             MessageSerializer(
                 msg,
-                context={"request": self.context.get("request")},
+                context={
+                    "request": self.context.get("request"),
+                },
             ).data
             if msg
             else None
@@ -4057,23 +4116,19 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         )
 
     def _get_state_for_user(self, obj):
-        """
-        Helper to get MessageThreadState for the current user.
-        If the view has pre-attached obj._state_for_user, use that;
-        otherwise do a small DB lookup.
-        """
         request = self.context.get("request")
         user = getattr(request, "user", None)
+
         if not user or not user.is_authenticated:
             return None
 
-        # If view pre-attached a state
-        st = getattr(obj, "_state_for_user", None)
-        if st is not None:
-            return st
+        if hasattr(obj, "_state_for_user"):
+            return obj._state_for_user
 
-        # Fallback: 1 query per thread
-        return MessageThreadState.objects.filter(user=user, thread=obj).first()
+        return MessageThreadState.objects.filter(
+            user=user,
+            thread=obj,
+        ).first()
 
     @extend_schema_field(serializers.CharField(allow_null=True, required=False))
     def get_label(self, obj):

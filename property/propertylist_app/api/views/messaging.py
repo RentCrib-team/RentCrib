@@ -159,25 +159,48 @@ class InboxListView(APIView):
             )
             .prefetch_related(
                 "participants__profile",
-                "messages",
+                Prefetch(
+                    "messages",
+                    queryset=(
+                        Message.objects
+                        .order_by("-created")[:1]
+                    ),
+                    to_attr="_prefetched_last_messages",
+                ),
             )
             .order_by("-last_msg_at")
         )[:200]
 
         thread_items = []
         for t in threads:
+            prefetched_messages = getattr(
+                t,
+                "_prefetched_last_messages",
+                [],
+            )
             last_msg = (
-                t.messages.order_by("-created").first()       # FIX: created not created_at
-                if hasattr(t, "messages") else None
+                prefetched_messages[0]
+                if prefetched_messages
+                else None
             )
             if not last_msg:
                 continue
 
             unread = getattr(t, "unread_count", 0)
 
-            other_party = (
-                t.participants.exclude(id=user.id).first()
-                if hasattr(t, "participants") else None
+            prefetched_participants = getattr(
+                t,
+                "_prefetched_objects_cache",
+                {},
+            ).get("participants", [])
+
+            other_party = next(
+                (
+                    participant
+                    for participant in prefetched_participants
+                    if participant.id != user.id
+                ),
+                None,
             )
             title = getattr(other_party, "username", None) or "Message"
 
@@ -487,7 +510,16 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
             )
             .prefetch_related(
                 "participants__profile",
-                "messages",
+                Prefetch(
+                    "messages",
+                    queryset=(
+                        Message.objects
+                        .select_related("sender")
+                        .prefetch_related("reads")
+                        .order_by("-created")[:1]
+                    ),
+                    to_attr="_prefetched_last_messages",
+                ),
             )
         )
 
@@ -928,20 +960,30 @@ class MessageStatsView(APIView):
         total_threads = base_threads.distinct().count()
         total_good_fit = good_fit_threads.distinct().count()
 
-        # Unread = messages not from me & not read by me
+        # Keep stats consistent with the thread-list unread rule:
+        # system events or messages from the other participant remain
+        # unread until this user reads them.
         total_unread = (
             Message.objects
             .filter(thread__in=base_threads)
-            .exclude(sender=user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
             .exclude(reads__user=user)
+            .distinct()
             .count()
         )
 
         good_fit_unread = (
             Message.objects
             .filter(thread__in=good_fit_threads)
-            .exclude(sender=user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
             .exclude(reads__user=user)
+            .distinct()
             .count()
         )
 
@@ -1126,7 +1168,11 @@ class ThreadMarkReadView(APIView):
                     "message": serializers.CharField(required=False, allow_null=True),
                     "data": inline_serializer(
                         name="ThreadMarkReadData",
-                        fields={"marked": serializers.IntegerField()},
+                        fields={
+                            "marked": serializers.IntegerField(),
+                            "thread_unread_count": serializers.IntegerField(),
+                            "account_unread_total": serializers.IntegerField(),
+                        },
                     ),
                 },
             ),
@@ -1247,6 +1293,8 @@ class ThreadMarkReadView(APIView):
         return ok_response(
             {
                 "marked": len(messages_to_mark),
+                "thread_unread_count": 0,
+                "account_unread_total": total_unread,
             },
             status_code=status.HTTP_200_OK,
         )

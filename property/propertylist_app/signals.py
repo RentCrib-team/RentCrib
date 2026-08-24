@@ -346,6 +346,7 @@ def message_created_create_notifications(
     # ---------------------------------------------------------
 
     notifications_to_create = []
+    notification_users = []
 
     # Mobile app deep link.
     deep_link = f"/app/threads/{thread.id}"
@@ -364,12 +365,26 @@ def message_created_create_notifications(
     message_snippet = instance.body[:200] if instance.body else ""
 
     for user in recipients:
+        # Realtime chat delivery is core messaging behaviour.
+        # It must not depend on bell/email notification preferences.
+        push_user_realtime_event(
+            user.id,
+            "new_message",
+            {
+                "message_id": instance.id,
+                "thread_id": thread.id,
+                "sender_id": instance.sender_id,
+            },
+        )
+
         profile, _ = UserProfile.objects.get_or_create(
             user=user
         )
 
         if not getattr(profile, "notify_messages", True):
             continue
+
+        notification_users.append(user)
 
         notifications_to_create.append(
             Notification(
@@ -382,16 +397,14 @@ def message_created_create_notifications(
             )
         )
 
-        push_user_realtime_event(
-            user.id,
-            "new_message",
-            {
-                "message_id": instance.id,
-                "thread_id": thread.id,
-                "sender_id": instance.sender_id,
-            },
+    if notifications_to_create:
+        Notification.objects.bulk_create(
+            notifications_to_create,
+            ignore_conflicts=True,
         )
 
+    # Notify the frontend only after the notification rows exist.
+    for user in notification_users:
         push_user_realtime_event(
             user.id,
             "new_notification",
@@ -422,14 +435,6 @@ def message_created_create_notifications(
                 "snippet": message_snippet,
             },
         )
-
-    if notifications_to_create:
-        Notification.objects.bulk_create(
-            notifications_to_create,
-            ignore_conflicts=True,
-        )
-        
-        
 # -------------------------------------------------------------------
 # TenancyExtension notifications
 # -------------------------------------------------------------------
