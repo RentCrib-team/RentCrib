@@ -100,6 +100,7 @@ class UserReviewListSerializer(serializers.ModelSerializer):
 
 class ReviewSerializer(serializers.ModelSerializer):
     review_mode = serializers.SerializerMethodField()
+    review_location = serializers.SerializerMethodField()
     display_summary = serializers.SerializerMethodField()
     positive_labels = serializers.SerializerMethodField()
     negative_labels = serializers.SerializerMethodField()
@@ -125,6 +126,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "notes",
             "display_summary",
             "review_mode",
+            "review_location",
             "positive_labels",
             "negative_labels",
             "submitted_at",
@@ -265,6 +267,34 @@ class ReviewSerializer(serializers.ModelSerializer):
     def get_room_id(self, obj):
         tenancy = getattr(obj, "tenancy", None)
         return getattr(tenancy, "room_id", None)
+
+    
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_review_location(self, obj) -> str:
+        tenancy = getattr(obj, "tenancy", None)
+        room = getattr(tenancy, "room", None)
+
+        if not room:
+            return ""
+
+        location = (getattr(room, "location", "") or "").strip()
+        if not location:
+            return ""
+
+        import re
+
+        compact = location.upper().replace(" ", "")
+
+        match = re.search(
+            r"([A-Z]{1,2}\d[A-Z\d]?)\d[A-Z]{2}$",
+            compact,
+        )
+
+        if not match:
+            return ""
+
+        return f"{match.group(1)} area"
+
 
 
     @extend_schema_field(OpenApiTypes.STR)
