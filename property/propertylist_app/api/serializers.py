@@ -3886,8 +3886,13 @@ class MessageSerializer(serializers.ModelSerializer):
                 tenancy,
                 context=self.context,
             )
+            can_leave_review, _ = (
+                serializer._get_review_eligibility(
+                    tenancy
+                )
+            )
 
-            if serializer.data.get("can_leave_review"):
+            if can_leave_review:
                 return ["leave_review"]
 
             return []
@@ -3917,8 +3922,12 @@ class MessageSerializer(serializers.ModelSerializer):
             tenancy,
             context=self.context,
         )
-
-        return serializer.data.get("available_actions", [])
+        permissions = (
+            serializer._get_tenancy_action_permissions(
+                tenancy
+            )
+        )
+        return permissions["available_actions"]
     
     
     
