@@ -447,4 +447,99 @@ def test_tenancy_proposal_message_body_is_viewer_specific(
     assert (
         "You submitted tenancy information for"
         not in landlord_body
-    )    
+    ) 
+    
+    
+@pytest.mark.django_db
+def test_sender_only_sees_read_after_recipient_opens_thread():
+    from propertylist_app.models import MessageRead
+
+    sender, recipient, _ = _mk_users()
+    thread = _mk_thread(sender, recipient)
+
+    message = Message.objects.create(
+        thread=thread,
+        sender=sender,
+        body="read receipt test",
+    )
+
+    messages_url = reverse(
+        "v1:thread-messages",
+        kwargs={"thread_id": thread.id},
+    )
+
+    read_url = reverse(
+        "v1:thread-mark-read",
+        kwargs={"thread_id": thread.id},
+    )
+
+    # -------------------------------------------------
+    # Sender checks thread BEFORE recipient has opened it
+    # -------------------------------------------------
+    sender_client = APIClient()
+    sender_client.force_authenticate(user=sender)
+
+    sender_response = sender_client.get(messages_url)
+
+    assert sender_response.status_code == 200
+
+    sender_results = sender_response.data.get(
+        "data",
+        sender_response.data.get("results", []),
+    )
+
+    sender_message = next(
+        item
+        for item in sender_results
+        if item["id"] == message.id
+    )
+
+    assert sender_message["is_read"] is False
+    assert sender_message["read_at"] is None
+
+    assert not MessageRead.objects.filter(
+        message=message,
+        user=recipient,
+    ).exists()
+
+    # -------------------------------------------------
+    # Recipient actually opens/marks the thread read
+    # -------------------------------------------------
+    recipient_client = APIClient()
+    recipient_client.force_authenticate(user=recipient)
+
+    read_response = recipient_client.post(
+        read_url,
+        {},
+        format="json",
+    )
+
+    assert read_response.status_code == 200
+
+    receipt = MessageRead.objects.filter(
+        message=message,
+        user=recipient,
+    ).first()
+
+    assert receipt is not None
+
+    # -------------------------------------------------
+    # Sender fetches again AFTER recipient read it
+    # -------------------------------------------------
+    sender_response_after = sender_client.get(messages_url)
+
+    assert sender_response_after.status_code == 200
+
+    sender_results_after = sender_response_after.data.get(
+        "data",
+        sender_response_after.data.get("results", []),
+    )
+
+    sender_message_after = next(
+        item
+        for item in sender_results_after
+        if item["id"] == message.id
+    )
+
+    assert sender_message_after["is_read"] is True
+    assert sender_message_after["read_at"] is not None       

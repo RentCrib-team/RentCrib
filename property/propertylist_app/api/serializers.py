@@ -4165,10 +4165,37 @@ class MessageSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return False
 
-        if obj.sender_id == request.user.id:
-            return True
+        metadata = obj.metadata or {}
 
-        return self._get_read_for_user(obj) is not None
+        # RentCrib system messages do not have a meaningful human
+        # sender/recipient read receipt.
+        if metadata.get("system_event") is True:
+            return self._get_read_for_user(obj) is not None
+
+        # Recipient viewing an inbound human message:
+        # report whether THIS user has read it.
+        if obj.sender_id != request.user.id:
+            return self._get_read_for_user(obj) is not None
+
+        # Sender viewing their own human message:
+        # it is only "read" if another participant has actually created
+        # a MessageRead row for this message.
+        prefetched_reads = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get("reads")
+
+        if prefetched_reads is not None:
+            return any(
+                read.user_id != obj.sender_id
+                for read in prefetched_reads
+            )
+
+        return obj.reads.exclude(
+            user_id=obj.sender_id,
+        ).exists()
+
 
     def get_read_at(self, obj):
         request = self.context.get("request")
@@ -4176,10 +4203,46 @@ class MessageSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
 
-        if obj.sender_id == request.user.id:
-            return None
+        metadata = obj.metadata or {}
 
-        read = self._get_read_for_user(obj)
+        if metadata.get("system_event") is True:
+            read = self._get_read_for_user(obj)
+            return read.read_at if read else None
+
+        # Recipient sees their own read timestamp.
+        if obj.sender_id != request.user.id:
+            read = self._get_read_for_user(obj)
+            return read.read_at if read else None
+
+        # Sender sees when the recipient actually read the message.
+        prefetched_reads = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get("reads")
+
+        if prefetched_reads is not None:
+            recipient_reads = [
+                read
+                for read in prefetched_reads
+                if read.user_id != obj.sender_id
+            ]
+
+            if not recipient_reads:
+                return None
+
+            return min(
+                read.read_at
+                for read in recipient_reads
+            )
+
+        read = (
+            obj.reads
+            .exclude(user_id=obj.sender_id)
+            .order_by("read_at")
+            .first()
+        )
+
         return read.read_at if read else None
 
 
