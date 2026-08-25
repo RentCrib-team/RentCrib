@@ -3805,6 +3805,7 @@ class AvatarUploadRequestSerializer(serializers.Serializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.SerializerMethodField()
+    body = serializers.SerializerMethodField()
     is_read = serializers.SerializerMethodField()
     read_at = serializers.SerializerMethodField()
     available_actions = serializers.SerializerMethodField()
@@ -3848,6 +3849,113 @@ class MessageSerializer(serializers.ModelSerializer):
     
     
     
+    @extend_schema_field(serializers.CharField())
+    def get_body(self, obj):
+        metadata = obj.metadata or {}
+
+        # Only tenancy proposal messages need viewer-specific wording.
+        if (
+            obj.message_type != Message.TYPE_TENANCY_PROPOSAL
+            or metadata.get("event_type") != "proposed"
+        ):
+            return obj.body
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return obj.body
+
+        # The other party must continue to receive the existing
+        # actionable proposal copy.
+        if user.id != obj.sender_id:
+            return obj.body
+
+        # The person who submitted the tenancy information must not see
+        # instructions telling them to review/respond to their own proposal.
+        room_title = (
+            metadata.get("room_title")
+            or "this property"
+        )
+
+        move_in_date = metadata.get("move_in_date")
+        duration_months = metadata.get("duration_months")
+        monthly_rent = metadata.get("monthly_rent")
+        
+        formatted_duration = (
+            f"{duration_months} months"
+            if duration_months is not None
+            else "Not provided"
+        )
+
+        formatted_rent = (
+            f"£{monthly_rent}"
+            if monthly_rent not in (None, "")
+            else "Not provided"
+        )
+
+        # Make the stored ISO date human-readable where possible.
+        formatted_move_in = move_in_date or "Not provided"
+
+        if move_in_date:
+            try:
+                from datetime import date
+
+                parsed_date = date.fromisoformat(
+                    str(move_in_date)
+                )
+                formatted_move_in = (
+                    f"{parsed_date.day} "
+                    f"{parsed_date.strftime('%B %Y')}"
+                )
+            except (TypeError, ValueError):
+                pass
+
+        details = [
+            (
+                "You submitted tenancy information for "
+                f"{room_title}."
+            ),
+            "",
+            "The details you submitted are:",
+            "",
+            f"Move-in date: {formatted_move_in}",
+            f"Duration: {formatted_duration}",
+            f"Monthly rent: {formatted_rent}",
+            "",
+        ]
+
+        # Mirror the acknowledgement depending on who submitted.
+        try:
+            tenancy_id = metadata.get("tenancy_id")
+            tenancy = Tenancy.objects.only(
+                "id",
+                "landlord_id",
+                "tenant_id",
+            ).get(id=tenancy_id)
+        except (Tenancy.DoesNotExist, TypeError, ValueError):
+            tenancy = None
+
+        if tenancy and user.id == tenancy.tenant_id:
+            details.append(
+                "Your landlord has been asked to review these details. "
+                "You will be notified when they respond."
+            )
+        elif tenancy and user.id == tenancy.landlord_id:
+            details.append(
+                "Your tenant has been asked to review these details. "
+                "You will be notified when they respond."
+            )
+        else:
+            details.append(
+                "The other party has been asked to review these details. "
+                "You will be notified when they respond."
+            )
+
+        return "\n".join(details)
+        
+        
+        
 
     @extend_schema_field(
         serializers.ListField(

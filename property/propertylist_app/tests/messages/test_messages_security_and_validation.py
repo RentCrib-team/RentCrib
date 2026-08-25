@@ -315,3 +315,136 @@ def test_still_living_message_update_tenancy_action_expires(
     item = get_message()
 
     assert item["available_actions"] == []    
+    
+    
+def test_tenancy_proposal_message_body_is_viewer_specific(
+    user_factory,
+    room_factory,
+):
+    from propertylist_app.models import Tenancy
+    from propertylist_app.services.tenancy_chat import post_tenancy_event
+
+    landlord = user_factory(
+        username="proposal_body_landlord",
+    )
+    tenant = user_factory(
+        username="proposal_body_tenant",
+    )
+
+    room = room_factory(
+        property_owner=landlord,
+    )
+
+    now = timezone.now()
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=tenant,
+        move_in_date=timezone.localdate() + timedelta(days=7),
+        duration_months=6,
+        status=Tenancy.STATUS_PROPOSED,
+        landlord_confirmed_at=None,
+        tenant_confirmed_at=None,
+    )
+
+    thread, message = post_tenancy_event(
+        tenancy=tenancy,
+        event_type="proposed",
+        sender=tenant,
+    )
+
+    url = reverse(
+        "v1:thread-messages",
+        kwargs={"thread_id": thread.id},
+    )
+
+    # -------------------------------------------------
+    # Tenant is the proposer:
+    # must see acknowledgement copy.
+    # -------------------------------------------------
+    tenant_client = APIClient()
+    tenant_client.force_authenticate(user=tenant)
+
+    tenant_response = tenant_client.get(
+        url,
+        {"limit": 100},
+    )
+
+    assert tenant_response.status_code == 200
+
+    tenant_payload = tenant_response.data.get(
+        "data",
+        tenant_response.data.get("results", []),
+    )
+
+    tenant_message = next(
+        item
+        for item in tenant_payload
+        if item["id"] == message.id
+    )
+
+    tenant_body = tenant_message["body"]
+
+    assert "You submitted tenancy information for" in tenant_body
+    assert room.title in tenant_body
+    assert "Move-in date:" in tenant_body
+    assert "Duration: 6 months" in tenant_body
+    assert "Monthly rent:" in tenant_body
+    assert "Your landlord has been asked to review these details." in tenant_body
+
+    assert (
+        "Please review the proposed tenancy details below before responding."
+        not in tenant_body
+    )
+    assert (
+        "Not rented to this person"
+        not in tenant_body
+    )
+
+    # -------------------------------------------------
+    # Landlord is the counterparty:
+    # must see the original actionable copy.
+    # -------------------------------------------------
+    landlord_client = APIClient()
+    landlord_client.force_authenticate(user=landlord)
+
+    landlord_response = landlord_client.get(
+        url,
+        {"limit": 100},
+    )
+
+    assert landlord_response.status_code == 200
+
+    landlord_payload = landlord_response.data.get(
+        "data",
+        landlord_response.data.get("results", []),
+    )
+
+    landlord_message = next(
+        item
+        for item in landlord_payload
+        if item["id"] == message.id
+    )
+
+    landlord_body = landlord_message["body"]
+
+    assert (
+        "Please review the proposed tenancy details below before responding."
+        in landlord_body
+    )
+    assert room.title in landlord_body
+    assert "Move-in date:" in landlord_body
+    assert "Duration: 6 months" in landlord_body
+    assert "Monthly rent:" in landlord_body
+    assert (
+        "Please confirm that you actually rented this room to this tenant"
+        in landlord_body
+    )
+    assert "Not rented to this person" in landlord_body
+
+    assert (
+        "You submitted tenancy information for"
+        not in landlord_body
+    )    
