@@ -545,4 +545,107 @@ def test_custom_dates_before_available_from_are_not_generated():
 
     assert before not in slot_dates
     assert valid_one in slot_dates
-    assert valid_two in slot_dates    
+    assert valid_two in slot_dates
+    
+    
+@pytest.mark.django_db
+def test_public_availability_dates_exclude_past_slots():
+    room = create_room(username="past_slot_landlord")
+
+    now = timezone.now()
+
+    past_start = now - timedelta(days=2)
+    past_end = past_start + timedelta(minutes=30)
+
+    future_start = now + timedelta(days=2)
+    future_end = future_start + timedelta(minutes=30)
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=past_start,
+        end=past_end,
+        max_bookings=1,
+    )
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=future_start,
+        end=future_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse(
+        "v1:room-slots-public",
+        args=[room.id],
+    )
+
+    response = client.get(
+        url,
+        {
+            "mode": "dates",
+            "only_free": "true",
+        },
+    )
+
+    assert response.status_code == 200
+
+    available_dates = response.data["available_dates"]
+
+    past_date = timezone.localtime(
+        past_start
+    ).date().isoformat()
+
+    future_date = timezone.localtime(
+        future_start
+    ).date().isoformat()
+
+    assert past_date not in available_dates
+    assert future_date in available_dates
+
+
+@pytest.mark.django_db
+def test_public_availability_excludes_earlier_today_slots():
+    room = create_room(username="earlier_today_landlord")
+
+    now = timezone.now()
+
+    past_start = now - timedelta(hours=2)
+    past_end = now - timedelta(hours=1, minutes=30)
+
+    future_start = now + timedelta(hours=2)
+    future_end = future_start + timedelta(minutes=30)
+
+    past_slot = AvailabilitySlot.objects.create(
+        room=room,
+        start=past_start,
+        end=past_end,
+        max_bookings=1,
+    )
+
+    future_slot = AvailabilitySlot.objects.create(
+        room=room,
+        start=future_start,
+        end=future_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse(
+        "v1:room-slots-public",
+        args=[room.id],
+    )
+
+    response = client.get(url)
+
+    assert response.status_code == 200
+
+    returned_ids = {
+        item["id"]
+        for item in response.data["results"]
+    }
+
+    assert past_slot.id not in returned_ids
+    assert future_slot.id in returned_ids        

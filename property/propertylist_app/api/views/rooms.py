@@ -1246,7 +1246,12 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
             return AvailabilitySlot.objects.none()
 
         room = get_object_or_404(Room.objects.alive(), pk=self.kwargs["pk"])
-        qs = room.availability_slots.order_by("start")
+        # Never expose viewing slots whose start time has already passed.
+        # Past dates therefore disappear from the seeker booking calendar,
+        # while future booked slots can still be returned when only_free=False.
+        qs = room.availability_slots.filter(
+            start__gt=timezone.now(),
+        ).order_by("start")
 
         date_value = self.request.query_params.get("date")
         f = self.request.query_params.get("from")
