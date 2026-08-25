@@ -166,3 +166,152 @@ def test_cursor_consistency_when_new_message_arrives_between_page_fetches():
     # page 2 should NOT include the newly-created message,
     # but duplicates across pages can happen if a new record is inserted
     assert new_msg.id not in page2_ids
+    
+    
+def test_still_living_message_update_tenancy_action_expires(
+    user_factory,
+    room_factory,
+):
+    from propertylist_app.models import Tenancy
+
+    landlord = user_factory(
+        username="ending_action_landlord",
+    )
+    tenant = user_factory(
+        username="ending_action_tenant",
+    )
+
+    room = room_factory(
+        property_owner=landlord,
+    )
+
+    now = timezone.now()
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=timezone.localdate() - timedelta(days=90),
+        duration_months=3,
+        status=Tenancy.STATUS_ACTIVE,
+        landlord_confirmed_at=now - timedelta(days=90),
+        tenant_confirmed_at=now - timedelta(days=90),
+
+        # Timer 2 is already active.
+        still_living_check_at=now - timedelta(minutes=1),
+
+        # QA update window is still open.
+        review_open_at=now + timedelta(minutes=10),
+
+        still_living_confirmed_at=None,
+        still_living_landlord_confirmed_at=None,
+        still_living_tenant_confirmed_at=None,
+    )
+
+    thread = _mk_thread(
+        landlord,
+        tenant,
+    )
+
+    message = Message.objects.create(
+        thread=thread,
+        sender=landlord,
+        body=(
+            "Your tenancy is ending soon.\n\n"
+            "You can update or renew the tenancy during this window."
+        ),
+        metadata={
+            "system_event": True,
+            "event_type": "still_living_check",
+            "tenancy_id": tenancy.id,
+            "room_id": room.id,
+            "available_actions": ["update_tenancy"],
+        },
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=tenant)
+
+    url = reverse(
+        "v1:thread-messages",
+        kwargs={"thread_id": thread.id},
+    )
+
+    def get_message():
+        response = client.get(url)
+        assert response.status_code == 200
+
+        payload = response.data.get(
+            "data",
+            response.data.get("results", []),
+        )
+
+        return next(
+            item
+            for item in payload
+            if item["id"] == message.id
+        )
+
+    # -------------------------------------------------
+    # 1. Window open:
+    # button must be available.
+    # -------------------------------------------------
+    item = get_message()
+
+    assert item["available_actions"] == [
+        "update_tenancy",
+    ]
+
+    # -------------------------------------------------
+    # 2. QA window expired:
+    # button must disappear.
+    # -------------------------------------------------
+    tenancy.review_open_at = (
+        timezone.now() - timedelta(seconds=1)
+    )
+    tenancy.save(
+        update_fields=[
+            "review_open_at",
+        ]
+    )
+
+    item = get_message()
+
+    assert item["available_actions"] == []
+
+    # -------------------------------------------------
+    # 3. Ended tenancy:
+    # button must remain unavailable.
+    # -------------------------------------------------
+    tenancy.review_open_at = (
+        timezone.now() + timedelta(minutes=10)
+    )
+    tenancy.status = Tenancy.STATUS_ENDED
+    tenancy.save(
+        update_fields=[
+            "review_open_at",
+            "status",
+        ]
+    )
+
+    item = get_message()
+
+    assert item["available_actions"] == []
+
+    # -------------------------------------------------
+    # 4. Still-living flow already completed:
+    # button must remain unavailable.
+    # -------------------------------------------------
+    tenancy.status = Tenancy.STATUS_ACTIVE
+    tenancy.still_living_confirmed_at = timezone.now()
+    tenancy.save(
+        update_fields=[
+            "status",
+            "still_living_confirmed_at",
+        ]
+    )
+
+    item = get_message()
+
+    assert item["available_actions"] == []    

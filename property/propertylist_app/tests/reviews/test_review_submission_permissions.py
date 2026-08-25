@@ -127,3 +127,103 @@ def test_random_user_cannot_submit_review_for_tenancy(user_factory, room_factory
     assert res.status_code in (400, 403, 404), getattr(res, "data", None)
 
     assert not Review.objects.filter(tenancy=tenancy).exists()
+    
+    
+def test_tenant_cannot_submit_landlord_to_tenant_review_flags(
+    user_factory,
+    room_factory,
+):
+    Tenancy = __import__("django.apps").apps.apps.get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+
+    landlord = user_factory(username="role_flag_landlord_1")
+    tenant = user_factory(username="role_flag_tenant_1")
+    room = room_factory(property_owner=landlord)
+
+    now = timezone.now()
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=timezone.localdate() - timedelta(days=90),
+        duration_months=3,
+        status=Tenancy.STATUS_ENDED,
+        landlord_confirmed_at=now - timedelta(days=90),
+        tenant_confirmed_at=now - timedelta(days=90),
+        review_open_at=now - timedelta(days=1),
+        review_deadline_at=now + timedelta(days=30),
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=tenant)
+
+    response = client.post(
+        "/api/v1/reviews/create/",
+        {
+            "tenancy_id": tenancy.id,
+            "review_flags": ["friendly"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "validation_error"
+    assert "review_flags" in response.data["field_errors"]
+    assert (
+        "Invalid review flag(s) for tenant_to_landlord: friendly"
+        in response.data["field_errors"]["review_flags"]
+    )
+
+
+def test_landlord_cannot_submit_tenant_to_landlord_review_flags(
+    user_factory,
+    room_factory,
+):
+    Tenancy = __import__("django.apps").apps.apps.get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+
+    landlord = user_factory(username="role_flag_landlord_2")
+    tenant = user_factory(username="role_flag_tenant_2")
+    room = room_factory(property_owner=landlord)
+
+    now = timezone.now()
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=timezone.localdate() - timedelta(days=90),
+        duration_months=3,
+        status=Tenancy.STATUS_ENDED,
+        landlord_confirmed_at=now - timedelta(days=90),
+        tenant_confirmed_at=now - timedelta(days=90),
+        review_open_at=now - timedelta(days=1),
+        review_deadline_at=now + timedelta(days=30),
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=landlord)
+
+    response = client.post(
+        "/api/v1/reviews/create/",
+        {
+            "tenancy_id": tenancy.id,
+            "review_flags": ["responsive"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "validation_error"
+    assert "review_flags" in response.data["field_errors"]
+    assert (
+        "Invalid review flag(s) for landlord_to_tenant: responsive"
+        in response.data["field_errors"]["review_flags"]
+    ) 

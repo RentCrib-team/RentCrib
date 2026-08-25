@@ -362,8 +362,7 @@ class ReviewCreateSerializer(serializers.Serializer):
         allow_empty=True,
     )
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    ALLOWED_FLAGS = {
-    # Tenant -> Landlord
+    TENANT_TO_LANDLORD_FLAGS = {
     "responsive",
     "maintenance_good",
     "accurate_listing",
@@ -372,20 +371,21 @@ class ReviewCreateSerializer(serializers.Serializer):
     "maintenance_poor",
     "misleading_listing",
     "unfair_treatment",
+    }
 
-    # Landlord -> Tenant
-    "clean_and_tidy",
-    "friendly",
-    "good_communication",
-    "paid_on_time",
-    "property_care_good",
-    "followed_rules",
-    "messy",
-    "rude",
-    "poor_communication",
-    "late_payment",
-    "property_care_poor",
-    "broke_rules",
+    LANDLORD_TO_TENANT_FLAGS = {
+        "clean_and_tidy",
+        "friendly",
+        "good_communication",
+        "paid_on_time",
+        "property_care_good",
+        "followed_rules",
+        "messy",
+        "rude",
+        "poor_communication",
+        "late_payment",
+        "property_care_poor",
+        "broke_rules",
     }
 
 
@@ -437,11 +437,29 @@ class ReviewCreateSerializer(serializers.Serializer):
         notes = attrs.get("notes")
         manual_rating = attrs.get("overall_rating")
 
-        # Reject unknown flags
-        invalid_flags = [f for f in flags if f not in self.ALLOWED_FLAGS]
+        # Review attributes are role-specific.
+        # A tenant reviews landlord behaviour; a landlord reviews tenant behaviour.
+        if role == Review.ROLE_TENANT_TO_LANDLORD:
+            allowed_flags = self.TENANT_TO_LANDLORD_FLAGS
+        else:
+            allowed_flags = self.LANDLORD_TO_TENANT_FLAGS
+
+        invalid_flags = [
+            flag
+            for flag in flags
+            if flag not in allowed_flags
+        ]
+
         if invalid_flags:
             raise serializers.ValidationError(
-                {"review_flags": [f"Invalid review flag(s): {', '.join(sorted(set(invalid_flags)))}"]}
+                {
+                    "review_flags": [
+                        (
+                            f"Invalid review flag(s) for {role}: "
+                            f"{', '.join(sorted(set(invalid_flags)))}"
+                        )
+                    ]
+                }
             )
 
         has_flags = len(flags) > 0
@@ -3895,6 +3913,23 @@ class MessageSerializer(serializers.ModelSerializer):
                     tenancy.landlord_id,
                     tenancy.tenant_id,
                 }
+            ):
+                return []
+
+            now = timezone.now()
+
+            if tenancy.status not in {
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            }:
+                return []
+
+            if tenancy.still_living_confirmed_at is not None:
+                return []
+
+            if (
+                tenancy.review_open_at is not None
+                and now >= tenancy.review_open_at
             ):
                 return []
 
