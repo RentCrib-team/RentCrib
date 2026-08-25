@@ -1870,6 +1870,16 @@ class RoomSerializer(serializers.ModelSerializer):
 
         slot_minutes = 30
         today = timezone.localdate()
+
+        available_from = getattr(room, "available_from", None)
+
+        # Viewing availability must never begin before the room's advertised
+        # available-from date. If that date has already passed, begin today.
+        start_date = max(
+            today,
+            available_from or today,
+        )
+
         desired_dates = []
 
         if mode == "custom":
@@ -1882,13 +1892,14 @@ class RoomSerializer(serializers.ModelSerializer):
                     except (TypeError, ValueError):
                         continue
 
-                if selected_date >= today:
+                if selected_date >= start_date:
                     desired_dates.append(selected_date)
 
         else:
-            # Generate today plus the following 29 days.
+            # Generate the first valid availability date plus the following
+            # 29 calendar days.
             for day_offset in range(30):
-                selected_date = today + timedelta(days=day_offset)
+                selected_date = start_date + timedelta(days=day_offset)
 
                 if (
                     mode == "weekdays"

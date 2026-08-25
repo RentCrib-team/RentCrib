@@ -388,3 +388,161 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         ("10:00", "10:30"),
         ("10:30", "11:00"),
     ]
+    
+    
+@pytest.mark.django_db
+def test_everyday_slots_start_from_future_available_from():
+    room = create_room(username="future_everyday_landlord")
+
+    future_start = timezone.localdate() + timedelta(days=10)
+
+    room.available_from = future_start
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="everyday",
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slots = (
+        AvailabilitySlot.objects
+        .filter(room=room)
+        .order_by("start")
+    )
+
+    assert slots.exists()
+
+    first_slot_date = timezone.localtime(
+        slots.first().start
+    ).date()
+
+    assert first_slot_date == future_start
+
+    assert not any(
+        timezone.localtime(slot.start).date() < future_start
+        for slot in slots
+    )
+
+
+@pytest.mark.django_db
+def test_custom_dates_before_available_from_are_not_generated():
+    room = create_room(username="future_custom_landlord")
+
+    available_from = timezone.localdate() + timedelta(days=10)
+
+    before = available_from - timedelta(days=2)
+    valid_one = available_from + timedelta(days=1)
+    valid_two = available_from + timedelta(days=4)
+
+    room.available_from = available_from
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="custom",
+        custom_dates=[
+            before.isoformat(),
+            valid_one.isoformat(),
+            valid_two.isoformat(),
+        ],
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slot_dates = {
+        timezone.localtime(slot.start).date()
+        for slot in AvailabilitySlot.objects.filter(room=room)
+    }
+
+    assert before not in slot_dates
+    assert valid_one in slot_dates
+    assert valid_two in slot_dates
+
+
+@pytest.mark.django_db
+def test_everyday_slots_start_from_future_available_from():
+    room = create_room(username="future_everyday_landlord")
+
+    future_start = timezone.localdate() + timedelta(days=10)
+
+    room.available_from = future_start
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="everyday",
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slots = (
+        AvailabilitySlot.objects
+        .filter(room=room)
+        .order_by("start")
+    )
+
+    assert slots.exists()
+
+    first_slot_date = timezone.localtime(
+        slots.first().start
+    ).date()
+
+    assert first_slot_date == future_start
+
+    assert not any(
+        timezone.localtime(slot.start).date() < future_start
+        for slot in slots
+    )
+
+
+@pytest.mark.django_db
+def test_custom_dates_before_available_from_are_not_generated():
+    room = create_room(username="future_custom_landlord")
+
+    available_from = timezone.localdate() + timedelta(days=10)
+
+    before = available_from - timedelta(days=2)
+    valid_one = available_from + timedelta(days=1)
+    valid_two = available_from + timedelta(days=4)
+
+    room.available_from = available_from
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="custom",
+        custom_dates=[
+            before.isoformat(),
+            valid_one.isoformat(),
+            valid_two.isoformat(),
+        ],
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slot_dates = {
+        timezone.localtime(slot.start).date()
+        for slot in AvailabilitySlot.objects.filter(room=room)
+    }
+
+    assert before not in slot_dates
+    assert valid_one in slot_dates
+    assert valid_two in slot_dates    
