@@ -507,7 +507,6 @@ def tenancy_extension_notifications(
     # Web/Vercel destination.
     cta_url = build_absolute_url(
         f"/tenancies/{tenancy.id}",
-        force_login=True,
     )
 
 

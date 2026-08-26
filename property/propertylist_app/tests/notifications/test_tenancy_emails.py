@@ -426,6 +426,14 @@ def test_tenancy_extension_accepted_queues_email_for_both_parties():
             == 7
         )
 
+        # Both landlord and tenant accepted-extension emails must
+        # link directly to the updated tenancy information page.
+        cta_url = email.context["cta_url"]
+
+        assert f"/tenancies/{tenancy.id}" in cta_url
+        assert "/login?next=" not in cta_url
+        assert "/app/tenancies/" not in cta_url
+
     assert OutboundNotification.objects.filter(
         template_key="tenancy.extension.accepted",
     ).count() == 2
