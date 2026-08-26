@@ -12,6 +12,7 @@ from .auth import (
     id_token,
     verify_captcha,
     AccountReactivateView,
+    TokenRefreshEnvelopeView,
 )
 
 from .privacy import (

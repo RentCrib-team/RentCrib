@@ -56,7 +56,7 @@ from propertylist_app.api.views import (
     PasswordResetRequestView, PasswordResetConfirmView,
     MeView, UserProfileView,
     UserAvatarUploadView, ChangeEmailView, ChangePasswordView, DeactivateAccountView, MyRoomsView,MyProfilePageView,
-    CreatePasswordView,TokenRefreshView,GoogleRegisterView, AppleRegisterView,
+    CreatePasswordView,TokenRefreshView,GoogleRegisterView, AppleRegisterView,TokenRefreshEnvelopeView,
 
 
     # Soft delete
@@ -295,7 +295,11 @@ urlpatterns = [
     path("auth/logout/",                 LogoutView.as_view(),               name="auth-logout"),
     path("auth/password-reset/",         PasswordResetRequestView.as_view(), name="auth-password-reset"),
     path("auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="auth-token-refresh"),
+    path(
+        "auth/token/refresh/",
+        TokenRefreshEnvelopeView.as_view(),
+        name="auth-token-refresh",
+    ),
 
 
 
