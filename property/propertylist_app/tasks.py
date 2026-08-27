@@ -462,6 +462,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"you submitted for {room_title}. Your submission has been "
                 "cancelled."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -482,6 +484,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"{room_title} has been rejected. The listing availability "
                 "was not changed."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -510,6 +514,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"Your tenancy request for {room_title} expired because "
                 "the landlord did not verify it within the required time."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -533,6 +539,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"{room_title} has expired. The listing availability "
                 "was not changed."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -557,6 +565,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 notification_type="tenancy_cancelled",
                 title="Tenancy cancelled",
                 body=f"Tenancy cancelled for: {room_title}.",
+                target_type="tenancy",
+                target_id=tenancy.id,
             )
 
             _maybe_queue(
@@ -599,6 +609,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             f"The tenancy information changes you made for "
             f"{room_title} have been sent to {other_party_name}."
         ),
+        target_type="tenancy",
+        target_id=tenancy.id,
     )
 
     _maybe_queue(
@@ -620,6 +632,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             f"Your {editor_role}, {editor_name}, updated the tenancy "
             f"information for {room_title}."
         ),
+        target_type="tenancy",
+        target_id=tenancy.id,
     )
 
     _maybe_queue(
