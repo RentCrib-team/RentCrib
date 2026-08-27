@@ -1167,27 +1167,72 @@ class LoginView(APIView):
             identifier = ser.validated_data["identifier"]
             password = ser.validated_data["password"]
 
-            lookup_username = identifier
-            if "@" in identifier:
-                try:
-                    u = get_user_model().objects.get(email__iexact=identifier)
-                    lookup_username = u.username
-                except get_user_model().DoesNotExist:
-                    pass
-
-                
-
-                
-            candidate_user = None
             UserModel = get_user_model()
 
-            try:
-                if "@" in identifier:
-                    candidate_user = UserModel.objects.get(email__iexact=identifier)
-                else:
-                    candidate_user = UserModel.objects.get(username__iexact=lookup_username)
-            except UserModel.DoesNotExist:
-                candidate_user = None
+            lookup_username = identifier
+            candidate_user = None
+
+            if "@" in identifier:
+                # Email is intended to identify exactly one RentCrib account.
+                # Fetch at most two rows so corrupted/legacy duplicate data can never
+                # raise MultipleObjectsReturned or cause us to choose an account
+                # arbitrarily.
+                email_matches = list(
+                    UserModel.objects
+                    .filter(email__iexact=identifier)
+                    .order_by("id")[:2]
+                )
+
+                if len(email_matches) > 1:
+                    logger.error(
+                        "login_duplicate_email ip=%s identifier=%s user_ids=%s",
+                        ip,
+                        identifier,
+                        [user.id for user in email_matches],
+                    )
+
+                    return error_response(
+                        message=(
+                            "Unable to sign in with this email. "
+                            "Please contact support."
+                        ),
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        code="account_conflict",
+                    )
+
+                if len(email_matches) == 1:
+                    candidate_user = email_matches[0]
+                    lookup_username = candidate_user.username
+
+            else:
+                # Username is normally unique, but use the same defensive rule for
+                # case-insensitive matches so malformed data can never cause a 500.
+                username_matches = list(
+                    UserModel.objects
+                    .filter(username__iexact=identifier)
+                    .order_by("id")[:2]
+                )
+
+                if len(username_matches) > 1:
+                    logger.error(
+                        "login_duplicate_username ip=%s identifier=%s user_ids=%s",
+                        ip,
+                        identifier,
+                        [user.id for user in username_matches],
+                    )
+
+                    return error_response(
+                        message=(
+                            "Unable to sign in with this username. "
+                            "Please contact support."
+                        ),
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        code="account_conflict",
+                    )
+
+                if len(username_matches) == 1:
+                    candidate_user = username_matches[0]
+                    lookup_username = candidate_user.username
 
             if candidate_user and candidate_user.check_password(password) and not candidate_user.is_active:
                 profile, _ = UserProfile.objects.get_or_create(user=candidate_user)

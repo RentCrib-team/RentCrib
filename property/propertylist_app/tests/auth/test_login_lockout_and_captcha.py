@@ -61,14 +61,14 @@ def test_login_lockout_after_repeated_failures(settings):
 
 
 @pytest.mark.django_db
-def test_login_requires_captcha_when_enabled(settings, monkeypatch):
+def test_login_requires_turnstile_when_enabled(settings, monkeypatch):
     caches["default"].clear()
 
-    settings.ENABLE_CAPTCHA = True
+    settings.TURNSTILE_REQUIRED = True
     settings.LOGIN_FAIL_LIMIT = 10
     settings.LOGIN_LOCKOUT_SECONDS = 600
 
-    # Avoid DRF throttling interfering with this captcha behaviour test
+    # Avoid DRF throttling interfering with this Turnstile behaviour test.
     settings.REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
     settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"] = "10000/hour"
     api_settings.reload()
@@ -78,7 +78,10 @@ def test_login_requires_captcha_when_enabled(settings, monkeypatch):
         password="pass12345",
         email="c@example.com",
     )
-    UserProfile.objects.update_or_create(user=user, defaults={"email_verified": True})
+    UserProfile.objects.update_or_create(
+        user=user,
+        defaults={"email_verified": True},
+    )
 
     client = APIClient()
     url = reverse("v1:auth-login")
@@ -86,31 +89,158 @@ def test_login_requires_captcha_when_enabled(settings, monkeypatch):
     def fake_verify_fail(token, ip):
         return False
 
-    monkeypatch.setattr("propertylist_app.api.views.verify_captcha", fake_verify_fail)
+    monkeypatch.setattr(
+        "propertylist_app.api.views.auth.verify_turnstile",
+        fake_verify_fail,
+    )
 
     r_bad = client.post(
         url,
-        {"identifier": "catuser", "password": "pass12345", "captcha_token": "token123"},
+        {
+            "identifier": "catuser",
+            "password": "pass12345",
+            "turnstile_token": "token123",
+        },
         format="json",
         **_ip_headers(),
     )
+
     assert r_bad.status_code == 400, r_bad.data
-    assert "CAPTCHA verification failed" in str(r_bad.data)
+    assert "Security check failed" in str(r_bad.data)
 
     def fake_verify_ok(token, ip):
         return True
 
-    monkeypatch.setattr("propertylist_app.api.views.verify_captcha", fake_verify_ok)
+    monkeypatch.setattr(
+        "propertylist_app.api.views.auth.verify_turnstile",
+        fake_verify_ok,
+    )
 
     r_ok = client.post(
         url,
-        {"identifier": "catuser", "password": "pass12345", "captcha_token": "token123"},
+        {
+            "identifier": "catuser",
+            "password": "pass12345",
+            "turnstile_token": "token123",
+        },
         format="json",
         **_ip_headers(),
     )
+
     assert r_ok.status_code == 200, r_ok.data
     assert r_ok.data.get("ok") is True
     assert "tokens" in r_ok.data.get("data", {})
     assert "access" in r_ok.data["data"]["tokens"]
     assert "refresh" in r_ok.data["data"]["tokens"]
+    
+    
+@pytest.mark.django_db
+def test_login_duplicate_email_returns_controlled_error_not_500(
+    settings,
+    monkeypatch,
+):
+    """
+    Defensive regression test for legacy/corrupt duplicate-email data.
 
+    The database now prevents creation of new case-insensitive duplicate
+    emails, so simulate two legacy matching users at the queryset boundary
+    and prove login returns account_conflict instead of HTTP 500.
+    """
+    caches["default"].clear()
+
+    settings.ENABLE_CAPTCHA = False
+    settings.TURNSTILE_REQUIRED = False
+    settings.LOGIN_FAIL_LIMIT = 10
+    settings.LOGIN_LOCKOUT_SECONDS = 600
+
+    settings.REST_FRAMEWORK.setdefault(
+        "DEFAULT_THROTTLE_RATES",
+        {},
+    )
+    settings.REST_FRAMEWORK[
+        "DEFAULT_THROTTLE_RATES"
+    ]["login"] = "10000/hour"
+    api_settings.reload()
+
+    UserModel = User
+
+    original_filter = UserModel.objects.filter
+
+    class DuplicateEmailQuery:
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def __getitem__(self, key):
+            if isinstance(key, slice):
+                return [
+                    type(
+                        "LegacyUser",
+                        (),
+                        {"id": 101},
+                    )(),
+                    type(
+                        "LegacyUser",
+                        (),
+                        {"id": 202},
+                    )(),
+                ]
+
+            raise IndexError(key)
+
+    def duplicate_email_filter(*args, **kwargs):
+        if "email__iexact" in kwargs:
+            return DuplicateEmailQuery()
+
+        return original_filter(*args, **kwargs)
+
+    monkeypatch.setattr(
+        UserModel.objects,
+        "filter",
+        duplicate_email_filter,
+    )
+
+    client = APIClient()
+    url = reverse("v1:auth-login")
+
+    response = client.post(
+        url,
+        {
+            "identifier": "duplicate-login@example.com",
+            "password": "pass12345",
+        },
+        format="json",
+        **_ip_headers("203.0.113.77"),
+    )
+
+    assert response.status_code == 400, getattr(
+        response,
+        "data",
+        response.content,
+    )
+
+    assert response.data["ok"] is False
+    assert response.data["code"] == "account_conflict"
+
+    assert (
+        "contact support"
+        in response.data["message"].lower()
+    )
+    
+    
+@pytest.mark.django_db(transaction=True)
+def test_database_rejects_case_insensitive_duplicate_email():
+    from django.db import IntegrityError, transaction
+
+    User.objects.create_user(
+        username="email_unique_one",
+        email="CaseSensitive@TestExample.com",
+        password="pass12345",
+    )
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            User.objects.create_user(
+                username="email_unique_two",
+                email="casesensitive@testexample.com",
+                password="pass12345",
+            )        
