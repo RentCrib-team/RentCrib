@@ -1,16 +1,21 @@
+# Free-tier blueprint: ONE web service running daphne + celery worker + celery
+# beat together (Render free accounts get a single service slot).
+# Deploy: Render dashboard -> New -> Blueprint, repo RentCrib, branch abioye/debug-resolve.
+# NOTE: secrets marked `sync: false` are left blank and MUST be set in the
+# dashboard BEFORE the first build (settings.py raises at import if missing).
 services:
   - type: web
-    name: rentout-staging-v2
-    branch: staging
+    name: rentout-free-test
+    branch: abioye/debug-resolve
     autoDeployTrigger: commit
     runtime: python
     rootDir: property
-    plan: standard
+    plan: free
     buildCommand: |
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
-      python manage.py migrate
-    startCommand: daphne -b 0.0.0.0 -p $PORT property.asgi:application
+      python manage.py migrate --noinput
+    startCommand: bash start.sh
     healthCheckPath: /health/
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -69,33 +74,3 @@ services:
         sync: false
       - key: RENDER_DISK_PATH
         value: /var/data
-
-  - type: worker
-    name: rentout-staging-worker
-    branch: staging
-    autoDeployTrigger: commit
-    runtime: python
-    rootDir: property
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A celery_app worker -l info --concurrency=1 -Q celery,emails,maintenance
-    envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: property.settings
-      - key: DJANGO_DEBUG
-        value: "false"
-
-  - type: worker
-    name: rentout-staging-beat
-    branch: staging
-    autoDeployTrigger: commit
-    runtime: python
-    rootDir: property
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A celery_app beat -l info
-    envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: property.settings
-      - key: DJANGO_DEBUG
-        value: "false"
