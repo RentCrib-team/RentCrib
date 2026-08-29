@@ -15,7 +15,13 @@ from rest_framework.views import APIView
 from rest_framework import filters
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.throttling import ScopedRateThrottle, UserRateThrottle
-from drf_spectacular.utils import extend_schema, OpenApiResponse,inline_serializer,OpenApiParameter
+from drf_spectacular.utils import (
+    extend_schema,
+    extend_schema_view,
+    OpenApiResponse,
+    inline_serializer,
+    OpenApiParameter,
+)
 from drf_spectacular.types import OpenApiTypes
 
 
@@ -460,6 +466,24 @@ class MySavedRoomsView(generics.ListAPIView):
 #---------------------
 # Messaging
 # --------------------
+
+@extend_schema_view(
+    get=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="role",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["landlord", "seeker"],
+                description=(
+                    "Return threads where the authenticated user has "
+                    "the authoritative landlord or seeker role."
+                ),
+            ),
+        ],
+    ),
+)
 class MessageThreadListCreateView(generics.ListCreateAPIView):
 
     """

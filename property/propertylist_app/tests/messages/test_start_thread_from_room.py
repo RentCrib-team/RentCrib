@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APIClient
-
+from drf_spectacular.generators import SchemaGenerator
 from propertylist_app.models import Room, RoomCategorie, MessageThread, Message
 
 
@@ -13,10 +13,18 @@ def _mk_user(username: str) -> User:
     return User.objects.create_user(username=username, password="pass12345")
 
 
-def _mk_room(owner: User, status: str = "active") -> Room:
-    cat = RoomCategorie.objects.create(name="General", key=f"general-{owner.username}")
+def _mk_room(
+    owner: User,
+    status: str = "active",
+    key_suffix: str = "",
+) -> Room:
+    cat = RoomCategorie.objects.create(
+        name="General",
+        key=f"general-{owner.username}{key_suffix}",
+    )
+
     return Room.objects.create(
-        title=f"Room {owner.username}",
+        title=f"Room {owner.username}{key_suffix}",
         description="desc",
         price_per_month="500.00",
         location="London",
@@ -169,16 +177,21 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
         "/api/v1/messages/threads/",
         {"role": "landlord"},
     )
-    assert landlord_response.status_code == 200
 
+    assert landlord_response.status_code == 200
     landlord_items = landlord_response.data["data"]
+
     assert [item["id"] for item in landlord_items] == [
         landlord_thread.id
     ]
 
     landlord_item = landlord_items[0]
+
     assert landlord_item["participant_role"] == "landlord"
+    assert landlord_item["inbox_side"] == "landlord"
     assert landlord_item["relationship_type"] == "room_enquiry"
+    assert landlord_item["relationship_id"] == landlord_room.id
+    assert landlord_item["property_id"] == landlord_room.id
     assert landlord_item["room_id"] == landlord_room.id
     assert landlord_item["landlord_id"] == current_user.id
     assert landlord_item["seeker_id"] == seeker_counterpart.id
@@ -187,16 +200,21 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
         "/api/v1/messages/threads/",
         {"role": "seeker"},
     )
-    assert seeker_response.status_code == 200
 
+    assert seeker_response.status_code == 200
     seeker_items = seeker_response.data["data"]
+
     assert [item["id"] for item in seeker_items] == [
         seeker_thread.id
     ]
 
     seeker_item = seeker_items[0]
+
     assert seeker_item["participant_role"] == "seeker"
+    assert seeker_item["inbox_side"] == "seeker"
     assert seeker_item["relationship_type"] == "room_enquiry"
+    assert seeker_item["relationship_id"] == seeker_room.id
+    assert seeker_item["property_id"] == seeker_room.id
     assert seeker_item["room_id"] == seeker_room.id
     assert seeker_item["landlord_id"] == landlord_counterpart.id
     assert seeker_item["seeker_id"] == current_user.id
@@ -204,9 +222,10 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
     all_threads_response = client.get(
         "/api/v1/messages/threads/",
     )
-    assert all_threads_response.status_code == 200
 
+    assert all_threads_response.status_code == 200
     all_items = all_threads_response.data["data"]
+
     all_items_by_id = {
         item["id"]: item
         for item in all_items
@@ -219,8 +238,12 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
     }
 
     legacy_item = all_items_by_id[legacy_thread.id]
+
     assert legacy_item["participant_role"] == "unscoped"
+    assert legacy_item["inbox_side"] == "unscoped"
     assert legacy_item["relationship_type"] == "legacy_direct"
+    assert legacy_item["relationship_id"] is None
+    assert legacy_item["property_id"] is None
     assert legacy_item["room_id"] is None
     assert legacy_item["landlord_id"] is None
     assert legacy_item["seeker_id"] is None
@@ -229,4 +252,99 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
         "/api/v1/messages/threads/",
         {"role": "invalid"},
     )
-    assert invalid_response.status_code == 400    
+
+    assert invalid_response.status_code == 400
+    
+def test_same_pair_different_rooms_keep_distinct_context():
+    landlord = _mk_user("context-landlord")
+    seeker = _mk_user("context-seeker")
+
+    first_room = _mk_room(
+    landlord,
+    key_suffix="-a",
+    )
+
+    second_room = _mk_room(
+        landlord,
+        key_suffix="-b",
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=seeker)
+
+    first_response = client.post(
+        reverse(
+            "v1:start-thread-from-room",
+            kwargs={"room_id": first_room.id},
+        ),
+        {},
+        format="json",
+    )
+    second_response = client.post(
+        reverse(
+            "v1:start-thread-from-room",
+            kwargs={"room_id": second_room.id},
+        ),
+        {},
+        format="json",
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    first_item = first_response.data["data"]
+    second_item = second_response.data["data"]
+
+    assert first_item["id"] != second_item["id"]
+
+    assert first_item["participant_role"] == "seeker"
+    assert first_item["inbox_side"] == "seeker"
+    assert first_item["room_id"] == first_room.id
+    assert first_item["relationship_id"] == first_room.id
+    assert first_item["property_id"] == first_room.id
+
+    assert second_item["participant_role"] == "seeker"
+    assert second_item["inbox_side"] == "seeker"
+    assert second_item["room_id"] == second_room.id
+    assert second_item["relationship_id"] == second_room.id
+    assert second_item["property_id"] == second_room.id
+
+    client.force_authenticate(user=landlord)
+
+    detail_response = client.get(
+        f"/api/v1/messages/threads/{first_item['id']}/",
+    )
+
+    assert detail_response.status_code == 200
+
+    detail_item = detail_response.data["data"]
+
+    assert detail_item["participant_role"] == "landlord"
+    assert detail_item["inbox_side"] == "landlord"
+    assert detail_item["relationship_type"] == "room_enquiry"
+    assert detail_item["relationship_id"] == first_room.id
+    assert detail_item["property_id"] == first_room.id
+
+
+def test_thread_list_openapi_declares_role_parameter():
+    schema = SchemaGenerator().get_schema(
+        request=None,
+        public=True,
+    )
+
+    parameters = schema["paths"][
+        "/api/v1/messages/threads/"
+    ]["get"]["parameters"]
+
+    role_parameter = next(
+        parameter
+        for parameter in parameters
+        if parameter.get("name") == "role"
+    )
+
+    assert role_parameter["in"] == "query"
+    assert role_parameter.get("required", False) is False
+    assert set(role_parameter["schema"]["enum"]) == {
+        "landlord",
+        "seeker",
+    }     

@@ -4256,6 +4256,9 @@ class MessageThreadSerializer(serializers.ModelSerializer):
     
     participant_role = serializers.SerializerMethodField()
     relationship_type = serializers.SerializerMethodField()
+    inbox_side = serializers.SerializerMethodField()
+    relationship_id = serializers.SerializerMethodField()
+    property_id = serializers.SerializerMethodField()
 
     room_id = serializers.IntegerField(
         read_only=True,
@@ -4285,6 +4288,9 @@ class MessageThreadSerializer(serializers.ModelSerializer):
             "room_id",
             "landlord_id",
             "seeker_id",
+            "inbox_side",
+            "relationship_id",
+            "property_id",
             "created_at",
             "last_message",
             "unread_count",
@@ -4330,6 +4336,22 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         return "unscoped"
 
 
+
+    @extend_schema_field(
+    serializers.ChoiceField(
+        choices=[
+            ("landlord", "Landlord"),
+            ("seeker", "Seeker"),
+            ("unscoped", "Unscoped"),
+        ],
+        allow_null=True,
+    )
+    )
+    def get_inbox_side(self, obj):
+        return self.get_participant_role(obj)
+
+
+
     @extend_schema_field(
         serializers.ChoiceField(
             choices=[
@@ -4343,6 +4365,29 @@ class MessageThreadSerializer(serializers.ModelSerializer):
             return "room_enquiry"
 
         return "legacy_direct"
+    
+    
+    
+    @extend_schema_field(
+        serializers.IntegerField(
+            read_only=True,
+            allow_null=True,
+        )
+    )
+    def get_relationship_id(self, obj):
+        # A conversation is scoped to its room/property lifecycle.
+        # Booking and tenancy IDs remain event-specific message metadata.
+        return obj.room_id
+
+
+    @extend_schema_field(
+        serializers.IntegerField(
+            read_only=True,
+            allow_null=True,
+        )
+    )
+    def get_property_id(self, obj):
+        return obj.room_id
     
     
     @extend_schema_field(
