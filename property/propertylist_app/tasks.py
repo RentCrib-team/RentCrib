@@ -299,6 +299,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                     "message": message,
                     "title": title,
                     "body": body,
+                    "audience": (
+                        Notification.Audience.LANDLORD
+                        if user.id == tenancy.landlord_id
+                        else Notification.Audience.SEEKER
+                    ),
                 },
             )
         )
@@ -408,6 +413,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 message=tenancy_message,
                 title="Tenancy confirmed",
                 body=f"Tenancy confirmed for: {room_title}.",
+                audience=(
+                    Notification.Audience.LANDLORD
+                    if user.id == tenancy.landlord_id
+                    else Notification.Audience.SEEKER
+                ),
             )
 
             push_user_realtime_event(
@@ -1076,6 +1086,11 @@ def task_tenancy_prompts_sweep() -> int:
                 message=prompt_message,
                 title=title,
                 body=body,
+                audience=(
+                    Notification.Audience.LANDLORD
+                    if user.id == tenancy.landlord_id
+                    else Notification.Audience.SEEKER
+                ),
             )
 
             # Realtime Envelope / Inbox update.
@@ -1324,6 +1339,7 @@ def task_tenancy_prompts_sweep() -> int:
                             f"You can now leave a review for "
                             f"{t.room.title}."
                         ),
+                        "audience": Notification.Audience.LANDLORD,
                     },
                 )
             )
@@ -1379,6 +1395,7 @@ def task_tenancy_prompts_sweep() -> int:
                             f"You can now leave a review for "
                             f"{t.room.title}."
                         ),
+                        "audience": Notification.Audience.SEEKER,
                     },
                 )
             )
@@ -1487,6 +1504,11 @@ def task_tenancy_prompts_sweep() -> int:
                     "body": (
                         f"A review from your tenancy at "
                         f"{tenancy.room.title} is now available to view."
+                    ),
+                    "audience": (
+                        Notification.Audience.LANDLORD
+                        if reviewee.id == tenancy.landlord_id
+                        else Notification.Audience.SEEKER
                     ),
                 },
             )

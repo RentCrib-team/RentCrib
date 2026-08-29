@@ -298,6 +298,7 @@ class BookingListCreateView(generics.ListCreateAPIView):
                     target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
+                    audience=Notification.Audience.SEEKER,
                 )
 
                 push_user_realtime_event(
@@ -351,6 +352,7 @@ class BookingListCreateView(generics.ListCreateAPIView):
                     target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
+                    audience=Notification.Audience.SEEKER,
                 )
 
                 push_user_realtime_event(
@@ -892,6 +894,11 @@ class BookingRescheduleView(APIView):
                             f"{booking.room.title} to "
                             f"{start_text}."
                         ),
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
+                        ),
                     },
                 )
             )
@@ -1155,6 +1162,11 @@ class BookingCancelView(APIView):
                         "body": (
                             f"{cancelled_by_name} cancelled the "
                             f"viewing for {booking.room.title}."
+                        ),
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
                         ),
                     },
                 )
@@ -1468,6 +1480,11 @@ class BookingSuspendView(APIView):
                             f"{booking.room.title} "
                             "has been suspended."
                         ),
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
+                        ),
                     },
                 )
             )
@@ -1740,6 +1757,11 @@ class BookingDeleteView(APIView):
                         "body": (
                             f"{deleted_by_name} removed the "
                             f"viewing for {booking.room.title}."
+                        ),
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
                         ),
                     },
                 )

@@ -47,6 +47,7 @@ from propertylist_app.models import (
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.throttling import MessageUserThrottle, MessagingScopedThrottle
 from propertylist_app.services.realtime import push_user_realtime_event
+from propertylist_app.services import messaging_unread as unread_svcs
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
@@ -154,11 +155,8 @@ class InboxListView(APIView):
                 unread_count=Count(
                     "messages",
                     filter=(
-                        (
-                            Q(messages__metadata__system_event=True)
-                            | ~Q(messages__sender=user)
-                        )
-                        & ~Q(messages__reads__user=user)
+                        unread_svcs.unread_filter(user, prefix="messages__")
+                        & unread_svcs.unread_read_exclusion(user, prefix="messages__")
                     ),
                     distinct=True,
                 ),
@@ -512,10 +510,7 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
         unread_messages = (
             Message.objects
             .filter(thread=OuterRef("pk"))
-            .filter(
-                Q(metadata__system_event=True)
-                | ~Q(sender=user)
-            )
+            .filter(unread_svcs.unread_filter(user))
             .exclude(reads__user=user)
             .values("thread")
             .annotate(total=Count("id", distinct=True))
@@ -1296,46 +1291,32 @@ class ThreadMarkReadView(APIView):
                     "thread_id": thread.id,
                     "reader_id": request.user.id,
                     "message_ids": message_ids,
+                    # BE-03: lets the sender's client target the conversation
+                    # (and the right role envelope) without a refetch.
+                    "relationship_id": thread.room_id,
+                    "role": unread_svcs.participant_role(sender_id, thread),
                 },
             )
 
-        # Calculate the global unread-envelope count using exactly the same rule:
-        #
-        # - normal messages count when another user sent them
-        # - system_event messages count for every participant until that
-        #   participant has their own MessageRead row
-        base_threads = MessageThread.objects.filter(
-            participants=request.user,
+        # Total unread envelope counts: account-wide plus both roles, one
+        # shared rule (see services.messaging_unread). Unscoped threads appear
+        # in both role totals — the same way the role-scoped thread lists show
+        # them — so never sum the two roles to derive the account total.
+        bin_ids = unread_svcs.bin_thread_ids(request.user)
+        unread_totals = unread_svcs.unread_totals(request.user, bin_ids=bin_ids)
+        total_unread = unread_totals["account"]
+
+        # Conversation-scoped total for this thread's room. Null for legacy
+        # roomless threads; frontend falls back to its targeted refetch.
+        relationship_id = thread.room_id
+        conversation_unread_count = unread_svcs.conversation_unread_count(
+            request.user,
+            relationship_id,
+            bin_ids=bin_ids,
         )
 
-        bin_thread_ids = list(
-            MessageThreadState.objects
-            .filter(
-                user=request.user,
-                in_bin=True,
-            )
-            .values_list(
-                "thread_id",
-                flat=True,
-            )
-        )
-
-        if bin_thread_ids:
-            base_threads = base_threads.exclude(
-                id__in=bin_thread_ids,
-            )
-
-        total_unread = (
-            Message.objects
-            .filter(thread__in=base_threads)
-            .filter(
-                Q(metadata__system_event=True)
-                | ~Q(sender=request.user)
-            )
-            .exclude(reads__user=request.user)
-            .distinct()
-            .count()
-        )
+        # Which envelope the change belongs to.
+        role = unread_svcs.participant_role(request.user, thread)
 
         push_user_realtime_event(
             request.user.id,
@@ -1344,6 +1325,13 @@ class ThreadMarkReadView(APIView):
                 "thread_id": thread.id,
                 "thread_unread_count": 0,
                 "account_unread_total": total_unread,
+                "role": role,
+                "relationship_id": relationship_id,
+                "conversation_unread_count": conversation_unread_count,
+                "role_unread_totals": {
+                    "landlord": unread_totals["landlord"],
+                    "seeker": unread_totals["seeker"],
+                },
             },
         )
 
@@ -1440,7 +1428,10 @@ class ThreadsBulkMarkReadView(APIView):
                 [],
             ).append(message.id)
 
+        thread_by_id = {thread.id: thread for thread in threads}
+
         for (sender_id, thread_id), message_ids in message_ids_by_sender_and_thread.items():
+            sender_thread = thread_by_id.get(thread_id)
             push_user_realtime_event(
                 sender_id,
                 "message_read",
@@ -1448,40 +1439,38 @@ class ThreadsBulkMarkReadView(APIView):
                     "thread_id": thread_id,
                     "reader_id": request.user.id,
                     "message_ids": message_ids,
+                    # BE-03: lets the sender's client target the conversation
+                    # (and the right role envelope) without a refetch.
+                    "relationship_id": (
+                        sender_thread.room_id
+                        if sender_thread is not None
+                        else None
+                    ),
+                    "role": (
+                        unread_svcs.participant_role(sender_id, sender_thread)
+                        if sender_thread is not None
+                        else "unscoped"
+                    ),
                 },
             )
 
-        base_threads = MessageThread.objects.filter(
-            participants=request.user,
-        )
+        bin_ids = unread_svcs.bin_thread_ids(request.user)
+        unread_totals = unread_svcs.unread_totals(request.user, bin_ids=bin_ids)
 
-        bin_thread_ids = list(
-            MessageThreadState.objects
-            .filter(
-                user=request.user,
-                in_bin=True,
+        # Conversations (rooms) touched by this bulk mark-read, with their
+        # post-mark unread totals. Bulk marks can span several rooms, so this
+        # is keyed by relationship_id rather than a single scalar.
+        relationship_ids = list({
+            thread.room_id
+            for thread in threads
+            if thread.room_id is not None
+        })
+        conversation_unread_counts = (
+            unread_svcs.conversation_unread_counts(
+                request.user,
+                relationship_ids,
+                bin_ids=bin_ids,
             )
-            .values_list(
-                "thread_id",
-                flat=True,
-            )
-        )
-
-        if bin_thread_ids:
-            base_threads = base_threads.exclude(
-                id__in=bin_thread_ids,
-            )
-
-        total_unread = (
-            Message.objects
-            .filter(thread__in=base_threads)
-            .filter(
-                Q(metadata__system_event=True)
-                | ~Q(sender=request.user)
-            )
-            .exclude(reads__user=request.user)
-            .distinct()
-            .count()
         )
 
         push_user_realtime_event(
@@ -1493,7 +1482,12 @@ class ThreadsBulkMarkReadView(APIView):
                     str(thread_id): 0
                     for thread_id in thread_ids
                 },
-                "account_unread_total": total_unread,
+                "account_unread_total": unread_totals["account"],
+                "conversation_unread_counts": conversation_unread_counts,
+                "role_unread_totals": {
+                    "landlord": unread_totals["landlord"],
+                    "seeker": unread_totals["seeker"],
+                },
             },
         )
 
@@ -1501,7 +1495,7 @@ class ThreadsBulkMarkReadView(APIView):
             {
                 "marked": len(messages_to_mark),
                 "thread_ids": thread_ids,
-                "account_unread_total": total_unread,
+                "account_unread_total": unread_totals["account"],
             },
             status_code=status.HTTP_200_OK,
         )        

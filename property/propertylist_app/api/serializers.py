@@ -4320,20 +4320,11 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         if not user or not user.is_authenticated:
             return None
 
-        matching_roles = []
+        # Single source of truth for hat resolution — also drives realtime
+        # events (see services.messaging_unread.participant_role).
+        from propertylist_app.services.messaging_unread import participant_role
 
-        if obj.landlord_id == user.id:
-            matching_roles.append("landlord")
-
-        if obj.seeker_id == user.id:
-            matching_roles.append("seeker")
-
-        if len(matching_roles) == 1:
-            return matching_roles[0]
-
-        # Historical roomless or malformed threads are explicitly unscoped.
-        # Never infer their role from message order, sender or message text.
-        return "unscoped"
+        return participant_role(user, obj)
 
 
 
@@ -4785,6 +4776,11 @@ class NotificationSerializer(serializers.ModelSerializer):
             "cta_url",
             "is_read",
             "created_at",
+            # BE-13: the backend's own answer to "which role does this
+            # notification address" — "landlord" / "seeker" / "both". The
+            # frontend used to infer this from wording/URLs; it now reads it
+            # straight off the payload (see isNotificationForRole).
+            "audience",
         ]
         read_only_fields = fields
 

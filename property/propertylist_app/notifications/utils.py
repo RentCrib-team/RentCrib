@@ -13,6 +13,7 @@ def create_in_app_notification_if_allowed(
     title: str,
     body: str,
     preference_field: str,
+    audience: str = Notification.Audience.BOTH,
 ) -> Optional[Notification]:
     """
     Creates an in-app Notification only if the user's profile preference allows it.
@@ -20,6 +21,10 @@ def create_in_app_notification_if_allowed(
       - "notify_messages"
       - "notify_confirmations"
       - "notify_reminders"
+
+    ``audience`` is the backend's own answer to "which role does this address"
+    ("landlord" / "seeker" / "both") — the frontend reads it straight off the
+    payload instead of inferring it from wording/URLs (see BE-13).
     """
     profile, _ = UserProfile.objects.get_or_create(user=user)
 
@@ -32,6 +37,7 @@ def create_in_app_notification_if_allowed(
         type=notification_type,
         title=title,
         body=body,
+        audience=audience,
     )
 
 

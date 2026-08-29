@@ -146,6 +146,7 @@ class MyIdentityVerificationView(APIView):
                 "We've received your identity verification "
                 "and it is now waiting for review."
             ),
+            audience=Notification.Audience.BOTH,
         )
 
         push_user_realtime_event(

@@ -1,6 +1,8 @@
 
 from django.shortcuts import get_object_or_404
 
+from django.db.models import Count
+
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -54,6 +56,31 @@ class NotificationListView(APIView):
             is_read=False,
         ).count()
 
+        # BE-13: role-scoped unread totals. A notification's `audience` is the
+        # backend's own answer to "which role does this address" ("landlord" /
+        # "seeker" / "both"). A role's unread total counts every unread
+        # notification addressed to that role *or* to both — so a dual-role
+        # account's landlord badge never counts a seeker-only notification, and
+        # vice versa. The account-wide `unread_total` above is kept for
+        # backward compatibility.
+        unread_by_audience = list(
+            qs.filter(is_read=False)
+            .order_by()
+            .values("audience")
+            .annotate(total=Count("id"))
+        )
+        audience_counts = {
+            row["audience"]: row["total"]
+            for row in unread_by_audience
+        }
+        both = audience_counts.get(Notification.Audience.BOTH, 0)
+        unread_total_landlord = (
+            audience_counts.get(Notification.Audience.LANDLORD, 0) + both
+        )
+        unread_total_seeker = (
+            audience_counts.get(Notification.Audience.SEEKER, 0) + both
+        )
+
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(
             qs,
@@ -75,6 +102,10 @@ class NotificationListView(APIView):
             "meta",
             {},
         )["unread_total"] = unread_total
+        response.data["unread_total_landlord"] = unread_total_landlord
+        response.data["unread_total_seeker"] = unread_total_seeker
+        response.data["meta"]["unread_total_landlord"] = unread_total_landlord
+        response.data["meta"]["unread_total_seeker"] = unread_total_seeker
 
         return response
     

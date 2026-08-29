@@ -199,6 +199,7 @@ def notify_listing_expiring(
                     f"Your listing '{room.title}' is expiring on "
                     f"{expiry_key}. Renew it to keep it visible."
                 ),
+                audience=Notification.Audience.LANDLORD,
             )
 
             push_user_realtime_event(
@@ -477,6 +478,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 title=title,
                 body=body,
                 preference_field="notify_confirmations",
+                audience=Notification.Audience.SEEKER,
             )
 
             if notification and system_message and thread:
@@ -569,6 +571,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                             f"The viewing for '{room_title}' "
                             f"scheduled for {start_str} has been completed."
                         ),
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                     if system_message and thread:

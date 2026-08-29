@@ -74,6 +74,9 @@ def test_new_message_signal_emits_realtime_message_and_notification():
             "message_id": msg.id,
             "thread_id": thread.id,
             "sender_id": sender.id,
+            # BE-03: conversation + role targeting.
+            "relationship_id": thread.room_id,
+            "role": "unscoped",
         },
     )
 
@@ -132,6 +135,9 @@ def test_new_message_realtime_delivery_ignores_notification_preference():
             "message_id": msg.id,
             "thread_id": thread.id,
             "sender_id": sender.id,
+            # BE-03: conversation + role targeting.
+            "relationship_id": thread.room_id,
+            "role": "unscoped",
         },
     )
 
@@ -287,6 +293,9 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count(
             "thread_id": thread.id,
             "reader_id": reader.id,
             "message_ids": [msg1.id, msg2.id],
+            # BE-03: conversation + role targeting.
+            "relationship_id": thread.room_id,
+            "role": "unscoped",
         },
     )
 
@@ -297,6 +306,16 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count(
             "thread_id": thread.id,
             "thread_unread_count": 0,
             "account_unread_total": 0,
+            # BE-03: role + conversation state transfer. This roomless thread
+            # is unscoped, so it counts in neither role total, and null
+            # relationship_id means the frontend falls back to a refetch.
+            "role": "unscoped",
+            "relationship_id": thread.room_id,
+            "conversation_unread_count": 0,
+            "role_unread_totals": {
+                "landlord": 0,
+                "seeker": 0,
+            },
         },
     )
 
@@ -394,5 +413,12 @@ def test_bulk_thread_mark_read_updates_realtime_and_account_total(
                 for thread_id in data["thread_ids"]
             },
             "account_unread_total": 1,
+            # BE-03: bulk marks span rooms, so totals are keyed by
+            # relationship_id (empty here — roomless threads).
+            "conversation_unread_counts": {},
+            "role_unread_totals": {
+                "landlord": 0,
+                "seeker": 0,
+            },
         },
     )    

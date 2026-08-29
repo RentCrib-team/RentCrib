@@ -53,6 +53,7 @@ def expire_paid_listings(today: Optional[date] = None) -> int:
                             f"Room '{room.title}' is now hidden because "
                             "the payment period ended."
                         ),
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                     push_user_realtime_event(
@@ -269,6 +270,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                     type="booking_reminder",
                     title=seeker_title,
                     body=seeker_body,
+                    audience=Notification.Audience.SEEKER,
                 )
 
             if seeker_template:
@@ -332,6 +334,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                         type="booking_reminder_landlord",
                         title=landlord_title,
                         body=landlord_body,
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                 if landlord_template:

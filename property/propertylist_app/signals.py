@@ -16,6 +16,7 @@ from propertylist_app.models import (
     UserProfile,
 )
 from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.messaging_unread import participant_role
 from propertylist_app.services.realtime import push_user_realtime_event
 from propertylist_app.services.reviews import (
     update_room_rating_from_revealed_reviews,
@@ -226,6 +227,7 @@ def booking_created_queue_emails(
                             f"A viewing has been booked for "
                             f"{room.title}."
                         ),
+                        "audience": Notification.Audience.LANDLORD,
                     },
                 )
             )
@@ -374,6 +376,10 @@ def message_created_create_notifications(
                 "message_id": instance.id,
                 "thread_id": thread.id,
                 "sender_id": instance.sender_id,
+                # BE-03: lets the recipient's client bump the right conversation
+                # (and role envelope) without a full list refetch.
+                "relationship_id": thread.room_id,
+                "role": participant_role(user, thread),
             },
         )
 
@@ -394,6 +400,7 @@ def message_created_create_notifications(
                 message=instance,
                 title="New message",
                 body=message_snippet,
+                audience=Notification.Audience.BOTH,
             )
         )
 
@@ -605,6 +612,9 @@ def tenancy_extension_notifications(
                         "message_id": message.id,
                         "thread_id": thread.id,
                         "sender_id": message.sender_id,
+                        # BE-03: conversation + role targeting.
+                        "relationship_id": thread.room_id,
+                        "role": participant_role(user, thread),
                     },
                 )
 
@@ -779,6 +789,11 @@ def tenancy_extension_notifications(
                         f"{duration_text}. Review the renewal "
                         "information and respond."
                     ),
+                    "audience": (
+                        Notification.Audience.LANDLORD
+                        if other_party.id == tenancy.landlord_id
+                        else Notification.Audience.SEEKER
+                    ),
                 },
             )
         )
@@ -816,6 +831,11 @@ def tenancy_extension_notifications(
                         f"{tenancy.room.title}, starting "
                         f"{proposed_start_date_text} for "
                         f"{duration_text}, has been sent."
+                    ),
+                    "audience": (
+                        Notification.Audience.LANDLORD
+                        if proposer.id == tenancy.landlord_id
+                        else Notification.Audience.SEEKER
                     ),
                 },
             )
@@ -891,6 +911,11 @@ def tenancy_extension_notifications(
                             f"starts {proposed_start_date_text} "
                             f"and continues for {duration_text}."
                         ),
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if user.id == tenancy.landlord_id
+                            else Notification.Audience.SEEKER
+                        ),
                     },
                 )
             )
@@ -946,6 +971,11 @@ def tenancy_extension_notifications(
                         f"{duration_text}, was declined. "
                         "The existing tenancy information "
                         "remains unchanged."
+                    ),
+                    "audience": (
+                        Notification.Audience.LANDLORD
+                        if proposer.id == tenancy.landlord_id
+                        else Notification.Audience.SEEKER
                     ),
                 },
             )
