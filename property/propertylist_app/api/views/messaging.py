@@ -463,14 +463,16 @@ class MySavedRoomsView(generics.ListAPIView):
 class MessageThreadListCreateView(generics.ListCreateAPIView):
 
     """
-    GET /api/messages/threads/
+    GET /api/v1/messages/threads/
 
     Query params:
       - folder : inbox (default) | sent | bin | new | waiting_reply
-      - label  : filter by per-user label (Viewing scheduled, Good fit, etc.)
+      - role   : landlord | seeker
+      - label  : filter by per-user label
       - q      : search in message body or participant username
       - sort_by: latest (default) | oldest
     """
+    
     serializer_class = MessageThreadSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardLimitOffsetPagination
@@ -522,6 +524,25 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 ),
             )
         )
+
+
+        role = (params.get("role") or "").strip().lower()
+
+        if role:
+            if role == "landlord":
+                qs = qs.filter(landlord=user)
+            elif role == "seeker":
+                qs = qs.filter(seeker=user)
+            else:
+                raise ValidationError(
+                    {
+                        "role": (
+                            "Invalid role. Expected 'landlord' or 'seeker'."
+                        )
+                    }
+                )
+
+
 
         folder = (params.get("folder") or "").strip().lower()
 
@@ -667,6 +688,18 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 required=False,
                 description="Maximum number of threads to return.",
             ),
+            OpenApiParameter(
+                name="role",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["landlord", "seeker"],
+                description=(
+                    "Return only threads where the authenticated user has "
+                    "the authoritative landlord or seeker role."
+                ),
+            ),
+            
             OpenApiParameter(
                 name="offset",
                 type=int,
@@ -1693,6 +1726,11 @@ class StartThreadFromRoomView(APIView):
 
         if not existing:
             thread.participants.set(users)
+
+        thread.set_role_participants(
+            landlord=room.property_owner,
+            seeker=request.user,
+        )
 
         body = (request.data or {}).get("body", "").strip()
         if body:

@@ -4253,6 +4253,22 @@ class MessageThreadSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     other_user = serializers.SerializerMethodField(read_only=True)
+    
+    participant_role = serializers.SerializerMethodField()
+    relationship_type = serializers.SerializerMethodField()
+
+    room_id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    landlord_id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    seeker_id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
 
     # NEW: per-user state fields
     label = serializers.SerializerMethodField()
@@ -4264,6 +4280,11 @@ class MessageThreadSerializer(serializers.ModelSerializer):
             "id",
             "participants",
             "other_user",
+            "participant_role",
+            "relationship_type",
+            "room_id",
+            "landlord_id",
+            "seeker_id",
             "created_at",
             "last_message",
             "unread_count",
@@ -4273,12 +4294,65 @@ class MessageThreadSerializer(serializers.ModelSerializer):
 
 
 
+  
+    
+    
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=[
+                ("landlord", "Landlord"),
+                ("seeker", "Seeker"),
+                ("unscoped", "Unscoped"),
+            ],
+            allow_null=True,
+        )
+    )
+    def get_participant_role(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return None
+
+        matching_roles = []
+
+        if obj.landlord_id == user.id:
+            matching_roles.append("landlord")
+
+        if obj.seeker_id == user.id:
+            matching_roles.append("seeker")
+
+        if len(matching_roles) == 1:
+            return matching_roles[0]
+
+        # Historical roomless or malformed threads are explicitly unscoped.
+        # Never infer their role from message order, sender or message text.
+        return "unscoped"
+
+
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=[
+                ("room_enquiry", "Room enquiry"),
+                ("legacy_direct", "Legacy direct"),
+            ],
+        )
+    )
+    def get_relationship_type(self, obj):
+        if obj.room_id:
+            return "room_enquiry"
+
+        return "legacy_direct"
+    
+    
     @extend_schema_field(
     serializers.DictField(
-        child=serializers.CharField(allow_null=True),
-        allow_null=True,
+            child=serializers.CharField(allow_null=True),
+            allow_null=True,
+        )
     )
-)
+    
+    
     def get_other_user(self, obj):
         request = self.context.get("request")
         current_user = getattr(request, "user", None)
