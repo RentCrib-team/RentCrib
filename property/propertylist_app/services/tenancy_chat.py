@@ -8,7 +8,9 @@ from django.db.models import Q
 
 from propertylist_app.models import Message, MessageThread, Tenancy
 
-
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
 EVENT_MESSAGE_TYPES = {
     "proposed": Message.TYPE_TENANCY_PROPOSAL,
     "updated": Message.TYPE_TENANCY_UPDATED,
@@ -169,24 +171,11 @@ def post_tenancy_event(
     landlord = tenancy.landlord
     tenant = tenancy.tenant
 
-    # Reuse the same room-based thread logic already used by
-    # StartThreadFromRoomView.
-    thread = (
-        MessageThread.objects
-        .filter(Q(room=room) | Q(room__isnull=True))
-        .filter(participants=landlord)
-        .filter(participants=tenant)
-        .distinct()
-        .first()
-    )
-
-    if thread is None:
-        thread = MessageThread.objects.create(room=room)
-        thread.participants.set([landlord, tenant])
-
-    elif thread.room_id is None:
-        thread.room = room
-        thread.save(update_fields=["room"])
+    thread = get_or_create_canonical_thread(
+        landlord=landlord,
+        seeker=tenant,
+        room=room,
+    )    
 
     message = Message.objects.create(
         thread=thread,

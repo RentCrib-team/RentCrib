@@ -1484,7 +1484,19 @@ class MessageThread(SoftDeleteModel):
         help_text="Optional label for this thread (e.g. 'Viewing scheduled', 'Good fit').",
     )
 
-
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["room", "landlord", "seeker"],
+                condition=models.Q(
+                    is_deleted=False,
+                    room__isnull=False,
+                    landlord__isnull=False,
+                    seeker__isnull=False,
+                ),
+                name="uniq_active_thread_room_landlord_seeker",
+            ),
+        ]
 
     def __str__(self):
         users = ", ".join(self.participants.values_list("username", flat=True)[:2])

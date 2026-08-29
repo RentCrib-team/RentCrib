@@ -4,6 +4,11 @@ from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
+
+
 from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.models import (
     Booking,
@@ -136,22 +141,11 @@ def booking_created_queue_emails(
     system_message = None
 
     if owner and booker:
-        thread = (
-            MessageThread.objects
-            .filter(room=room)
-            .filter(participants=owner)
-            .filter(participants=booker)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=owner,
+            seeker=booker,
+            room=room,
         )
-
-        if thread is None:
-            thread = MessageThread.objects.create(
-                room=room,
-            )
-            thread.participants.set(
-                [owner, booker]
-            )
 
         event_key = f"booking:{instance.id}:created"
 
@@ -221,6 +215,7 @@ def booking_created_queue_emails(
                     defaults={
                         "thread": thread,
                         "message": system_message,
+                        "audience": Notification.Audience.LANDLORD,
                         "title": "New viewing booked",
                         "body": (
                             f"A viewing has been booked for "
@@ -386,6 +381,18 @@ def message_created_create_notifications(
 
         notification_users.append(user)
 
+
+
+        notification_audience = (
+            Notification.Audience.LANDLORD
+            if thread.landlord_id == user.id
+            else (
+                Notification.Audience.SEEKER
+                if thread.seeker_id == user.id
+                else Notification.Audience.BOTH
+            )
+        )
+
         notifications_to_create.append(
             Notification(
                 user=user,
@@ -394,6 +401,7 @@ def message_created_create_notifications(
                 message=instance,
                 title="New message",
                 body=message_snippet,
+                audience=notification_audience,
             )
         )
 
@@ -402,6 +410,9 @@ def message_created_create_notifications(
             notifications_to_create,
             ignore_conflicts=True,
         )
+
+
+
 
     # Notify the frontend only after the notification rows exist.
     for user in notification_users:
@@ -523,28 +534,11 @@ def tenancy_extension_notifications(
         if not landlord or not tenant:
             return None, None
 
-        thread = (
-            MessageThread.objects
-            .filter(Q(room=tenancy.room) | Q(room__isnull=True))
-            .filter(participants=landlord)
-            .filter(participants=tenant)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=tenant,
+            room=tenancy.room,
         )
-
-        if thread is None:
-            thread = MessageThread.objects.create(
-                room=tenancy.room,
-            )
-            thread.participants.set(
-                [landlord, tenant]
-            )
-
-        elif thread.room_id is None:
-            thread.room = tenancy.room
-            thread.save(
-                update_fields=["room"]
-            )
 
         event_key = (
             f"tenancy_extension:{instance.id}:"
@@ -742,6 +736,26 @@ def tenancy_extension_notifications(
         if not other_party or not proposer:
             return
 
+        responder_audience = (
+            Notification.Audience.LANDLORD
+            if other_party.id == tenancy.landlord_id
+            else (
+                Notification.Audience.SEEKER
+                if other_party.id == tenancy.tenant_id
+                else Notification.Audience.BOTH
+            )
+        )
+
+        proposer_audience = (
+            Notification.Audience.LANDLORD
+            if proposer.id == tenancy.landlord_id
+            else (
+                Notification.Audience.SEEKER
+                if proposer.id == tenancy.tenant_id
+                else Notification.Audience.BOTH
+            )
+        )
+
         thread, message = create_extension_system_message(
             "tenancy_extension_proposed",
             (
@@ -771,6 +785,7 @@ def tenancy_extension_notifications(
                 defaults={
                     "thread": thread,
                     "message": message,
+                    "audience": responder_audience,
                     "title": "Tenancy renewal proposed",
                     "body": (
                         f"A renewal has been proposed for "
@@ -810,6 +825,7 @@ def tenancy_extension_notifications(
                 defaults={
                     "thread": thread,
                     "message": message,
+                    "audience": proposer_audience,
                     "title": "Tenancy renewal proposed",
                     "body": (
                         f"Your renewal proposal for "
@@ -867,9 +883,15 @@ def tenancy_extension_notifications(
             ),
         )
 
-        for user in (
-            tenancy.landlord,
-            tenancy.tenant,
+        for user, audience in (
+            (
+                tenancy.landlord,
+                Notification.Audience.LANDLORD,
+            ),
+            (
+                tenancy.tenant,
+                Notification.Audience.SEEKER,
+            ),
         ):
             if not user:
                 continue
@@ -883,6 +905,7 @@ def tenancy_extension_notifications(
                     defaults={
                         "thread": thread,
                         "message": message,
+                        "audience": audience,
                         "title": "Tenancy renewal accepted",
                         "body": (
                             f"The renewal for "
@@ -918,6 +941,16 @@ def tenancy_extension_notifications(
         if not proposer:
             return
 
+        proposer_audience = (
+            Notification.Audience.LANDLORD
+            if proposer.id == tenancy.landlord_id
+            else (
+                Notification.Audience.SEEKER
+                if proposer.id == tenancy.tenant_id
+                else Notification.Audience.BOTH
+            )
+        )
+
         thread, message = create_extension_system_message(
             "tenancy_extension_rejected",
             (
@@ -938,6 +971,7 @@ def tenancy_extension_notifications(
                 defaults={
                     "thread": thread,
                     "message": message,
+                    "audience": proposer_audience,
                     "title": "Tenancy renewal declined",
                     "body": (
                         f"The proposed renewal for "

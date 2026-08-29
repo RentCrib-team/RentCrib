@@ -25,6 +25,10 @@ from drf_spectacular.utils import (
 from drf_spectacular.types import OpenApiTypes
 
 
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
+
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -1731,31 +1735,11 @@ class StartThreadFromRoomView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        users = [room.property_owner, request.user]
-
-        existing = (
-            MessageThread.objects
-            .filter(Q(room=room) | Q(room__isnull=True))
-            .filter(participants=room.property_owner)
-            .filter(participants=request.user)
-            .distinct()
-            .first()
-        )
-
-        thread = existing or MessageThread.objects.create(room=room)
-
-        if existing and thread.room_id is None:
-            thread.room = room
-            thread.save(update_fields=["room"])
-
-        if not existing:
-            thread.participants.set(users)
-
-        thread.set_role_participants(
+        thread = get_or_create_canonical_thread(
             landlord=room.property_owner,
             seeker=request.user,
+            room=room,
         )
-
         body = (request.data or {}).get("body", "").strip()
         if body:
             Message.objects.create(thread=thread, sender=request.user, body=body)

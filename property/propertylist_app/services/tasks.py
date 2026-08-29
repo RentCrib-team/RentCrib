@@ -19,7 +19,9 @@ from propertylist_app.models import (
     Booking,
 )
 from propertylist_app.services.deep_links import build_absolute_url
-
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
 
 def expire_paid_listings(today: Optional[date] = None) -> int:
     """
@@ -53,6 +55,7 @@ def expire_paid_listings(today: Optional[date] = None) -> int:
                             f"Room '{room.title}' is now hidden because "
                             "the payment period ended."
                         ),
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                     push_user_realtime_event(
@@ -269,6 +272,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                     type="booking_reminder",
                     title=seeker_title,
                     body=seeker_body,
+                    audience=Notification.Audience.SEEKER,
                 )
 
             if seeker_template:
@@ -332,6 +336,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
                         type="booking_reminder_landlord",
                         title=landlord_title,
                         body=landlord_body,
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                 if landlord_template:
@@ -381,22 +386,11 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
             )
 
             if existing_system_message is None:
-                thread = (
-                    MessageThread.objects
-                    .filter(Q(room=room) | Q(room__isnull=True))
-                    .filter(participants=landlord)
-                    .filter(participants=seeker)
-                    .distinct()
-                    .first()
+                thread = get_or_create_canonical_thread(
+                    landlord=landlord,
+                    seeker=seeker,
+                    room=room,
                 )
-
-                if thread is None:
-                    thread = MessageThread.objects.create(room=room)
-                    thread.participants.set([landlord, seeker])
-
-                elif thread.room_id is None:
-                    thread.room = room
-                    thread.save(update_fields=["room"])
 
                 system_message = Message.objects.create(
                     thread=thread,

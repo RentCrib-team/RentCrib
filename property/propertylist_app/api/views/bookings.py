@@ -16,7 +16,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.throttling import UserRateThrottle
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse,inline_serializer
 
 from propertylist_app.services.deep_links import build_absolute_url
@@ -298,6 +300,7 @@ class BookingListCreateView(generics.ListCreateAPIView):
                     target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
+                    audience=Notification.Audience.SEEKER,
                 )
 
                 push_user_realtime_event(
@@ -351,6 +354,7 @@ class BookingListCreateView(generics.ListCreateAPIView):
                     target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
+                    audience=Notification.Audience.SEEKER,
                 )
 
                 push_user_realtime_event(
@@ -779,31 +783,11 @@ class BookingRescheduleView(APIView):
         # ---------------------------------------------------------
         # 1. SHARED ENVELOPE / INBOX MESSAGE
         # ---------------------------------------------------------
-        thread = (
-            MessageThread.objects
-            .filter(
-                Q(room=booking.room)
-                | Q(room__isnull=True)
-            )
-            .filter(participants=landlord)
-            .filter(participants=seeker)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
         )
-
-        if thread is None:
-            thread = MessageThread.objects.create(
-                room=booking.room
-            )
-            thread.participants.set(
-                [landlord, seeker]
-            )
-
-        elif thread.room_id is None:
-            thread.room = booking.room
-            thread.save(
-                update_fields=["room"]
-            )
 
         event_key = (
             f"booking:{booking.id}:"
@@ -884,6 +868,11 @@ class BookingRescheduleView(APIView):
                     target_id=system_message.id,
                     defaults={
                         "thread": thread,
+                        "audience": (
+                            Notification.Audience.SEEKER
+                            if recipient == seeker
+                            else Notification.Audience.LANDLORD
+                        ),
                         "message": system_message,
                         "title": "Viewing rescheduled",
                         "body": (
@@ -1054,31 +1043,11 @@ class BookingCancelView(APIView):
         # ---------------------------------------------------------
         # 1. SHARED RENTCRIB ENVELOPE / INBOX MESSAGE
         # ---------------------------------------------------------
-        thread = (
-            MessageThread.objects
-            .filter(
-                Q(room=booking.room)
-                | Q(room__isnull=True)
-            )
-            .filter(participants=landlord)
-            .filter(participants=seeker)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
         )
-
-        if thread is None:
-            thread = MessageThread.objects.create(
-                room=booking.room,
-            )
-            thread.participants.set(
-                [landlord, seeker]
-            )
-
-        elif thread.room_id is None:
-            thread.room = booking.room
-            thread.save(
-                update_fields=["room"]
-            )
 
         event_key = (
             f"booking:{booking.id}:cancelled"
@@ -1149,6 +1118,11 @@ class BookingCancelView(APIView):
                     target_type="message",
                     target_id=system_message.id,
                     defaults={
+                        "audience": (
+                            Notification.Audience.SEEKER
+                            if recipient == seeker
+                            else Notification.Audience.LANDLORD
+                        ),
                         "thread": thread,
                         "message": system_message,
                         "title": "Viewing cancelled",
@@ -1349,31 +1323,11 @@ class BookingSuspendView(APIView):
         # ---------------------------------------------------------
         # 1. SHARED RENTCRIB ENVELOPE / INBOX MESSAGE
         # ---------------------------------------------------------
-        thread = (
-            MessageThread.objects
-            .filter(
-                Q(room=booking.room)
-                | Q(room__isnull=True)
-            )
-            .filter(participants=landlord)
-            .filter(participants=seeker)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
         )
-
-        if thread is None:
-            thread = MessageThread.objects.create(
-                room=booking.room,
-            )
-            thread.participants.set(
-                [landlord, seeker]
-            )
-
-        elif thread.room_id is None:
-            thread.room = booking.room
-            thread.save(
-                update_fields=["room"]
-            )
 
         event_key = (
             f"booking:{booking.id}:suspended"
@@ -1461,6 +1415,11 @@ class BookingSuspendView(APIView):
                     target_id=system_message.id,
                     defaults={
                         "thread": thread,
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
+                        ),
                         "message": system_message,
                         "title": "Viewing suspended",
                         "body": (
@@ -1627,31 +1586,11 @@ class BookingDeleteView(APIView):
         # ---------------------------------------------------------
         # 1. SHARED RENTCRIB ENVELOPE / INBOX MESSAGE
         # ---------------------------------------------------------
-        thread = (
-            MessageThread.objects
-            .filter(
-                Q(room=booking.room)
-                | Q(room__isnull=True)
-            )
-            .filter(participants=landlord)
-            .filter(participants=seeker)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
         )
-
-        if thread is None:
-            thread = MessageThread.objects.create(
-                room=booking.room,
-            )
-            thread.participants.set(
-                [landlord, seeker]
-            )
-
-        elif thread.room_id is None:
-            thread.room = booking.room
-            thread.save(
-                update_fields=["room"]
-            )
 
         event_key = (
             f"booking:{booking.id}:deleted"
@@ -1735,6 +1674,11 @@ class BookingDeleteView(APIView):
                     target_id=system_message.id,
                     defaults={
                         "thread": thread,
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
+                        ),
                         "message": system_message,
                         "title": "Viewing removed",
                         "body": (

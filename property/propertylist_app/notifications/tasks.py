@@ -25,7 +25,9 @@ from propertylist_app.models import (
 )
 from propertylist_app.notifications.utils import create_in_app_notification_if_allowed
 from propertylist_app.services.realtime import push_user_realtime_event
-
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
 
 def _frontend_base_url() -> str:
     """
@@ -199,6 +201,7 @@ def notify_listing_expiring(
                     f"Your listing '{room.title}' is expiring on "
                     f"{expiry_key}. Renew it to keep it visible."
                 ),
+                audience=Notification.Audience.LANDLORD,
             )
 
             push_user_realtime_event(
@@ -369,31 +372,11 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
         system_message = None
 
         if landlord:
-            thread = (
-                MessageThread.objects
-                .filter(
-                    Q(room=room)
-                    | Q(room__isnull=True)
-                )
-                .filter(participants=landlord)
-                .filter(participants=user)
-                .distinct()
-                .first()
+            thread = get_or_create_canonical_thread(
+                landlord=landlord,
+                seeker=user,
+                room=room,
             )
-
-            if thread is None:
-                thread = MessageThread.objects.create(
-                    room=room,
-                )
-                thread.participants.set(
-                    [landlord, user]
-                )
-
-            elif thread.room_id is None:
-                thread.room = room
-                thread.save(
-                    update_fields=["room"]
-                )
 
             event_key = (
                 f"booking:{booking.id}:"
@@ -477,6 +460,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                 title=title,
                 body=body,
                 preference_field="notify_confirmations",
+                audience=Notification.Audience.SEEKER,
             )
 
             if notification and system_message and thread:
@@ -569,6 +553,7 @@ def notify_completed_viewings(hours_back: int = 24) -> int:
                             f"The viewing for '{room_title}' "
                             f"scheduled for {start_str} has been completed."
                         ),
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                     if system_message and thread:
