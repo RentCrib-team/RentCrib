@@ -204,7 +204,6 @@ def test_mark_read_emits_role_and_conversation_totals():
         {
             "thread_id": t.id,
             "thread_unread_count": 0,
-            "account_unread_total": 0,
             "role": "seeker",
             "relationship_id": room.id,
             "conversation_unread_count": 0,

@@ -279,7 +279,6 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count(
     assert payload["data"]["marked"] == 2
     
     assert payload["data"]["thread_unread_count"] == 0
-    assert payload["data"]["account_unread_total"] == 0
 
     assert MessageRead.objects.filter(
         user=reader,
@@ -305,7 +304,6 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count(
         {
             "thread_id": thread.id,
             "thread_unread_count": 0,
-            "account_unread_total": 0,
             # BE-03: role + conversation state transfer. This roomless thread
             # is unscoped, so it counts in neither role total, and null
             # relationship_id means the frontend falls back to a refetch.
@@ -322,7 +320,7 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count(
     assert realtime.call_count == 2    
     
     
-def test_bulk_thread_mark_read_updates_realtime_and_account_total(
+def test_bulk_thread_mark_read_updates_realtime_and_role_totals(
     django_assert_max_num_queries,
 ):
     sender, reader = make_users(2)
@@ -391,7 +389,6 @@ def test_bulk_thread_mark_read_updates_realtime_and_account_total(
         first_thread.id,
         second_thread.id,
     }
-    assert data["account_unread_total"] == 1
 
     assert MessageRead.objects.filter(
         user=reader,
@@ -408,12 +405,11 @@ def test_bulk_thread_mark_read_updates_realtime_and_account_total(
         "unread_count_changed",
         {
             "thread_ids": data["thread_ids"],
-            "thread_unread_counts": {
-                str(thread_id): 0
-                for thread_id in data["thread_ids"]
-            },
-            "account_unread_total": 1,
-            # BE-03: bulk marks span rooms, so totals are keyed by
+"thread_unread_counts": {
+                    str(thread_id): 0
+                    for thread_id in data["thread_ids"]
+                },
+                # BE-03: bulk marks span rooms, so totals are keyed by
             # relationship_id (empty here — roomless threads).
             "conversation_unread_counts": {},
             "role_unread_totals": {

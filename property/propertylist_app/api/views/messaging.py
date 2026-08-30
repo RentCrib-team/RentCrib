@@ -1223,7 +1223,6 @@ class ThreadMarkReadView(APIView):
                         fields={
                             "marked": serializers.IntegerField(),
                             "thread_unread_count": serializers.IntegerField(),
-                            "account_unread_total": serializers.IntegerField(),
                         },
                     ),
                 },
@@ -1304,7 +1303,6 @@ class ThreadMarkReadView(APIView):
         # them — so never sum the two roles to derive the account total.
         bin_ids = unread_svcs.bin_thread_ids(request.user)
         unread_totals = unread_svcs.unread_totals(request.user, bin_ids=bin_ids)
-        total_unread = unread_totals["account"]
 
         # Conversation-scoped total for this thread's room. Null for legacy
         # roomless threads; frontend falls back to its targeted refetch.
@@ -1324,7 +1322,6 @@ class ThreadMarkReadView(APIView):
             {
                 "thread_id": thread.id,
                 "thread_unread_count": 0,
-                "account_unread_total": total_unread,
                 "role": role,
                 "relationship_id": relationship_id,
                 "conversation_unread_count": conversation_unread_count,
@@ -1339,7 +1336,6 @@ class ThreadMarkReadView(APIView):
             {
                 "marked": len(messages_to_mark),
                 "thread_unread_count": 0,
-                "account_unread_total": total_unread,
             },
             status_code=status.HTTP_200_OK,
         )
@@ -1482,7 +1478,6 @@ class ThreadsBulkMarkReadView(APIView):
                     str(thread_id): 0
                     for thread_id in thread_ids
                 },
-                "account_unread_total": unread_totals["account"],
                 "conversation_unread_counts": conversation_unread_counts,
                 "role_unread_totals": {
                     "landlord": unread_totals["landlord"],
@@ -1495,7 +1490,6 @@ class ThreadsBulkMarkReadView(APIView):
             {
                 "marked": len(messages_to_mark),
                 "thread_ids": thread_ids,
-                "account_unread_total": unread_totals["account"],
             },
             status_code=status.HTTP_200_OK,
         )        
