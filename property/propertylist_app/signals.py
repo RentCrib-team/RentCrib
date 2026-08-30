@@ -371,6 +371,60 @@ def message_created_create_notifications(
                 "sender_id": instance.sender_id,
             },
         )
+        thread_unread_count = (
+            Message.objects
+            .filter(thread=thread)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
+            .exclude(reads__user=user)
+            .distinct()
+            .count()
+        )
+
+        base_threads = MessageThread.objects.filter(
+            participants=user,
+        )
+
+        bin_thread_ids = list(
+            MessageThreadState.objects
+            .filter(
+                user=user,
+                in_bin=True,
+            )
+            .values_list(
+                "thread_id",
+                flat=True,
+            )
+        )
+
+        if bin_thread_ids:
+            base_threads = base_threads.exclude(
+                id__in=bin_thread_ids,
+            )
+
+        account_unread_total = (
+            Message.objects
+            .filter(thread__in=base_threads)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
+            .exclude(reads__user=user)
+            .distinct()
+            .count()
+        )
+
+        push_user_realtime_event(
+            user.id,
+            "unread_count_changed",
+            {
+                "thread_id": thread.id,
+                "thread_unread_count": thread_unread_count,
+                "account_unread_total": account_unread_total,
+            },
+        )
 
         profile, _ = UserProfile.objects.get_or_create(
             user=user
