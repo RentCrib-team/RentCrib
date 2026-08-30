@@ -601,9 +601,10 @@ def _default_db_redis(url):
     return url
 
 
-# Production deploys on the free Redis Cloud instance must drop the DB index.
-if not DEBUG and not TESTING:
-    REDIS_URL = _default_db_redis(REDIS_URL)
+# Redis Cloud free instances expose a single DB: drop the DB index regardless
+# of DEBUG (some staging envs still run with DJANGO_DEBUG truthy). Without a
+# numbered path, clients use the default DB and never issue `SELECT <n>`.
+REDIS_URL = _default_db_redis(REDIS_URL)
 
 ASGI_APPLICATION = "property.asgi.application"
 
@@ -655,9 +656,9 @@ if not DEBUG and not TESTING:
 CELERY_BROKER_URL = CELERY_BROKER_URL or "redis://127.0.0.1:6379/0"
 CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND or "redis://127.0.0.1:6379/1"
 
-if not DEBUG and not TESTING:
-    CELERY_BROKER_URL = _default_db_redis(CELERY_BROKER_URL)
-    CELERY_RESULT_BACKEND = _default_db_redis(CELERY_RESULT_BACKEND)
+# Same DB-index stripping as REDIS_URL above; see the helper's docstring.
+CELERY_BROKER_URL = _default_db_redis(CELERY_BROKER_URL)
+CELERY_RESULT_BACKEND = _default_db_redis(CELERY_RESULT_BACKEND)
 
 CACHE_DEFAULT_TTL = 60
 CACHE_SEARCH_TTL = 120
