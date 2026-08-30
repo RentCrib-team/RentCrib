@@ -86,6 +86,34 @@ from .common import ok_response, _pagination_meta, _wrap_response_success
 class EmptyDataSerializer(serializers.Serializer):
     pass
 
+def _role_scoped_threads(user):
+    profile, _ = UserProfile.objects.get_or_create(
+        user=user
+    )
+    active_role = profile.role
+
+    qs = MessageThread.objects.filter(
+        participants=user
+    )
+
+    if active_role == "landlord":
+        return qs.filter(
+            Q(landlord=user)
+            | Q(
+                landlord__isnull=True,
+                seeker__isnull=True,
+            )
+        )
+
+    return qs.filter(
+        Q(seeker=user)
+        | Q(
+            landlord__isnull=True,
+            seeker__isnull=True,
+        )
+    )
+
+
 
 
 
@@ -123,9 +151,20 @@ class InboxListView(APIView):
         user = request.user
 
         # 1) notifications
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
+        active_role = profile.role
+
         notif_qs = (
             Notification.objects
-            .filter(user=user)
+            .filter(
+                user=user,
+                audience__in=[
+                    active_role,
+                    Notification.Audience.BOTH,
+                ],
+            )
             .order_by("-created_at")[:200]
         )
 
@@ -151,8 +190,7 @@ class InboxListView(APIView):
 
         # 2) message threads (use latest message timestamp as created_at)
         threads = (
-            MessageThread.objects
-            .filter(participants=user)
+            _role_scoped_threads(user)
             .annotate(
                 last_msg_at=Max("messages__created"),
                 unread_count=Count(
@@ -554,21 +592,38 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
         )
 
 
-        role = (params.get("role") or "").strip().lower()
+        requested_role = (params.get("role") or "").strip().lower()
 
-        if role:
-            if role == "landlord":
-                qs = qs.filter(landlord=user)
-            elif role == "seeker":
-                qs = qs.filter(seeker=user)
-            else:
-                raise ValidationError(
-                    {
-                        "role": (
-                            "Invalid role. Expected 'landlord' or 'seeker'."
-                        )
-                    }
+        if requested_role not in {"", "landlord", "seeker"}:
+            raise ValidationError(
+                {
+                    "role": (
+                        "Invalid role. Expected 'landlord' or 'seeker'."
+                    )
+                }
+            )
+
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
+        active_role = profile.role
+
+        if active_role == "landlord":
+            qs = qs.filter(
+                Q(landlord=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
                 )
+            )
+        else:
+            qs = qs.filter(
+                Q(seeker=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
 
 
 
@@ -844,6 +899,11 @@ class MessageThreadDetailView(generics.RetrieveAPIView):
             return MessageThread.objects.none()
 
         user = self.request.user
+        
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
+        active_role = profile.role
 
         unread_messages = (
             Message.objects
@@ -858,9 +918,30 @@ class MessageThreadDetailView(generics.RetrieveAPIView):
             .values("total")[:1]
         )
 
-        return (
+        qs = (
             MessageThread.objects
             .filter(participants=user)
+        )
+
+        if active_role == "landlord":
+            qs = qs.filter(
+                Q(landlord=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+        else:
+            qs = qs.filter(
+                Q(seeker=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+
+        return (
+            qs
             .annotate(
                 unread_count=Coalesce(
                     Subquery(
@@ -919,8 +1000,34 @@ class MessageThreadStateView(APIView):
         }
     )
     def patch(self, request, thread_id):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
+        qs = MessageThread.objects.filter(
+            participants=request.user
+        )
+
+        if active_role == "landlord":
+            qs = qs.filter(
+                Q(landlord=request.user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+        else:
+            qs = qs.filter(
+                Q(seeker=request.user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            qs,
             pk=thread_id,
         )
 
@@ -1089,7 +1196,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
 
         # HARD GUARD: user must be a participant (otherwise 404)
         get_object_or_404(
-            MessageThread.objects.filter(participants=user),
+            _role_scoped_threads(user),
             id=thread_id,
         )
 
@@ -1108,7 +1215,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=self.request.user),
+            _role_scoped_threads(self.request.user),
             id=self.kwargs["thread_id"]
         )
         serializer.save(thread=thread, sender=self.request.user)
@@ -1244,9 +1351,11 @@ class ThreadMarkReadView(APIView):
     )
     def post(self, request, thread_id):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
+
+        
 
         # A normal human message is inbound when someone else sent it.
         #
@@ -1546,7 +1655,7 @@ class ThreadSetLabelView(APIView):
     def post(self, request, thread_id):
         # Only allow labels for threads I am in
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
@@ -1623,7 +1732,7 @@ class ThreadMoveToBinView(APIView):
     )
     def post(self, request, thread_id):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
@@ -1676,7 +1785,7 @@ class ThreadRestoreFromBinView(APIView):
     )
     def post(self, request, thread_id):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 

@@ -448,7 +448,11 @@ def test_tenancy_proposal_message_body_is_viewer_specific(
         "You submitted tenancy information for"
         not in landlord_body
     ) 
-    
+   
+    thread.refresh_from_db()
+
+    assert thread.landlord_id == tenancy.landlord_id
+    assert thread.seeker_id == tenancy.tenant_id 
     
 @pytest.mark.django_db
 def test_sender_only_sees_read_after_recipient_opens_thread():

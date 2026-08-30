@@ -3,7 +3,13 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APIClient
 from drf_spectacular.generators import SchemaGenerator
-from propertylist_app.models import Room, RoomCategorie, MessageThread, Message
+from propertylist_app.models import (
+    Room,
+    RoomCategorie,
+    MessageThread,
+    Message,
+    UserProfile,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -139,6 +145,10 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
     seeker_counterpart = _mk_user("role-seeker")
     legacy_counterpart = _mk_user("role-legacy")
 
+    profile, _ = UserProfile.objects.get_or_create(
+        user=current_user
+    )
+
     # Current user is landlord for this thread.
     landlord_room = _mk_room(current_user, status="active")
     landlord_thread = MessageThread.objects.create(
@@ -164,7 +174,7 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
         [landlord_counterpart, current_user]
     )
 
-    # Historical roomless thread must remain explicitly unscoped.
+    # Historical roomless thread remains visible under either active role.
     legacy_thread = MessageThread.objects.create()
     legacy_thread.participants.set(
         [current_user, legacy_counterpart]
@@ -173,19 +183,29 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
     client = APIClient()
     client.force_authenticate(user=current_user)
 
+    # Active landlord role is authoritative.
+    profile.role = "landlord"
+    profile.save(update_fields=["role"])
+
     landlord_response = client.get(
         "/api/v1/messages/threads/",
-        {"role": "landlord"},
     )
 
     assert landlord_response.status_code == 200
     landlord_items = landlord_response.data["data"]
 
-    assert [item["id"] for item in landlord_items] == [
-        landlord_thread.id
-    ]
+    landlord_items_by_id = {
+        item["id"]: item
+        for item in landlord_items
+    }
 
-    landlord_item = landlord_items[0]
+    assert set(landlord_items_by_id) == {
+        landlord_thread.id,
+        legacy_thread.id,
+    }
+    assert seeker_thread.id not in landlord_items_by_id
+
+    landlord_item = landlord_items_by_id[landlord_thread.id]
 
     assert landlord_item["participant_role"] == "landlord"
     assert landlord_item["inbox_side"] == "landlord"
@@ -196,48 +216,7 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
     assert landlord_item["landlord_id"] == current_user.id
     assert landlord_item["seeker_id"] == seeker_counterpart.id
 
-    seeker_response = client.get(
-        "/api/v1/messages/threads/",
-        {"role": "seeker"},
-    )
-
-    assert seeker_response.status_code == 200
-    seeker_items = seeker_response.data["data"]
-
-    assert [item["id"] for item in seeker_items] == [
-        seeker_thread.id
-    ]
-
-    seeker_item = seeker_items[0]
-
-    assert seeker_item["participant_role"] == "seeker"
-    assert seeker_item["inbox_side"] == "seeker"
-    assert seeker_item["relationship_type"] == "room_enquiry"
-    assert seeker_item["relationship_id"] == seeker_room.id
-    assert seeker_item["property_id"] == seeker_room.id
-    assert seeker_item["room_id"] == seeker_room.id
-    assert seeker_item["landlord_id"] == landlord_counterpart.id
-    assert seeker_item["seeker_id"] == current_user.id
-
-    all_threads_response = client.get(
-        "/api/v1/messages/threads/",
-    )
-
-    assert all_threads_response.status_code == 200
-    all_items = all_threads_response.data["data"]
-
-    all_items_by_id = {
-        item["id"]: item
-        for item in all_items
-    }
-
-    assert set(all_items_by_id) == {
-        landlord_thread.id,
-        seeker_thread.id,
-        legacy_thread.id,
-    }
-
-    legacy_item = all_items_by_id[legacy_thread.id]
+    legacy_item = landlord_items_by_id[legacy_thread.id]
 
     assert legacy_item["participant_role"] == "unscoped"
     assert legacy_item["inbox_side"] == "unscoped"
@@ -248,6 +227,69 @@ def test_thread_list_uses_authoritative_role_and_context_metadata():
     assert legacy_item["landlord_id"] is None
     assert legacy_item["seeker_id"] is None
 
+    # Query parameter cannot bypass the persisted active role.
+    landlord_with_seeker_param = client.get(
+        "/api/v1/messages/threads/",
+        {"role": "seeker"},
+    )
+
+    assert landlord_with_seeker_param.status_code == 200
+
+    landlord_with_seeker_param_ids = {
+        item["id"]
+        for item in landlord_with_seeker_param.data["data"]
+    }
+
+    assert landlord_with_seeker_param_ids == {
+        landlord_thread.id,
+        legacy_thread.id,
+    }
+    assert seeker_thread.id not in landlord_with_seeker_param_ids
+
+    # Switching the persisted role changes visibility without deleting threads.
+    profile.role = "seeker"
+    profile.save(update_fields=["role"])
+
+    seeker_response = client.get(
+        "/api/v1/messages/threads/",
+    )
+
+    assert seeker_response.status_code == 200
+    seeker_items = seeker_response.data["data"]
+
+    seeker_items_by_id = {
+        item["id"]: item
+        for item in seeker_items
+    }
+
+    assert set(seeker_items_by_id) == {
+        seeker_thread.id,
+        legacy_thread.id,
+    }
+    assert landlord_thread.id not in seeker_items_by_id
+
+    seeker_item = seeker_items_by_id[seeker_thread.id]
+
+    assert seeker_item["participant_role"] == "seeker"
+    assert seeker_item["inbox_side"] == "seeker"
+    assert seeker_item["relationship_type"] == "room_enquiry"
+    assert seeker_item["relationship_id"] == seeker_room.id
+    assert seeker_item["property_id"] == seeker_room.id
+    assert seeker_item["room_id"] == seeker_room.id
+    assert seeker_item["landlord_id"] == landlord_counterpart.id
+    assert seeker_item["seeker_id"] == current_user.id
+
+    assert MessageThread.objects.filter(
+        pk=landlord_thread.pk
+    ).exists()
+    assert MessageThread.objects.filter(
+        pk=seeker_thread.pk
+    ).exists()
+    assert MessageThread.objects.filter(
+        pk=legacy_thread.pk
+    ).exists()
+
+    # Existing API validation remains intact.
     invalid_response = client.get(
         "/api/v1/messages/threads/",
         {"role": "invalid"},
@@ -348,3 +390,97 @@ def test_thread_list_openapi_declares_role_parameter():
         "landlord",
         "seeker",
     }     
+
+
+def test_thread_detail_is_scoped_to_authoritative_active_role():
+    current_user = _mk_user("detail-role-user")
+    landlord_counterpart = _mk_user("detail-landlord")
+    seeker_counterpart = _mk_user("detail-seeker")
+    legacy_counterpart = _mk_user("detail-legacy")
+
+    profile, _ = UserProfile.objects.get_or_create(
+        user=current_user
+    )
+
+    landlord_room = _mk_room(
+        current_user,
+        status="active",
+        key_suffix="-l",
+    )
+    landlord_thread = MessageThread.objects.create(
+        room=landlord_room,
+        landlord=current_user,
+        seeker=seeker_counterpart,
+    )
+    landlord_thread.participants.set(
+        [current_user, seeker_counterpart]
+    )
+
+    seeker_room = _mk_room(
+        landlord_counterpart,
+        status="active",
+        key_suffix="-s",
+    )
+    seeker_thread = MessageThread.objects.create(
+        room=seeker_room,
+        landlord=landlord_counterpart,
+        seeker=current_user,
+    )
+    seeker_thread.participants.set(
+        [landlord_counterpart, current_user]
+    )
+
+    legacy_thread = MessageThread.objects.create()
+    legacy_thread.participants.set(
+        [current_user, legacy_counterpart]
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=current_user)
+
+    # Landlord mode: landlord + legacy allowed, seeker denied.
+    profile.role = "landlord"
+    profile.save(update_fields=["role"])
+
+    landlord_response = client.get(
+        f"/api/v1/messages/threads/{landlord_thread.id}/"
+    )
+    seeker_while_landlord_response = client.get(
+        f"/api/v1/messages/threads/{seeker_thread.id}/"
+    )
+    legacy_while_landlord_response = client.get(
+        f"/api/v1/messages/threads/{legacy_thread.id}/"
+    )
+
+    assert landlord_response.status_code == 200
+    assert seeker_while_landlord_response.status_code == 404
+    assert legacy_while_landlord_response.status_code == 200
+
+    # Seeker mode: seeker + legacy allowed, landlord denied.
+    profile.role = "seeker"
+    profile.save(update_fields=["role"])
+
+    seeker_response = client.get(
+        f"/api/v1/messages/threads/{seeker_thread.id}/"
+    )
+    landlord_while_seeker_response = client.get(
+        f"/api/v1/messages/threads/{landlord_thread.id}/"
+    )
+    legacy_while_seeker_response = client.get(
+        f"/api/v1/messages/threads/{legacy_thread.id}/"
+    )
+
+    assert seeker_response.status_code == 200
+    assert landlord_while_seeker_response.status_code == 404
+    assert legacy_while_seeker_response.status_code == 200
+
+    # Role switching must never delete the hidden threads.
+    assert MessageThread.objects.filter(
+        pk=landlord_thread.pk
+    ).exists()
+    assert MessageThread.objects.filter(
+        pk=seeker_thread.pk
+    ).exists()
+    assert MessageThread.objects.filter(
+        pk=legacy_thread.pk
+    ).exists()

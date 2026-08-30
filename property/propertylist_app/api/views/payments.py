@@ -343,6 +343,7 @@ def stripe_webhook(request):
                         body="Your listing payment was successful.",
                         target_type="payment",
                         target_id=payment.id,
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                     push_user_realtime_event(
@@ -555,6 +556,7 @@ def stripe_webhook(request):
                         body="Your listing payment was successful.",
                         target_type="payment",
                         target_id=payment.id,
+                        audience=Notification.Audience.LANDLORD,
                     )
 
                     push_user_realtime_event(

@@ -121,6 +121,7 @@ class AdminLandlordVerificationActionView(APIView):
                 target_type="identity_verification",
                 target_id=verification_request.id,
                 title="Identity verified",
+                audience=Notification.Audience.LANDLORD,
                 body=(
                     "Your identity verification has been approved."
                 ),
@@ -219,6 +220,7 @@ class AdminLandlordVerificationActionView(APIView):
                     "We couldn't approve your identity verification. "
                     "Review the reason and submit a new verification request."
                 ),
+                audience=Notification.Audience.LANDLORD,
             )
 
             push_user_realtime_event(

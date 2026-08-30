@@ -264,6 +264,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         notification_type: str,
         title: str,
         body: str,
+        audience: str = Notification.Audience.BOTH,
         target_type: str = "message",
         target_id=None,
     ):
@@ -297,6 +298,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 defaults={
                     "thread": thread,
                     "message": message,
+                    "audience": audience,
                     "title": title,
                     "body": body,
                 },
@@ -333,6 +335,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             if tenant_submitted_first
             else tenancy.tenant
         )
+        target_audience = (
+            Notification.Audience.LANDLORD
+            if tenant_submitted_first
+            else Notification.Audience.SEEKER
+        )
 
         sender_name = (
             sender.get_full_name().strip()
@@ -358,6 +365,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             notification_type="tenancy_proposed",
             title=notification_title,
             body=notification_body,
+            audience=target_audience,
             target_type="tenancy",
             target_id=tenancy.id,
         )
@@ -398,7 +406,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             else None
         )
 
-        for user in (tenancy.landlord, tenancy.tenant):
+        for user, audience in (
+            (tenancy.landlord, Notification.Audience.LANDLORD),
+            (tenancy.tenant, Notification.Audience.SEEKER),
+        ):
+
             notification = Notification.objects.create(
                 user=user,
                 type="tenancy_confirmed",
@@ -408,6 +420,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 message=tenancy_message,
                 title="Tenancy confirmed",
                 body=f"Tenancy confirmed for: {room_title}.",
+                audience=audience,
             )
 
             push_user_realtime_event(
@@ -455,6 +468,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.tenant,
+            audience=Notification.Audience.SEEKER,
             notification_type="tenancy_rejected_unverified",
             title="Tenancy information could not be verified",
             body=(
@@ -477,6 +491,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.landlord,
+            audience=Notification.Audience.LANDLORD,
             notification_type="tenancy_rejected_unverified",
             title="Tenancy claim rejected",
             body=(
@@ -508,6 +523,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.tenant,
+            audience=Notification.Audience.SEEKER,
             notification_type="tenancy_expired_unverified",
             title="Tenancy request expired",
             body=(
@@ -532,6 +548,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.landlord,
+            audience=Notification.Audience.LANDLORD,
             notification_type="tenancy_expired_unverified",
             title="Unverified tenancy request expired",
             body=(
@@ -559,9 +576,19 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     
 
     if event == "cancelled":
-        for user in (tenancy.landlord, tenancy.tenant):
+        for user, audience in (
+            (
+                tenancy.landlord,
+                Notification.Audience.LANDLORD,
+            ),
+            (
+                tenancy.tenant,
+                Notification.Audience.SEEKER,
+            ),
+        ):
             _create_notification(
                 user=user,
+                audience=audience,
                 notification_type="tenancy_cancelled",
                 title="Tenancy cancelled",
                 body=f"Tenancy cancelled for: {room_title}.",
@@ -594,6 +621,18 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         if editor_role == "landlord"
         else "landlord"
     )
+    
+    editor_audience = (
+        Notification.Audience.LANDLORD
+        if editor_role == "landlord"
+        else Notification.Audience.SEEKER
+    )
+
+    other_party_audience = (
+        Notification.Audience.SEEKER
+        if editor_role == "landlord"
+        else Notification.Audience.LANDLORD
+    )
 
     editor_name = editor.get_full_name().strip() or editor.username
     other_party_name = (
@@ -603,6 +642,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
     _create_notification(
         user=editor,
+        audience=editor_audience,
         notification_type="tenancy_updated",
         title="Tenancy information updated",
         body=(
@@ -626,6 +666,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
     _create_notification(
         user=other_party,
+        audience=other_party_audience,
         notification_type="tenancy_updated",
         title="Tenancy information changed",
         body=(
@@ -1056,6 +1097,13 @@ def task_tenancy_prompts_sweep() -> int:
                     target_type = "booking"
                     target_id = viewing_booking.id
 
+            audience = (
+                Notification.Audience.LANDLORD
+                if user.id == tenancy.landlord_id
+                else Notification.Audience.SEEKER
+            )
+
+
             reminder_exists = Notification.objects.filter(
                 user=user,
                 type="tenancy_still_living_check",
@@ -1076,6 +1124,7 @@ def task_tenancy_prompts_sweep() -> int:
                 message=prompt_message,
                 title=title,
                 body=body,
+                audience=audience,
             )
 
             # Realtime Envelope / Inbox update.
@@ -1319,6 +1368,7 @@ def task_tenancy_prompts_sweep() -> int:
                     defaults={
                         "thread": prompt_thread,
                         "message": prompt_message,
+                        "audience": Notification.Audience.LANDLORD,
                         "title": "Review available",
                         "body": (
                             f"You can now leave a review for "
@@ -1374,6 +1424,7 @@ def task_tenancy_prompts_sweep() -> int:
                     defaults={
                         "thread": prompt_thread,
                         "message": prompt_message,
+                        "audience": Notification.Audience.SEEKER,
                         "title": "Review available",
                         "body": (
                             f"You can now leave a review for "
@@ -1454,6 +1505,14 @@ def task_tenancy_prompts_sweep() -> int:
 
         if not reviewee:
             continue
+        
+        
+        if reviewee.id == tenancy.landlord_id:
+            reviewee_audience = Notification.Audience.LANDLORD
+        elif reviewee.id == tenancy.tenant_id:
+            reviewee_audience = Notification.Audience.SEEKER
+        else:
+            reviewee_audience = Notification.Audience.BOTH
 
         # -------------------------------------------------
         # Review revealed:
@@ -1484,6 +1543,7 @@ def task_tenancy_prompts_sweep() -> int:
                     "thread": prompt_thread,
                     "message": prompt_message,
                     "title": "Review now available",
+                    "audience": reviewee_audience,
                     "body": (
                         f"A review from your tenancy at "
                         f"{tenancy.room.title} is now available to view."

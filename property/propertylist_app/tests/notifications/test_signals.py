@@ -79,6 +79,16 @@ def test_new_message_signal_emits_realtime_message_and_notification():
 
     realtime.assert_any_call(
         recipient.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "thread_unread_count": 1,
+            "account_unread_total": 1,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
         "new_notification",
         {
             "kind": "message",
@@ -87,7 +97,7 @@ def test_new_message_signal_emits_realtime_message_and_notification():
         },
     )
 
-    assert realtime.call_count == 2
+    assert realtime.call_count == 3
 
     assert InAppNotification.objects.filter(
         user=recipient,
@@ -98,9 +108,9 @@ def test_new_message_signal_emits_realtime_message_and_notification():
     assert OutboundNotification.objects.filter(
         user=recipient,
         template_key="message.new",
-    ).count() == 1    
+    ).count() == 1
     
- 
+    
 def test_new_message_realtime_delivery_ignores_notification_preference():
     from propertylist_app.models import UserProfile
 
@@ -125,7 +135,7 @@ def test_new_message_realtime_delivery_ignores_notification_preference():
             message_type=Message.TYPE_TEXT,
         )
 
-    realtime.assert_called_once_with(
+    realtime.assert_any_call(
         recipient.id,
         "new_message",
         {
@@ -134,6 +144,18 @@ def test_new_message_realtime_delivery_ignores_notification_preference():
             "sender_id": sender.id,
         },
     )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "thread_unread_count": 1,
+            "account_unread_total": 1,
+        },
+    )
+
+    assert realtime.call_count == 2
 
     assert not InAppNotification.objects.filter(
         user=recipient,
@@ -144,16 +166,7 @@ def test_new_message_realtime_delivery_ignores_notification_preference():
     assert not OutboundNotification.objects.filter(
         user=recipient,
         template_key="message.new",
-    ).exists() 
- 
- 
- 
- 
- 
- 
- 
- 
- 
+    ).exists()
     
 
 def test_new_booking_signal_queues_owner_and_booker_emails():
@@ -172,12 +185,24 @@ def test_new_booking_signal_queues_owner_and_booker_emails():
             start = timezone.now()
             end = start + timedelta(hours=1)
 
-            Booking.objects.create(
+            booking = Booking.objects.create(
                 user=booker,
                 room=room,
                 start=start,
                 end=end,
             )
+            
+    thread = (
+        MessageThread.objects
+        .filter(room=room)
+        .filter(participants=owner)
+        .filter(participants=booker)
+        .distinct()
+        .get()
+    )
+
+    assert thread.landlord_id == owner.id
+    assert thread.seeker_id == booker.id        
 
     assert OutboundNotification.objects.filter(template_key="booking.new", user=owner).exists()
     assert OutboundNotification.objects.filter(template_key="booking.confirmation", user=booker).exists()

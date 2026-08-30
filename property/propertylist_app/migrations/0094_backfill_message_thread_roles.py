@@ -9,14 +9,19 @@ def backfill_message_thread_roles(apps, schema_editor):
 
     threads = (
         MessageThread.objects
-        .filter(room__isnull=False)
-        .select_related("room")
+        .filter(
+            landlord__isnull=True,
+            seeker__isnull=True,
+            room__isnull=False,
+        )
+        .select_related("room__property_owner")
         .prefetch_related("participants")
         .iterator(chunk_size=500)
     )
 
     for thread in threads:
-        landlord_id = getattr(thread.room, "property_owner_id", None)
+        room = thread.room
+        landlord_id = getattr(room, "property_owner_id", None)
 
         if not landlord_id:
             continue
@@ -26,12 +31,8 @@ def backfill_message_thread_roles(apps, schema_editor):
             for participant in thread.participants.all()
         ]
 
-        # Only classify a historical thread when the room relationship
-        # provides a deterministic result:
-        #
-        # - exactly two participants;
-        # - the room owner is one participant;
-        # - exactly one other participant is the seeker.
+        # Historical classification must be deterministic:
+        # exactly two participants, one of whom is the room owner.
         if len(participant_ids) != 2:
             continue
 

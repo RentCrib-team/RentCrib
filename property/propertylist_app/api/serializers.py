@@ -1696,6 +1696,7 @@ class RoomSerializer(serializers.ModelSerializer):
         - paid_until exists
         - paid_until has not expired
         """
+        
         today = date.today()
 
         # Rented / unavailable always takes priority.
@@ -2488,41 +2489,52 @@ class RoomSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
         """
-        Returns one of: 'draft', 'active', 'expired', 'hidden', 'rented'.
-        Used by the 'My Listings' page to group listings into tabs.
+        Authoritative state used by My Listings.
+
+        Returns one of:
+        draft, active, pending_review, expired, hidden, rented.
+
+        Lifecycle states take priority over image moderation:
+        a rented, draft, expired, or hidden listing must remain in that
+        lifecycle bucket regardless of its image status.
         """
+        # MyListingsView calculates the authoritative state at queryset level.
+        # Reuse it when present so filtering and serialized output can never
+        # disagree.
+        annotated_state = getattr(obj, "listing_state", None)
+        if annotated_state:
+            return str(annotated_state)
+        
+        
+        
         if not getattr(obj, "is_available", True):
             return "rented"
 
-        # If the queryset annotated a listing_state, reuse it.
-        state = getattr(obj, "listing_state", None)
-        if state:
-            return str(state)
-
         today = date.today()
 
-        # 1) Explicit hidden + past paid_until = expired
-        if obj.status == "hidden" and obj.paid_until and obj.paid_until < today:
-            return "expired"
+        if obj.status == "draft":
+            return "draft"
 
-        # 2) Hidden but not clearly expired
-        if obj.status == "hidden":
-            return "hidden"
-
-        # 3) No paid_until at all = draft (never paid / not live yet)
         if obj.paid_until is None:
             return "draft"
 
-        # 4) Paid until date in the past = expired
         if obj.paid_until < today:
             return "expired"
 
-        # 5) Otherwise treat as active
-        return "active"
+        if obj.status == "hidden":
+            return "hidden"
 
-    # --- New helpers for 'View Available Days' ---
+        # Only otherwise-live listings are classified by image moderation.
+        image_status = self._image_payload(obj)["image_status"]
 
+        if image_status != "approved":
+            return "pending_review"
 
+        if obj.status == "active" and obj.paid_until >= today:
+            return "active"
+
+        # Fail closed: an unknown combination must never be exposed as active.
+        return "draft"
 
 class MyListingRoomSerializer(RoomSerializer):
     viewing_summary = serializers.SerializerMethodField()
@@ -4776,6 +4788,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "id",
             "type",
             "title",
+            "audience",
             "body",
             "thread",
             "message",

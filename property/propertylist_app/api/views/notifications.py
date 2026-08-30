@@ -43,8 +43,17 @@ class NotificationListView(APIView):
         description="List notifications for the current user. Returns ok_response envelope (not paginated).",
     )
     def get(self, request):
-        qs = Notification.objects.filter(
+        profile, _ = UserProfile.objects.get_or_create(
             user=request.user
+        )
+        active_role = profile.role
+
+        qs = Notification.objects.filter(
+            user=request.user,
+            audience__in=[
+                active_role,
+                Notification.Audience.BOTH,
+            ],
         ).order_by(
             "is_read",
             "-created_at",
@@ -105,7 +114,20 @@ class NotificationMarkReadView(APIView):
         description="Mark a notification as read for the current user.",
     )
     def post(self, request, pk: int):
-        notif = get_object_or_404(Notification, pk=pk, user=request.user)
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
+        notif = get_object_or_404(
+            Notification,
+            pk=pk,
+            user=request.user,
+            audience__in=[
+                active_role,
+                Notification.Audience.BOTH,
+            ],
+        )
 
         if not notif.is_read:
             notif.is_read = True
@@ -141,17 +163,26 @@ class NotificationMarkAllReadView(APIView):
         description="Mark all notifications as read for the current user.",
     )
     def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
         updated_count = Notification.objects.filter(
             user=request.user,
-            is_read=False
+            audience__in=[
+                active_role,
+                Notification.Audience.BOTH,
+            ],
+            is_read=False,
         ).update(is_read=True)
 
         return ok_response(
             {"marked": updated_count},
             status_code=status.HTTP_200_OK,
         )
-    
-    
+        
+        
     
 class MyNotificationPreferencesView(APIView):
     permission_classes = [IsAuthenticated]
