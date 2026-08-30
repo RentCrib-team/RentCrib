@@ -1,0 +1,20 @@
+name: keep-alive
+
+on:
+  schedule:
+    # Every 10 minutes; Render's free tier sleeps after ~15 min idle.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render backend health endpoint
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
+            https://rentcrib-backend.onrender.com/health/)
+          echo "health status: $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::backend health returned $code"
+          fi

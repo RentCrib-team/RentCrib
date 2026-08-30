@@ -587,6 +587,24 @@ WEBHOOK_SECRETS = {
 # -----------------------------
 REDIS_URL = os.getenv("REDIS_CACHE_URL")
 
+
+def _default_db_redis(url):
+    # Redis Cloud free instances expose a single DB and reject
+    # `SELECT <n>` for numbered indexes ("DB index is out of range").
+    # Stripping the trailing /<n> makes clients use the default DB.
+    if not url or "://" not in url:
+        return url
+    scheme, _, rest = url.partition("://")
+    host, _, db = rest.rpartition("/")
+    if db.isdigit():
+        return f"{scheme}://{host}"
+    return url
+
+
+# Production deploys on the free Redis Cloud instance must drop the DB index.
+if not DEBUG and not TESTING:
+    REDIS_URL = _default_db_redis(REDIS_URL)
+
 ASGI_APPLICATION = "property.asgi.application"
 
 CHANNEL_LAYERS = {
@@ -636,6 +654,10 @@ if not DEBUG and not TESTING:
 # fallback for local dev only
 CELERY_BROKER_URL = CELERY_BROKER_URL or "redis://127.0.0.1:6379/0"
 CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND or "redis://127.0.0.1:6379/1"
+
+if not DEBUG and not TESTING:
+    CELERY_BROKER_URL = _default_db_redis(CELERY_BROKER_URL)
+    CELERY_RESULT_BACKEND = _default_db_redis(CELERY_RESULT_BACKEND)
 
 CACHE_DEFAULT_TTL = 60
 CACHE_SEARCH_TTL = 120
