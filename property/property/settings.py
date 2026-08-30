@@ -172,8 +172,6 @@ IDEAL_POSTCODES_API_KEY = os.getenv("IDEAL_POSTCODES_API_KEY", "").strip()
 
 GOOGLE_WEB_CLIENT_ID = os.getenv("GOOGLE_WEB_CLIENT_ID", "").strip()
 GOOGLE_IOS_CLIENT_ID = os.getenv("GOOGLE_IOS_CLIENT_ID", "").strip()
-CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "False").lower() == "true"
-CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "").strip()
 
 GOOGLE_ALLOWED_CLIENT_IDS = [
     client_id
@@ -459,16 +457,6 @@ SIMPLE_JWT = {
 # -----------------------------
 # Security / Abuse controls
 # -----------------------------
-ENABLE_CAPTCHA = os.getenv("ENABLE_CAPTCHA", "true" if not DEBUG else "false").lower() in {"1", "true", "yes"}
-CAPTCHA_PROVIDER = os.getenv("CAPTCHA_PROVIDER", "recaptcha")
-CAPTCHA_SECRET = os.getenv("CAPTCHA_SECRET", "")
-
-if not DEBUG and CAPTCHA_ENABLED and not CAPTCHA_SECRET:
-    import warnings
-    warnings.warn(
-        "CAPTCHA_SECRET missing (captcha disabled in non-production-safe mode)",
-        RuntimeWarning
-    )
 
 
 ACCOUNT_DELETION_GRACE_DAYS = 7

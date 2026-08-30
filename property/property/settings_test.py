@@ -4,7 +4,7 @@ from celery.schedules import crontab
 
 # Make tests predictable
 DEBUG = True
-ENABLE_CAPTCHA = False  # tests toggle this explicitly where needed
+TURNSTILE_REQUIRED = False  # tests toggle this explicitly where needed
 
 
 

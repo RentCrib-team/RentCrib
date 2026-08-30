@@ -28,7 +28,7 @@ def test_login_lockout_after_repeated_failures(settings):
 
     settings.LOGIN_FAIL_LIMIT = 3
     settings.LOGIN_LOCKOUT_SECONDS = 600
-    settings.ENABLE_CAPTCHA = False
+    settings.TURNSTILE_REQUIRED = False
 
     user = User.objects.create_user(
         username="lockuser",
@@ -148,7 +148,6 @@ def test_login_duplicate_email_returns_controlled_error_not_500(
     """
     caches["default"].clear()
 
-    settings.ENABLE_CAPTCHA = False
     settings.TURNSTILE_REQUIRED = False
     settings.LOGIN_FAIL_LIMIT = 10
     settings.LOGIN_LOCKOUT_SECONDS = 600

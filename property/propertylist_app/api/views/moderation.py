@@ -17,7 +17,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 
-from propertylist_app.services.captcha import verify_captcha
+from propertylist_app.services.turnstile import verify_turnstile
 from propertylist_app.models import AuditLog, Report, Room, Booking, Payment, Message, MessageThread
 from propertylist_app.api.permissions import IsModerationAdmin, IsOpsAdmin
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
@@ -63,10 +63,10 @@ class ReportCreateView(generics.CreateAPIView):
     throttle_scope = "report-create"
 
     def perform_create(self, serializer):
-        if settings.ENABLE_CAPTCHA:
-            token = (self.request.data.get("captcha_token") or "").strip()
-            if not verify_captcha(token, self.request.META.get("REMOTE_ADDR")):
-                raise ValidationError({"captcha_token": "CAPTCHA verification failed."})
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            token = (self.request.data.get("turnstile_token") or "").strip()
+            if not verify_turnstile(token, self.request.META.get("REMOTE_ADDR")):
+                raise ValidationError({"turnstile_token": "CAPTCHA verification failed."})
 
         report = serializer.save()
 

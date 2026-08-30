@@ -49,7 +49,6 @@ from propertylist_app.services.turnstile import verify_turnstile
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
 #Project helpers/services
-from propertylist_app.services.captcha import verify_captcha
 from propertylist_app.services.security import (
     clear_login_failures,
     is_locked_out,
@@ -73,8 +72,6 @@ from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
 )
 from .common import ok_response, error_response
-
-from propertylist_app.services.turnstile import verify_turnstile
 
 #Project serializers/models
 from propertylist_app.models import EmailOTP, IdempotencyKey, UserProfile
@@ -512,9 +509,9 @@ class RegistrationView(generics.CreateAPIView):
     )
     def create(self, request, *args, **kwargs):
         # Optional CAPTCHA
-        if getattr(settings, "ENABLE_CAPTCHA", False):
-            token = (request.data.get("captcha_token") or "").strip()
-            if not views_mod.verify_captcha(token, request.META.get("REMOTE_ADDR", "")):
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            token = (request.data.get("turnstile_token") or "").strip()
+            if not verify_turnstile(token, request.META.get("REMOTE_ADDR", "")):
                 return error_response(
                     message="CAPTCHA verification failed.",
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -620,43 +617,7 @@ class RegistrationView(generics.CreateAPIView):
         )
 
 
-    # def perform_create(self, serializer):
-    #     request = self.request
-
-    #     turnstile_token = request.data.get("turnstile_token")
-
-    #     if not turnstile_token:
-    #         raise ValidationError("Missing security verification")
-
-    #     if not verify_turnstile(
-    #         turnstile_token,
-    #         request.META.get("REMOTE_ADDR")
-    #     ):
-    #         raise ValidationError("Security check failed")
-
-    #     serializer.save()
-
-        
-
-        
-    # TEMPORARY (STAGING ONLY)
-    # Turnstile enforcement is disabled while frontend/mobile complete integration.
-    # Re-enable before production launch.    
     def perform_create(self, serializer):
-        request = self.request
-
-        if getattr(settings, "TURNSTILE_REQUIRED", False):
-            turnstile_token = request.data.get("turnstile_token")
-
-            if not turnstile_token:
-                raise ValidationError("Missing security verification")
-
-            if not verify_turnstile(
-                turnstile_token,
-                request.META.get("REMOTE_ADDR")
-            ):
-                raise ValidationError("Security check failed")
-
         serializer.save()
 
     
@@ -1612,9 +1573,9 @@ class PasswordResetRequestView(APIView):
         description="Request a password reset email. Returns ok_response envelope.",
     )
     def post(self, request):
-        if settings.ENABLE_CAPTCHA:
-            token = (request.data.get("captcha_token") or "").strip()
-            if not views_mod.verify_captcha(token, request.META.get("REMOTE_ADDR")):
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            token = (request.data.get("turnstile_token") or "").strip()
+            if not verify_turnstile(token, request.META.get("REMOTE_ADDR")):
                 return error_response(
                     message="CAPTCHA verification failed.",
                     status_code=status.HTTP_400_BAD_REQUEST,

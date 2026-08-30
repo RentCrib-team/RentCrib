@@ -41,7 +41,7 @@ from django.db.models import Q, Exists, OuterRef, Prefetch, Count, Case, When
 
 
 from propertylist_app.validators import validate_radius_miles, haversine_miles
-from propertylist_app.services.captcha import verify_captcha
+from propertylist_app.services.turnstile import verify_turnstile
 from propertylist_app.services.geo import geocode_postcode_cached
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
@@ -1512,9 +1512,9 @@ class EmailOTPResendView(APIView):
         ser = EmailOTPResendSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
 
-        if getattr(settings, "ENABLE_CAPTCHA", False):
-            token = (request.data.get("captcha_token") or "").strip()
-            if not verify_captcha(token, request.META.get("REMOTE_ADDR", "")):
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            token = (request.data.get("turnstile_token") or "").strip()
+            if not verify_turnstile(token, request.META.get("REMOTE_ADDR", "")):
                 return Response(
                     {"detail": "CAPTCHA verification failed."},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -1599,9 +1599,9 @@ class PhoneOTPStartView(APIView):
         serializer = PhoneOTPStartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        if getattr(settings, "ENABLE_CAPTCHA", False):
-            token = (request.data.get("captcha_token") or "").strip()
-            if not verify_captcha(token, request.META.get("REMOTE_ADDR", "")):
+        if getattr(settings, "TURNSTILE_REQUIRED", False):
+            token = (request.data.get("turnstile_token") or "").strip()
+            if not verify_turnstile(token, request.META.get("REMOTE_ADDR", "")):
                 return Response(
                     {"detail": "CAPTCHA verification failed."},
                     status=status.HTTP_400_BAD_REQUEST,

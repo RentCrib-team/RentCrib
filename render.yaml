@@ -52,10 +52,12 @@ services:
         sync: false
       - key: CSRF_TRUSTED_ORIGINS
         sync: false
-      - key: ENABLE_CAPTCHA
-        value: "true"
-      - key: CAPTCHA_SECRET
+      - key: TURNSTILE_SITE_KEY
         sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      - key: TURNSTILE_REQUIRED
+        value: "true"
       - key: EMAIL_HOST
         sync: false
       - key: EMAIL_HOST_USER

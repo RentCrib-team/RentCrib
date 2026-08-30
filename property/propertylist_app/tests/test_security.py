@@ -130,7 +130,7 @@ class TestRegisterThrottle(APITestCase):
 
 class TestRegisterThrottle(APITestCase):
     @override_settings(
-        ENABLE_CAPTCHA=False,  # keep CAPTCHA out of this test
+        TURNSTILE_REQUIRED=False,  # keep CAPTCHA out of this test
 
         CACHES={
             "default": {
@@ -209,7 +209,7 @@ class TestCaptcha(APITestCase):
         self.client = APIClient()
 
     @override_settings(
-        ENABLE_CAPTCHA=True,
+        TURNSTILE_REQUIRED=True,
         REST_FRAMEWORK={
             "DEFAULT_AUTHENTICATION_CLASSES": (
                 "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -236,20 +236,20 @@ class TestCaptcha(APITestCase):
             "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
         },
     )
-    @patch("propertylist_app.api.views.verify_captcha", return_value=False)  # patch where it's called
-    def test_login_captcha_fail_blocks(self, mocked_verify):
+    @patch("propertylist_app.api.views.auth.verify_turnstile", return_value=False)
+    def test_login_turnstile_fail_blocks(self, mocked_verify):
         url = reverse("v1:auth-login")
         resp = self.client.post(
             url,
-            {"identifier": "any", "password": "any", "captcha_token": "bad-token"},
+            {"identifier": "any", "password": "any", "turnstile_token": "bad-token"},
             format="json",
             **_auth_headers(ip="198.51.100.55"),
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("CAPTCHA", (resp.data.get("detail") or "").upper())
+        self.assertIn("SECURITY CHECK FAILED", (resp.data.get("detail") or "").upper())
 
     @override_settings(
-        ENABLE_CAPTCHA=True,
+        TURNSTILE_REQUIRED=True,
         REST_FRAMEWORK={
             "DEFAULT_AUTHENTICATION_CLASSES": (
                 "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -276,25 +276,23 @@ class TestCaptcha(APITestCase):
             "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
         },
     )
-    @patch("propertylist_app.api.views.verify_captcha", return_value=True)  # patch where it's called
-    def test_register_captcha_success_allows(self, mocked_verify):
+    @patch("propertylist_app.api.views.auth.verify_turnstile", return_value=True)
+    def test_register_turnstile_pass_allows(self, mocked_verify):
         url = reverse("v1:auth-register")
         resp = self.client.post(
-        url,
-        {
-            "username": "captchauser",
-            "email": "cap@example.com",
-            "password": "Pass12345!",
-            "captcha_token": "ok",
-            "terms_accepted": True,
-            "terms_version": "v1",
-            "role": "seeker",
-        },
-        format="json",
-        **_auth_headers(ip="198.51.100.55"),
-    )
-
-
+            url,
+            {
+                "username": "turnstileuser",
+                "email": "ts@example.com",
+                "password": "Pass12345!",
+                "turnstile_token": "ok",
+                "terms_accepted": True,
+                "terms_version": "v1",
+                "role": "seeker",
+            },
+            format="json",
+            **_auth_headers(ip="198.51.100.55"),
+        )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
 
 
