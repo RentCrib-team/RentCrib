@@ -1,12 +1,12 @@
 from django.db import models
 from django.db.models import Avg, Count
+from django.http import Http404
 from django.utils import timezone
 
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView
-from rest_framework.exceptions import PermissionDenied
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer, OpenApiParameter
 
@@ -120,9 +120,8 @@ class ReviewListView(generics.ListAPIView):
             Review.objects.select_related("reviewer", "reviewee", "tenancy")
             .filter(active=True)
             .filter(
-                models.Q(reveal_at__lte=now)
-                | models.Q(reviewer_id=user.id)
-                | models.Q(reviewee_id=user.id)
+                models.Q(reviewer_id=user.id)
+                | models.Q(reviewee_id=user.id, reveal_at__lte=now)
             )
             .order_by("-submitted_at")
         )
@@ -197,14 +196,19 @@ class ReviewDetailView(generics.RetrieveAPIView):
         user = self.request.user
         now = timezone.now()
 
-        is_visible = (
-            (obj.reveal_at and obj.reveal_at <= now) or
-            (obj.reviewer_id == user.id) or
-            (obj.reviewee_id == user.id)
-        )
-        if not is_visible:
-            raise PermissionDenied("You do not have permission to view this review yet.")
-        return obj
+        # A review is private to its two parties. The writer may always read
+        # their own review; the subject (reviewee) only after the double-blind
+        # window closes. Third parties get 404 either way, before and after
+        # reveal, so the endpoint never confirms a review id exists.
+        if obj.reviewer_id == user.id:
+            return obj
+        if (
+            obj.reviewee_id == user.id
+            and obj.reveal_at is not None
+            and obj.reveal_at <= now
+        ):
+            return obj
+        raise Http404("No Review matches the given query.")
 
 
   
