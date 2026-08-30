@@ -420,4 +420,121 @@ def test_bulk_thread_mark_read_updates_realtime_and_account_total(
             },
             "account_unread_total": 1,
         },
-    )    
+    )  
+    
+def test_new_message_realtime_is_partitioned_by_active_role():
+    from propertylist_app.models import UserProfile
+
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create(
+        landlord=recipient,
+        seeker=sender,
+    )
+    thread.participants.add(sender, recipient)
+
+    NotificationTemplate.objects.create(
+        key="message.new",
+        channel="email",
+        subject="New message",
+        body="Message",
+        is_active=True,
+    )
+
+    profile, _ = UserProfile.objects.get_or_create(
+        user=recipient
+    )
+
+    # Recipient is the landlord in this thread but is
+    # currently using RentCrib in seeker mode.
+    profile.role = "seeker"
+    profile.save(update_fields=["role"])
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        hidden_message = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Landlord message while seeker mode is active",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    # The message and notification must still be stored.
+    assert Message.objects.filter(
+        pk=hidden_message.pk,
+    ).exists()
+
+    hidden_notification = InAppNotification.objects.get(
+        user=recipient,
+        thread=thread,
+        message=hidden_message,
+    )
+
+    assert (
+        hidden_notification.audience
+        == InAppNotification.Audience.LANDLORD
+    )
+
+    # Email remains independent of the currently selected role.
+    assert OutboundNotification.objects.filter(
+        user=recipient,
+        template_key="message.new",
+    ).count() == 1
+
+    # But no landlord realtime event may leak into seeker mode.
+    assert realtime.call_count == 0
+
+    # Switch the same account back to landlord mode.
+    profile.role = "landlord"
+    profile.save(update_fields=["role"])
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        visible_message = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Landlord message while landlord mode is active",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_message",
+        {
+            "message_id": visible_message.id,
+            "thread_id": thread.id,
+            "sender_id": sender.id,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "thread_unread_count": 2,
+            "account_unread_total": 2,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_notification",
+        {
+            "kind": "message",
+            "message_id": visible_message.id,
+            "thread_id": thread.id,
+        },
+    )
+
+    assert realtime.call_count == 3
+
+    # Switching roles did not delete the first message.
+    assert Message.objects.filter(
+        id__in=[
+            hidden_message.id,
+            visible_message.id,
+        ]
+    ).count() == 2      

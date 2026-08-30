@@ -10,6 +10,7 @@ from propertylist_app.models import (
     MessageRead,
     MessageThread,
     Notification,
+    UserProfile,
 )
 
 
@@ -253,4 +254,173 @@ def test_message_stats_counts_system_messages_consistently(
     assert read_stats["total_unread"] == 0    
     
     
-    
+@pytest.mark.django_db
+def test_f4_inbox_is_partitioned_by_active_role(
+    user_factory,
+):
+    client = APIClient()
+
+    user = user_factory(
+        username="dual_role_inbox_user",
+        email="dual-role-inbox@example.com",
+    )
+    landlord_contact = user_factory(
+        username="landlord_side_contact",
+        email="landlord-side@example.com",
+    )
+    seeker_contact = user_factory(
+        username="seeker_side_contact",
+        email="seeker-side@example.com",
+    )
+    legacy_contact = user_factory(
+        username="legacy_side_contact",
+        email="legacy-side@example.com",
+    )
+
+    profile, _ = UserProfile.objects.get_or_create(
+        user=user
+    )
+
+    landlord_notification = Notification.objects.create(
+        user=user,
+        type="confirmation",
+        title="Landlord notification",
+        body="Landlord only",
+        audience=Notification.Audience.LANDLORD,
+        is_read=False,
+    )
+    seeker_notification = Notification.objects.create(
+        user=user,
+        type="confirmation",
+        title="Seeker notification",
+        body="Seeker only",
+        audience=Notification.Audience.SEEKER,
+        is_read=False,
+    )
+    both_notification = Notification.objects.create(
+        user=user,
+        type="confirmation",
+        title="Both notification",
+        body="Both roles",
+        audience=Notification.Audience.BOTH,
+        is_read=False,
+    )
+
+    landlord_thread = MessageThread.objects.create(
+        landlord=user,
+        seeker=landlord_contact,
+    )
+    landlord_thread.participants.set(
+        [user, landlord_contact]
+    )
+    Message.objects.create(
+        thread=landlord_thread,
+        sender=landlord_contact,
+        body="Landlord thread message",
+    )
+
+    seeker_thread = MessageThread.objects.create(
+        landlord=seeker_contact,
+        seeker=user,
+    )
+    seeker_thread.participants.set(
+        [user, seeker_contact]
+    )
+    Message.objects.create(
+        thread=seeker_thread,
+        sender=seeker_contact,
+        body="Seeker thread message",
+    )
+
+    legacy_thread = MessageThread.objects.create()
+    legacy_thread.participants.set(
+        [user, legacy_contact]
+    )
+    Message.objects.create(
+        thread=legacy_thread,
+        sender=legacy_contact,
+        body="Legacy thread message",
+    )
+
+    client.force_authenticate(user=user)
+    url = reverse("api:inbox-list")
+
+    # Landlord mode
+    profile.role = "landlord"
+    profile.save(update_fields=["role"])
+
+    landlord_response = client.get(
+        url,
+        {"limit": 100},
+    )
+    assert landlord_response.status_code == 200
+
+    landlord_items = landlord_response.data.get("data") or []
+
+    landlord_notification_ids = {
+        item.get("notification_id")
+        for item in landlord_items
+        if item.get("kind") == "notification"
+    }
+    landlord_thread_ids = {
+        item.get("thread_id")
+        for item in landlord_items
+        if item.get("kind") == "thread"
+    }
+
+    assert landlord_notification.id in landlord_notification_ids
+    assert both_notification.id in landlord_notification_ids
+    assert seeker_notification.id not in landlord_notification_ids
+
+    assert landlord_thread.id in landlord_thread_ids
+    assert legacy_thread.id in landlord_thread_ids
+    assert seeker_thread.id not in landlord_thread_ids
+
+    # Seeker mode
+    profile.role = "seeker"
+    profile.save(update_fields=["role"])
+
+    seeker_response = client.get(
+        url,
+        {"limit": 100},
+    )
+    assert seeker_response.status_code == 200
+
+    seeker_items = seeker_response.data.get("data") or []
+
+    seeker_notification_ids = {
+        item.get("notification_id")
+        for item in seeker_items
+        if item.get("kind") == "notification"
+    }
+    seeker_thread_ids = {
+        item.get("thread_id")
+        for item in seeker_items
+        if item.get("kind") == "thread"
+    }
+
+    assert seeker_notification.id in seeker_notification_ids
+    assert both_notification.id in seeker_notification_ids
+    assert landlord_notification.id not in seeker_notification_ids
+
+    assert seeker_thread.id in seeker_thread_ids
+    assert legacy_thread.id in seeker_thread_ids
+    assert landlord_thread.id not in seeker_thread_ids
+
+    # Switching roles only changes visibility.
+    # Nothing is deleted.
+    assert Notification.objects.filter(
+        id__in=[
+            landlord_notification.id,
+            seeker_notification.id,
+            both_notification.id,
+        ]
+    ).count() == 3
+
+    assert MessageThread.objects.filter(
+        id__in=[
+            landlord_thread.id,
+            seeker_thread.id,
+            legacy_thread.id,
+        ]
+    ).count() == 3    

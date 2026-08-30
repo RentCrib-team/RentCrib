@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from propertylist_app.models import MessageThread, Message
+from propertylist_app.models import MessageThread, Message, UserProfile
 
 
 pytestmark = pytest.mark.django_db
@@ -407,6 +407,12 @@ def test_tenancy_proposal_message_body_is_viewer_specific(
     # Landlord is the counterparty:
     # must see the original actionable copy.
     # -------------------------------------------------
+    landlord_profile, _ = UserProfile.objects.get_or_create(
+        user=landlord
+    )
+    landlord_profile.role = "landlord"
+    landlord_profile.save(update_fields=["role"])
+
     landlord_client = APIClient()
     landlord_client.force_authenticate(user=landlord)
 

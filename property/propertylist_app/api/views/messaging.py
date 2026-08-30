@@ -1096,15 +1096,13 @@ class MessageStatsView(APIView):
                 },
             )
         },
-        description="Return message statistics for the authenticated user, including total threads, total unread messages, and good-fit thread counts.",
+            description="Return message statistics for the authenticated user, including total threads, total unread messages, and good-fit thread counts.",
     )
     def get(self, request):
         user = request.user
 
-        # Base threads: I am a participant
-        base_threads = MessageThread.objects.filter(
-            participants=user
-        )
+        # Base threads: visible in my active role
+        base_threads = _role_scoped_threads(user)
 
         # Exclude threads that *I* put in Bin
         bin_thread_ids = list(
@@ -1417,9 +1415,7 @@ class ThreadMarkReadView(APIView):
         # - normal messages count when another user sent them
         # - system_event messages count for every participant until that
         #   participant has their own MessageRead row
-        base_threads = MessageThread.objects.filter(
-            participants=request.user,
-        )
+        base_threads = _role_scoped_threads(request.user)
 
         bin_thread_ids = list(
             MessageThreadState.objects
@@ -1495,10 +1491,9 @@ class ThreadsBulkMarkReadView(APIView):
             )
 
         threads = list(
-            MessageThread.objects
+            _role_scoped_threads(request.user)
             .filter(
                 id__in=thread_ids,
-                participants=request.user,
             )
             .distinct()
         )
@@ -1564,9 +1559,7 @@ class ThreadsBulkMarkReadView(APIView):
                 },
             )
 
-        base_threads = MessageThread.objects.filter(
-            participants=request.user,
-        )
+        base_threads = _role_scoped_threads(request.user)
 
         bin_thread_ids = list(
             MessageThreadState.objects

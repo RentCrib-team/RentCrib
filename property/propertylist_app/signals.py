@@ -360,84 +360,11 @@ def message_created_create_notifications(
     message_snippet = instance.body[:200] if instance.body else ""
 
     for user in recipients:
-        # Realtime chat delivery is core messaging behaviour.
-        # It must not depend on bell/email notification preferences.
-        push_user_realtime_event(
-            user.id,
-            "new_message",
-            {
-                "message_id": instance.id,
-                "thread_id": thread.id,
-                "sender_id": instance.sender_id,
-            },
-        )
-        thread_unread_count = (
-            Message.objects
-            .filter(thread=thread)
-            .filter(
-                Q(metadata__system_event=True)
-                | ~Q(sender=user)
-            )
-            .exclude(reads__user=user)
-            .distinct()
-            .count()
-        )
-
-        base_threads = MessageThread.objects.filter(
-            participants=user,
-        )
-
-        bin_thread_ids = list(
-            MessageThreadState.objects
-            .filter(
-                user=user,
-                in_bin=True,
-            )
-            .values_list(
-                "thread_id",
-                flat=True,
-            )
-        )
-
-        if bin_thread_ids:
-            base_threads = base_threads.exclude(
-                id__in=bin_thread_ids,
-            )
-
-        account_unread_total = (
-            Message.objects
-            .filter(thread__in=base_threads)
-            .filter(
-                Q(metadata__system_event=True)
-                | ~Q(sender=user)
-            )
-            .exclude(reads__user=user)
-            .distinct()
-            .count()
-        )
-
-        push_user_realtime_event(
-            user.id,
-            "unread_count_changed",
-            {
-                "thread_id": thread.id,
-                "thread_unread_count": thread_unread_count,
-                "account_unread_total": account_unread_total,
-            },
-        )
-
         profile, _ = UserProfile.objects.get_or_create(
             user=user
         )
 
-        if not getattr(profile, "notify_messages", True):
-            continue
-
-        notification_users.append(user)
-
-
-
-        notification_audience = (
+        thread_audience = (
             Notification.Audience.LANDLORD
             if thread.landlord_id == user.id
             else (
@@ -446,6 +373,108 @@ def message_created_create_notifications(
                 else Notification.Audience.BOTH
             )
         )
+
+        realtime_visible = (
+            thread_audience == Notification.Audience.BOTH
+            or profile.role == thread_audience
+        )
+
+        if realtime_visible:
+            # Realtime chat delivery is core messaging behaviour.
+            # It must not depend on bell/email notification preferences.
+            push_user_realtime_event(
+                user.id,
+                "new_message",
+                {
+                    "message_id": instance.id,
+                    "thread_id": thread.id,
+                    "sender_id": instance.sender_id,
+                },
+            )
+
+            thread_unread_count = (
+                Message.objects
+                .filter(thread=thread)
+                .filter(
+                    Q(metadata__system_event=True)
+                    | ~Q(sender=user)
+                )
+                .exclude(reads__user=user)
+                .distinct()
+                .count()
+            )
+
+            if profile.role == "landlord":
+                base_threads = MessageThread.objects.filter(
+                    participants=user,
+                ).filter(
+                    Q(landlord=user)
+                    | Q(
+                        landlord__isnull=True,
+                        seeker__isnull=True,
+                    )
+                )
+            else:
+                base_threads = MessageThread.objects.filter(
+                    participants=user,
+                ).filter(
+                    Q(seeker=user)
+                    | Q(
+                        landlord__isnull=True,
+                        seeker__isnull=True,
+                    )
+                )
+
+            bin_thread_ids = list(
+                MessageThreadState.objects
+                .filter(
+                    user=user,
+                    in_bin=True,
+                )
+                .values_list(
+                    "thread_id",
+                    flat=True,
+                )
+            )
+
+            if bin_thread_ids:
+                base_threads = base_threads.exclude(
+                    id__in=bin_thread_ids,
+                )
+
+            account_unread_total = (
+                Message.objects
+                .filter(thread__in=base_threads)
+                .filter(
+                    Q(metadata__system_event=True)
+                    | ~Q(sender=user)
+                )
+                .exclude(reads__user=user)
+                .distinct()
+                .count()
+            )
+
+            push_user_realtime_event(
+                user.id,
+                "unread_count_changed",
+                {
+                    "thread_id": thread.id,
+                    "thread_unread_count": thread_unread_count,
+                    "account_unread_total": account_unread_total,
+                },
+            )
+
+        if not getattr(profile, "notify_messages", True):
+            continue
+
+        if not getattr(profile, "notify_messages", True):
+            continue
+
+        notification_users.append(user)
+
+
+
+        notification_audience = thread_audience
 
         notifications_to_create.append(
             Notification(
@@ -470,15 +499,35 @@ def message_created_create_notifications(
 
     # Notify the frontend only after the notification rows exist.
     for user in notification_users:
-        push_user_realtime_event(
-            user.id,
-            "new_notification",
-            {
-                "kind": "message",
-                "message_id": instance.id,
-                "thread_id": thread.id,
-            },
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
         )
+
+        notification_audience = (
+            Notification.Audience.LANDLORD
+            if thread.landlord_id == user.id
+            else (
+                Notification.Audience.SEEKER
+                if thread.seeker_id == user.id
+                else Notification.Audience.BOTH
+            )
+        )
+
+        realtime_visible = (
+            notification_audience == Notification.Audience.BOTH
+            or profile.role == notification_audience
+        )
+
+        if realtime_visible:
+            push_user_realtime_event(
+                user.id,
+                "new_notification",
+                {
+                    "kind": "message",
+                    "message_id": instance.id,
+                    "thread_id": thread.id,
+                },
+            )
 
         _queue_email(
             user=user,

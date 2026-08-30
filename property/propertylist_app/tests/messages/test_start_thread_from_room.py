@@ -351,6 +351,12 @@ def test_same_pair_different_rooms_keep_distinct_context():
     assert second_item["relationship_id"] == second_room.id
     assert second_item["property_id"] == second_room.id
 
+    landlord_profile, _ = UserProfile.objects.get_or_create(
+        user=landlord
+    )
+    landlord_profile.role = "landlord"
+    landlord_profile.save(update_fields=["role"])
+
     client.force_authenticate(user=landlord)
 
     detail_response = client.get(
