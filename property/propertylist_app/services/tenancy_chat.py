@@ -183,6 +183,7 @@ def post_tenancy_event(
         body=body,
         message_type=message_type,
         metadata={
+          "system_event": True,
           "tenancy_id": tenancy.pk,
           "event_type": event_type,
           "event_key": event_key,

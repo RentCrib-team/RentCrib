@@ -13,9 +13,9 @@ from propertylist_app.models import (
     Room,
     Review,
     MessageThreadState,
+    MessageThread,
     Message,
     Booking,
-     
 )
 
 from propertylist_app.services.tasks import (
@@ -442,6 +442,99 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                     ),
                 },
             )
+            
+            # Tenancy confirmation is also an Inbox/envelope event.
+            # Structured tenancy messages do not pass through the ordinary
+            # TYPE_TEXT Message signal, so publish the message/unread events here.
+            if confirmation_thread and tenancy_message:
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": tenancy_message.id,
+                        "thread_id": confirmation_thread.id,
+                        "sender_id": tenancy_message.sender_id,
+                    },
+                )
+
+                thread_unread_count = (
+                    Message.objects
+                    .filter(thread=confirmation_thread)
+                    .filter(
+                        Q(metadata__system_event=True)
+                        | ~Q(sender=user)
+                    )
+                    .exclude(reads__user=user)
+                    .distinct()
+                    .count()
+                )
+
+                if audience == Notification.Audience.LANDLORD:
+                    thread_queryset = (
+                        MessageThread.objects
+                        .filter(participants=user)
+                        .filter(
+                            Q(landlord=user)
+                            | Q(
+                                landlord__isnull=True,
+                                seeker__isnull=True,
+                            )
+                        )
+                    )
+                else:
+                    thread_queryset = (
+                        MessageThread.objects
+                        .filter(participants=user)
+                        .filter(
+                            Q(seeker=user)
+                            | Q(
+                                landlord__isnull=True,
+                                seeker__isnull=True,
+                            )
+                        )
+                    )
+
+                bin_thread_ids = list(
+                    MessageThreadState.objects
+                    .filter(
+                        user=user,
+                        in_bin=True,
+                    )
+                    .values_list(
+                        "thread_id",
+                        flat=True,
+                    )
+                )
+
+                if bin_thread_ids:
+                    thread_queryset = thread_queryset.exclude(
+                        id__in=bin_thread_ids,
+                    )
+
+                account_unread_total = (
+                    Message.objects
+                    .filter(thread__in=thread_queryset)
+                    .filter(
+                        Q(metadata__system_event=True)
+                        | ~Q(sender=user)
+                    )
+                    .exclude(reads__user=user)
+                    .distinct()
+                    .count()
+                )
+
+                push_user_realtime_event(
+                    user.id,
+                    "unread_count_changed",
+                    {
+                        "thread_id": confirmation_thread.id,
+                        "thread_unread_count": thread_unread_count,
+                        "account_unread_total": account_unread_total,
+                    },
+                )
+            
+            
+            
 
             _maybe_queue(
                 user,
