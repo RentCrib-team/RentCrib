@@ -1678,7 +1678,10 @@ def task_tenancy_prompts_sweep() -> int:
                 deep_link=f"/app/tenancies/{tenancy.id}/reviews",
 
                 # Web/Vercel route used by email button.
-                cta_path=f"/reviews/{review.id}",
+                cta_path=(
+                    f"/reviews/{review.id}?role="
+                    f"{'landlord' if reviewee_audience == Notification.Audience.LANDLORD else 'seeker'}"
+                ),
 
                 room_title=tenancy.room.title,
                 tenancy_id=tenancy.id,
