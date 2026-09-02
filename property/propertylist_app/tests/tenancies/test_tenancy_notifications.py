@@ -123,6 +123,99 @@ def test_tenancy_confirmation_creates_notifications_for_both_users(user_factory,
     assert user_ids == {landlord.id, tenant.id}
 
 
+
+
+
+def test_tenancy_confirmation_pushes_realtime_envelope_events_for_landlord(
+    user_factory,
+    room_factory,
+    monkeypatch,
+):
+    Tenancy = __import__("django.apps").apps.apps.get_model(
+        "propertylist_app",
+        "Tenancy",
+    )
+
+    landlord = user_factory(username="nt_landlord_confirmed_realtime")
+    tenant = user_factory(username="nt_tenant_confirmed_realtime")
+    room = room_factory(property_owner=landlord)
+
+    _make_booking(tenant, room)
+
+    tenancy = _make_tenancy(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=tenant,
+        status=Tenancy.STATUS_CONFIRMED,
+    )
+
+    pushed_events = []
+
+    def fake_push_user_realtime_event(user_id, event_type, data):
+        pushed_events.append(
+            {
+                "user_id": user_id,
+                "event_type": event_type,
+                "data": data,
+            }
+        )
+
+    monkeypatch.setattr(
+        "propertylist_app.tasks.push_user_realtime_event",
+        fake_push_user_realtime_event,
+    )
+
+    created = task_send_tenancy_notification(
+        tenancy.id,
+        "confirmed",
+    )
+
+    assert created == 2
+
+    landlord_events = [
+        event
+        for event in pushed_events
+        if event["user_id"] == landlord.id
+    ]
+
+    event_types = {
+        event["event_type"]
+        for event in landlord_events
+    }
+
+    assert "new_notification" in event_types
+    assert "new_message" in event_types
+    assert "unread_count_changed" in event_types
+
+    new_message_event = next(
+        event
+        for event in landlord_events
+        if event["event_type"] == "new_message"
+    )
+
+    assert new_message_event["data"]["thread_id"] is not None
+    assert new_message_event["data"]["message_id"] is not None
+
+    unread_event = next(
+        event
+        for event in landlord_events
+        if event["event_type"] == "unread_count_changed"
+    )
+
+    assert unread_event["data"]["thread_unread_count"] >= 1
+    assert unread_event["data"]["account_unread_total"] >= 1
+
+
+
+
+
+
+
+
+
+
+
 def test_still_living_check_at_triggers_notification_for_both_users(user_factory, room_factory):
     Notification = __import__("django.apps").apps.apps.get_model("propertylist_app", "Notification")
     Tenancy = __import__("django.apps").apps.apps.get_model("propertylist_app", "Tenancy")
