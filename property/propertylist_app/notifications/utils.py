@@ -41,13 +41,15 @@ def create_in_app_notification_if_allowed(
 
 def build_frontend_inbox_link(tab: str = "notifications") -> str:
     """
-    Link that opens the app inbox. Frontend should:
-    - if not logged in -> show login
-    - after login -> redirect back here
+    Link that opens the frontend messages page.
+
+    Authentication is handled by the frontend:
+    - signed-in users continue directly;
+    - signed-out users are redirected through login and returned here.
     """
     base = (getattr(settings, "FRONTEND_BASE_URL", "") or "").rstrip("/")
-    if not base:
-        return "/app/inbox"
 
-    # Example: https://rentout.co.uk/app/inbox?tab=notifications
-    return f"{base}/app/inbox?tab={quote(tab)}"
+    if not base:
+        return "/messages"
+
+    return f"{base}/messages"

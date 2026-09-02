@@ -39,10 +39,9 @@ def _frontend_base_url() -> str:
 
 def _inbox_link() -> str:
     """
-    Deep link to inbox/messages page.
-    Adjust the path to match your frontend route when ready.
+    Deep link to the frontend messages page.
     """
-    return f"{_frontend_base_url()}/inbox"
+    return f"{_frontend_base_url()}/messages"
 
 def _my_listings_link() -> str:
     """

@@ -8,7 +8,7 @@ def _frontend_base_url() -> str:
 
 def _safe_next_path(
     next_path: str,
-    default: str = "/inbox",
+    default: str = "/messages",
 ) -> str:
     if not next_path or not isinstance(next_path, str):
         return default
@@ -47,7 +47,7 @@ def build_absolute_url(
     base = _frontend_base_url()
     safe_path = _safe_next_path(
         path,
-        default="/inbox",
+        default="/messages",
     )
 
     return f"{base}{safe_path}"

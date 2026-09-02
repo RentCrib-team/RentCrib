@@ -61,4 +61,4 @@ def test_build_absolute_url_rejects_unsafe_external_path():
         force_login=True,
     )
 
-    assert url == "https://rentcrib.example/inbox"
+    assert url == "https://rentcrib.example/messages"

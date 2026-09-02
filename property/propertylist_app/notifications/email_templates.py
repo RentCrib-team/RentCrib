@@ -16,7 +16,7 @@ def inbox_login_link() -> str:
         "",
     ).rstrip("/")
 
-    return f"{base}/inbox"
+    return f"{base}/messages"
 
 
 def notification_email_html(
