@@ -131,12 +131,16 @@ class RealtimeConsumer(AsyncWebsocketConsumer):
     async def realtime_event(self, event):
         """
         Deliver a backend realtime event to this authenticated user's socket.
+
+        Performance metadata contains only safe correlation identifiers and
+        backend timestamps. Application event data remains unchanged.
         """
         await self.send(
             text_data=json.dumps(
                 {
                     "type": event.get("event_type"),
                     "data": event.get("data", {}),
+                    "performance": event.get("performance", {}),
                 }
             )
         )

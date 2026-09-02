@@ -37,11 +37,14 @@ from drf_spectacular.utils import (
 
 #Project
 from propertylist_app.models import Payment, Room, WebhookReceipt, Notification, UserProfile
+from notifications.models import NotificationTemplate, OutboundNotification
+from propertylist_app.services.deep_links import build_absolute_url
 from propertylist_app.validators import (
     ensure_webhook_not_replayed,
     verify_webhook_signature,
 )
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
+from propertylist_app.services.realtime import push_user_realtime_event
 from propertylist_app.api.schema_helpers import standard_response_serializer
 from propertylist_app.api.permissions import IsFinanceAdmin
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
@@ -333,14 +336,64 @@ def stripe_webhook(request):
                         room.set_status(Room.Lifecycle.ACTIVE)
                         room.save(update_fields=["status", "paid_until"])
 
-                    Notification.objects.create(
+                    payment_notification = Notification.objects.create(
                         user=payment.user,
                         type="confirmation",
                         title="Payment confirmed",
                         body="Your listing payment was successful.",
                         target_type="payment",
                         target_id=payment.id,
+                        audience=Notification.Audience.LANDLORD,
                     )
+
+                    push_user_realtime_event(
+                        payment.user.id,
+                        "new_notification",
+                        {
+                            "kind": "payment_confirmed",
+                            "notification_id": payment_notification.id,
+                            "target_type": "payment",
+                            "target_id": payment.id,
+                        },
+                    )
+                    
+                    payment_template_exists = (
+                        NotificationTemplate.objects.filter(
+                            key="payment.confirmed",
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            is_active=True,
+                        ).exists()
+                    )
+
+                    if payment_template_exists:
+                        OutboundNotification.objects.create(
+                            user=payment.user,
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            template_key="payment.confirmed",
+                            scheduled_for=timezone.now(),
+                            context={
+                                "user": {
+                                    "first_name": payment.user.first_name,
+                                },
+                                "room": {
+                                    "title": (
+                                        room.title
+                                        if room
+                                        else "your RentCrib listing"
+                                    ),
+                                },
+                                "payment_id": payment.id,
+
+                                # Web/Vercel destination.
+                                "cta_url": build_absolute_url(
+                                    "/my-listings",
+                                    force_login=True,
+                                ),
+                            },
+                        )
+                    
+                    
+                    
         except Exception:
             logger.exception("stripe_webhook_payment_success_failed")
 
@@ -496,14 +549,62 @@ def stripe_webhook(request):
                             ]
                         )
 
-                    Notification.objects.create(
+                    payment_notification = Notification.objects.create(
                         user=payment.user,
                         type="confirmation",
                         title="Payment confirmed",
                         body="Your listing payment was successful.",
                         target_type="payment",
                         target_id=payment.id,
+                        audience=Notification.Audience.LANDLORD,
                     )
+
+                    push_user_realtime_event(
+                        payment.user.id,
+                        "new_notification",
+                        {
+                            "kind": "payment_confirmed",
+                            "notification_id": payment_notification.id,
+                            "target_type": "payment",
+                            "target_id": payment.id,
+                        },
+                    )
+                    
+                    
+                    payment_template_exists = (
+                        NotificationTemplate.objects.filter(
+                            key="payment.confirmed",
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            is_active=True,
+                        ).exists()
+                    )
+
+                    if payment_template_exists:
+                        OutboundNotification.objects.create(
+                            user=payment.user,
+                            channel=NotificationTemplate.CHANNEL_EMAIL,
+                            template_key="payment.confirmed",
+                            scheduled_for=timezone.now(),
+                            context={
+                                "user": {
+                                    "first_name": payment.user.first_name,
+                                },
+                                "room": {
+                                    "title": (
+                                        room.title
+                                        if room
+                                        else "your RentCrib listing"
+                                    ),
+                                },
+                                "payment_id": payment.id,
+
+                                # Web/Vercel destination.
+                                "cta_url": build_absolute_url(
+                                    "/my-listings",
+                                    force_login=True,
+                                ),
+                            },
+                        )
 
         except Exception:
             logger.exception(
@@ -723,7 +824,30 @@ class CreateListingPaymentIntentView(APIView):
     remains the trusted source of payment success.
     """
     permission_classes = [IsAuthenticated]
-
+    
+    
+    
+    @extend_schema(
+        request=None,
+        responses={
+            200: standard_response_serializer(
+                "CreateListingPaymentIntentResponse",
+                inline_serializer(
+                    name="CreateListingPaymentIntentData",
+                    fields={
+                        "payment_id": serializers.IntegerField(),
+                        "payment_intent_id": serializers.CharField(),
+                        "client_secret": serializers.CharField(),
+                        "customer_id": serializers.CharField(),
+                        "customer_session_client_secret": serializers.CharField(),
+                        "publishable_key": serializers.CharField(),
+                    },
+                ),
+            ),
+            403: OpenApiResponse(response=ErrorResponseSerializer),
+            502: OpenApiResponse(response=ErrorResponseSerializer),
+        },
+    )
     def post(self, request, pk):
         room = get_object_or_404(
             Room.objects.filter(is_deleted=False),

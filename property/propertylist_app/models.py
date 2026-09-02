@@ -1434,6 +1434,46 @@ class MessageThread(SoftDeleteModel):
         related_name="message_threads",
     )
     participants = models.ManyToManyField(User, related_name="message_threads")
+    landlord = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="landlord_message_threads",
+        help_text="Landlord-side participant snapshotted for role-scoped messaging.",
+    )
+    seeker = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="seeker_message_threads",
+        help_text="Seeker-side participant snapshotted for role-scoped messaging.",
+    )
+    
+    def set_role_participants(self, *, landlord=None, seeker=None):
+        """
+        Snapshot the business-role relationship for this thread.
+
+        This does not change thread participants and does not infer roles from
+        the users' currently selected profile roles.
+        """
+        update_fields = []
+
+        if landlord is not None and self.landlord_id != landlord.pk:
+            self.landlord = landlord
+            update_fields.append("landlord")
+
+        if seeker is not None and self.seeker_id != seeker.pk:
+            self.seeker = seeker
+            update_fields.append("seeker")
+
+        if update_fields:
+            self.save(update_fields=update_fields)
+
+        return self
+    
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     label = models.CharField(
@@ -1444,7 +1484,19 @@ class MessageThread(SoftDeleteModel):
         help_text="Optional label for this thread (e.g. 'Viewing scheduled', 'Good fit').",
     )
 
-
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["room", "landlord", "seeker"],
+                condition=models.Q(
+                    is_deleted=False,
+                    room__isnull=False,
+                    landlord__isnull=False,
+                    seeker__isnull=False,
+                ),
+                name="uniq_active_thread_room_landlord_seeker",
+            ),
+        ]
 
     def __str__(self):
         users = ", ".join(self.participants.values_list("username", flat=True)[:2])
@@ -1557,6 +1609,19 @@ class Notification(models.Model):
     class Type(models.TextChoices):
         MESSAGE = "message", "Message"
 
+
+
+    class Audience(models.TextChoices):
+        LANDLORD = "landlord", "Landlord"
+        SEEKER = "seeker", "Seeker"
+        BOTH = "both", "Both"
+
+    audience = models.CharField(
+        max_length=16,
+        choices=Audience.choices,
+        default=Audience.BOTH,
+        db_index=True,
+    )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     type = models.CharField(max_length=32, choices=Type.choices, default=Type.MESSAGE)
     target_type = models.CharField(max_length=50, blank=True, null=True)

@@ -4,10 +4,23 @@ from rest_framework.views import APIView
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 
-from propertylist_app.models import IdentityVerificationRequest
+from propertylist_app.models import (
+    IdentityVerificationRequest,
+    Notification,
+)
 from propertylist_app.api.serializers import IdentityVerificationRequestSerializer
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.views.common import ok_response
+from django.utils import timezone
+
+from notifications.models import (
+    NotificationTemplate,
+    OutboundNotification,
+)
+
+from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.realtime import push_user_realtime_event
+
 
 
 class MyIdentityVerificationView(APIView):
@@ -114,6 +127,77 @@ class MyIdentityVerificationView(APIView):
         obj = serializer.save(
             user=request.user,
         )
+        
+        
+        # ---------------------------------------------------------
+        # Identity verification received
+        # Account notification only:
+        # Bell + realtime Bell + email.
+        # No inbox/envelope message.
+        # ---------------------------------------------------------
+
+        notification = Notification.objects.create(
+            user=request.user,
+            type="identity_verification_received",
+            target_type="identity_verification",
+            target_id=obj.id,
+            title="Identity verification received",
+            body=(
+                "We've received your identity verification "
+                "and it is now waiting for review."
+            ),
+        )
+
+        push_user_realtime_event(
+            request.user.id,
+            "new_notification",
+            {
+                "kind": "identity_verification_received",
+                "notification_id": notification.id,
+                "target_type": "identity_verification",
+                "target_id": obj.id,
+            },
+        )
+
+        template_exists = (
+            NotificationTemplate.objects.filter(
+                key="identity_verification.received",
+                channel=NotificationTemplate.CHANNEL_EMAIL,
+                is_active=True,
+            ).exists()
+        )
+
+        if template_exists:
+            OutboundNotification.objects.create(
+                user=request.user,
+                channel=NotificationTemplate.CHANNEL_EMAIL,
+                template_key="identity_verification.received",
+                scheduled_for=timezone.now(),
+                context={
+                    "user_name": (
+                        request.user.first_name
+                        or request.user.username
+                    ),
+
+                    # Permanent frontend verification route.
+                    "dashboard_url": build_absolute_url(
+                        "/identity-verification",
+                        force_login=True,
+                    ),
+
+                    # Existing frontend contact/support route.
+                    "support_url": build_absolute_url(
+                        "/contact",
+                        force_login=False,
+                    ),
+
+                    "current_year": timezone.now().year,
+                    "verification_request_id": obj.id,
+                },
+            )
+        
+        
+        
 
         return ok_response(
             message="Identity verification submitted.",

@@ -229,9 +229,17 @@ def test_e2e_landlord_tenant_full_lifecycle(monkeypatch, user_factory, room_fact
         assert tenancy.review_open_at is not None
         assert tenancy.review_deadline_at is not None
 
+        # Simulate the tenancy having ended and its review window being open.
+        tenancy.status = Tenancy.STATUS_ENDED
         tenancy.review_open_at = timezone.now() - timedelta(days=1)
         tenancy.review_deadline_at = timezone.now() + timedelta(days=30)
-        tenancy.save(update_fields=["review_open_at", "review_deadline_at"])
+        tenancy.save(
+            update_fields=[
+                "status",
+                "review_open_at",
+                "review_deadline_at",
+            ]
+        )
 
         # Reviews are created through the central review-create endpoint.
         # Booking/viewing routes do not create reviews.

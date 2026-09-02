@@ -13,37 +13,60 @@ User = get_user_model()
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     DEFAULT_FROM_EMAIL="no-reply@rentout.test",
 )
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    DEFAULT_FROM_EMAIL="no-reply@rentout.test",
+)
 @pytest.mark.django_db
 def test_send_new_message_email_sends_to_other_participant_and_uses_outbox():
     """
     When A messages B in a 2-person thread:
     - An email is sent to B (not A).
-    - Subject includes the sender's username.
-    - Body contains the message text.
+    - Subject identifies the sender.
+    - Message content is NOT exposed in the email.
+    - Recipient is directed back to RentCrib to read the message.
     """
-    # Users with emails
-    alice = User.objects.create_user(username="alice", password="x", email="alice@example.com")
-    bob   = User.objects.create_user(username="bob",   password="x", email="bob@example.com")
+    alice = User.objects.create_user(
+        username="alice",
+        password="x",
+        email="alice@example.com",
+    )
+    bob = User.objects.create_user(
+        username="bob",
+        password="x",
+        email="bob@example.com",
+    )
 
-    # Thread with both participants
     thread = MessageThread.objects.create()
     thread.participants.set([alice, bob])
 
-    # Alice sends a message to Bob
-    msg = Message.objects.create(thread=thread, sender=alice, body="Hi Bob!")
+    msg = Message.objects.create(
+        thread=thread,
+        sender=alice,
+        body="Hi Bob!",
+    )
 
-    # Clear any prior mail just in case
     mail.outbox.clear()
 
     sent = send_new_message_email(msg.id)
-    assert sent == 1, "Expected send_new_message_email to report a sent mail"
-    assert len(mail.outbox) == 1, "Exactly one email should be sent"
+
+    assert sent == 1
+    assert len(mail.outbox) == 1
 
     email = mail.outbox[0]
-    assert email.to == ["bob@example.com"], "Recipient should be the other participant (Bob)"
-    assert "alice" in email.subject.lower(), "Subject should include sender's username"
-    assert "Hi Bob!" in email.body, "Body should include the message text"
 
+    assert email.to == ["bob@example.com"]
+    assert "alice" in email.subject.lower()
+
+    # Privacy contract: chat content must never be copied into email.
+    assert "Hi Bob!" not in email.body
+
+    assert "new message on RentCrib" in email.body
+    assert "Open your conversation to read and reply." in email.body
+    assert (
+        "The message content is only available inside RentCrib."
+        in email.body
+    )
 
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",

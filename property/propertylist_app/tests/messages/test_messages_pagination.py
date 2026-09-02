@@ -70,3 +70,77 @@ def test_messages_default_ordering_desc_and_limit_offset_next():
 
     # and no further pages
     assert not meta2.get("next")
+    
+    
+    
+@pytest.mark.django_db
+def test_thread_list_avoids_n_plus_one_queries(
+    django_assert_max_num_queries,
+):
+    user = User.objects.create_user(
+        username="inbox-owner",
+        email="inbox-owner@example.com",
+        password="pass12345",
+    )
+    other_user = User.objects.create_user(
+        username="inbox-contact",
+        email="inbox-contact@example.com",
+        password="pass12345",
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    expected_latest_bodies = set()
+
+    for thread_number in range(8):
+        thread = MessageThread.objects.create()
+        thread.participants.set([user, other_user])
+
+        for message_number in range(10):
+            body = (
+                f"Thread {thread_number} "
+                f"message {message_number}"
+            )
+
+            Message.objects.create(
+                thread=thread,
+                sender=(
+                    user
+                    if message_number % 2 == 0
+                    else other_user
+                ),
+                body=body,
+            )
+
+        expected_latest_bodies.add(
+            f"Thread {thread_number} message 9"
+        )
+
+    url = "/api/v1/messages/threads/"
+
+    # Warm up request/rendering before measuring database queries.
+    warmup = client.get(url, {"limit": 100, "folder": "inbox"})
+    assert warmup.status_code == 200
+
+    # Query count must remain bounded and must not grow per thread.
+    with django_assert_max_num_queries(15):
+        response = client.get(
+            url,
+            {
+                "limit": 100,
+                "folder": "inbox",
+            },
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["ok"] is True
+
+    latest_bodies = {
+        item["last_message"]["body"]
+        for item in payload["data"]
+    }
+
+    assert latest_bodies == expected_latest_bodies    

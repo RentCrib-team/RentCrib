@@ -5,7 +5,7 @@ from django.apps import apps
 from django.conf import settings
 from datetime import timedelta
 from propertylist_app.services.tenancy_chat import post_tenancy_event
-
+from propertylist_app.services.realtime import push_user_realtime_event
 from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.services.deep_links import build_absolute_url
 from propertylist_app.models import (
@@ -13,6 +13,9 @@ from propertylist_app.models import (
     Room,
     Review,
     MessageThreadState,
+    Message,
+    Booking,
+     
 )
 
 from propertylist_app.services.tasks import (
@@ -261,6 +264,9 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         notification_type: str,
         title: str,
         body: str,
+        audience: str = Notification.Audience.BOTH,
+        target_type: str = "message",
+        target_id=None,
     ):
         # Important tenancy actions must return the conversation to Inbox.
         thread_state, _ = MessageThreadState.objects.get_or_create(
@@ -279,18 +285,47 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 ]
             )
 
-        Notification.objects.get_or_create(
-            user=user,
-            type=notification_type,
-            target_type="message",
-            target_id=message.id,
-            defaults={
-                "thread": thread,
-                "message": message,
-                "title": title,
-                "body": body,
-            },
+        notification, notification_created = (
+            Notification.objects.get_or_create(
+                user=user,
+                type=notification_type,
+                target_type=target_type,
+                target_id=(
+                    target_id
+                    if target_id is not None
+                    else message.id
+                ),
+                defaults={
+                    "thread": thread,
+                    "message": message,
+                    "audience": audience,
+                    "title": title,
+                    "body": body,
+                },
+            )
         )
+
+        if notification_created:
+            push_user_realtime_event(
+                user.id,
+                "new_message",
+                {
+                    "message_id": message.id,
+                    "thread_id": thread.id,
+                    "sender_id": message.sender_id,
+                },
+            )
+
+            push_user_realtime_event(
+                user.id,
+                "new_notification",
+                {
+                    "kind": notification_type,
+                    "notification_id": notification.id,
+                    "message_id": message.id,
+                    "thread_id": thread.id,
+                },
+            )
 
     if event == "proposed":
         tenant_submitted_first = sender.id == tenancy.tenant_id
@@ -299,6 +334,11 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             tenancy.landlord
             if tenant_submitted_first
             else tenancy.tenant
+        )
+        target_audience = (
+            Notification.Audience.LANDLORD
+            if tenant_submitted_first
+            else Notification.Audience.SEEKER
         )
 
         sender_name = (
@@ -325,6 +365,9 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             notification_type="tenancy_proposed",
             title=notification_title,
             body=notification_body,
+            audience=target_audience,
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -347,21 +390,71 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         return 1
 
     if event == "confirmed":
-        for user in (tenancy.landlord, tenancy.tenant):
-            _create_notification(
+        # Use the existing tenancy conversation so the confirmation bell
+        # opens the exact conversation associated with this tenancy.
+        tenancy_message = (
+            Message.objects
+            .select_related("thread")
+            .filter(metadata__tenancy_id=tenancy.id)
+            .order_by("-created")
+            .first()
+        )
+
+        confirmation_thread = (
+            tenancy_message.thread
+            if tenancy_message and tenancy_message.thread_id
+            else None
+        )
+
+        for user, audience in (
+            (tenancy.landlord, Notification.Audience.LANDLORD),
+            (tenancy.tenant, Notification.Audience.SEEKER),
+        ):
+
+            notification = Notification.objects.create(
                 user=user,
-                notification_type="tenancy_confirmed",
+                type="tenancy_confirmed",
+                target_type="tenancy",
+                target_id=tenancy.id,
+                thread=confirmation_thread,
+                message=tenancy_message,
                 title="Tenancy confirmed",
                 body=f"Tenancy confirmed for: {room_title}.",
+                audience=audience,
+            )
+
+            push_user_realtime_event(
+                user.id,
+                "new_notification",
+                {
+                    "kind": "tenancy_confirmed",
+                    "notification_id": notification.id,
+                    "tenancy_id": tenancy.id,
+                    "thread_id": (
+                        confirmation_thread.id
+                        if confirmation_thread
+                        else None
+                    ),
+                    "message_id": (
+                        tenancy_message.id
+                        if tenancy_message
+                        else None
+                    ),
+                },
             )
 
             _maybe_queue(
                 user,
                 "tenancy.confirmed",
+                {
+                    "cta_url": build_absolute_url(
+                        f"/tenancies/{tenancy.id}"
+                    ),
+                },
             )
 
         return 2
-    
+        
     
     if event == "rejected_unverified":
         tenant_name = (
@@ -375,6 +468,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.tenant,
+            audience=Notification.Audience.SEEKER,
             notification_type="tenancy_rejected_unverified",
             title="Tenancy information could not be verified",
             body=(
@@ -382,6 +476,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"you submitted for {room_title}. Your submission has been "
                 "cancelled."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -395,6 +491,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.landlord,
+            audience=Notification.Audience.LANDLORD,
             notification_type="tenancy_rejected_unverified",
             title="Tenancy claim rejected",
             body=(
@@ -402,6 +499,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"{room_title} has been rejected. The listing availability "
                 "was not changed."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -424,12 +523,15 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.tenant,
+            audience=Notification.Audience.SEEKER,
             notification_type="tenancy_expired_unverified",
             title="Tenancy request expired",
             body=(
                 f"Your tenancy request for {room_title} expired because "
                 "the landlord did not verify it within the required time."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -446,6 +548,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
         _create_notification(
             user=tenancy.landlord,
+            audience=Notification.Audience.LANDLORD,
             notification_type="tenancy_expired_unverified",
             title="Unverified tenancy request expired",
             body=(
@@ -453,6 +556,8 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                 f"{room_title} has expired. The listing availability "
                 "was not changed."
             ),
+            target_type="tenancy",
+            target_id=tenancy.id,
         )
 
         _maybe_queue(
@@ -471,12 +576,24 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     
 
     if event == "cancelled":
-        for user in (tenancy.landlord, tenancy.tenant):
+        for user, audience in (
+            (
+                tenancy.landlord,
+                Notification.Audience.LANDLORD,
+            ),
+            (
+                tenancy.tenant,
+                Notification.Audience.SEEKER,
+            ),
+        ):
             _create_notification(
                 user=user,
+                audience=audience,
                 notification_type="tenancy_cancelled",
                 title="Tenancy cancelled",
                 body=f"Tenancy cancelled for: {room_title}.",
+                target_type="tenancy",
+                target_id=tenancy.id,
             )
 
             _maybe_queue(
@@ -504,6 +621,18 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         if editor_role == "landlord"
         else "landlord"
     )
+    
+    editor_audience = (
+        Notification.Audience.LANDLORD
+        if editor_role == "landlord"
+        else Notification.Audience.SEEKER
+    )
+
+    other_party_audience = (
+        Notification.Audience.SEEKER
+        if editor_role == "landlord"
+        else Notification.Audience.LANDLORD
+    )
 
     editor_name = editor.get_full_name().strip() or editor.username
     other_party_name = (
@@ -513,12 +642,15 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
     _create_notification(
         user=editor,
+        audience=editor_audience,
         notification_type="tenancy_updated",
         title="Tenancy information updated",
         body=(
             f"The tenancy information changes you made for "
             f"{room_title} have been sent to {other_party_name}."
         ),
+        target_type="tenancy",
+        target_id=tenancy.id,
     )
 
     _maybe_queue(
@@ -534,12 +666,15 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
 
     _create_notification(
         user=other_party,
+        audience=other_party_audience,
         notification_type="tenancy_updated",
         title="Tenancy information changed",
         body=(
             f"Your {editor_role}, {editor_name}, updated the tenancy "
             f"information for {room_title}."
         ),
+        target_type="tenancy",
+        target_id=tenancy.id,
     )
 
     _maybe_queue(
@@ -635,8 +770,8 @@ def task_tenancy_prompts_sweep() -> int:
         # Mobile fallback for older tenancy records with no conversation yet.
         deep_link = f"/app/tenancies/{tenancy.id}"
 
-        # No confirmed web tenancy route available here yet.
-        cta_path = None
+        # Web fallback for tenancy records with no conversation yet.
+        cta_path = f"/tenancies/{tenancy.id}"
 
         return deep_link, cta_path
     
@@ -940,27 +1075,81 @@ def task_tenancy_prompts_sweep() -> int:
                     else tenancy.created_at
                 )
 
+            # Tenant keeps the existing tenancy target.
+            target_type = "still_living_check"
+            target_id = tenancy.id
+
+            # Landlord should open the completed viewing detail page because that is
+            # where the web app exposes "Update tenancy information".
+            if user.id == tenancy.landlord_id:
+                viewing_booking = (
+                    Booking.objects
+                    .filter(
+                        room=tenancy.room,
+                        user=tenancy.tenant,
+                        is_deleted=False,
+                    )
+                    .order_by("-start", "-id")
+                    .first()
+                )
+
+                if viewing_booking:
+                    target_type = "booking"
+                    target_id = viewing_booking.id
+
+            audience = (
+                Notification.Audience.LANDLORD
+                if user.id == tenancy.landlord_id
+                else Notification.Audience.SEEKER
+            )
+
+
             reminder_exists = Notification.objects.filter(
                 user=user,
                 type="tenancy_still_living_check",
-                target_type="still_living_check",
-                target_id=tenancy.id,
+                target_type=target_type,
+                target_id=target_id,
                 created_at__gte=cycle_started_at,
             ).exists()
 
             if reminder_exists:
                 return 0
 
-            Notification.objects.create(
+            notification = Notification.objects.create(
                 user=user,
                 type="tenancy_still_living_check",
-                target_type="still_living_check",
-                target_id=tenancy.id,
+                target_type=target_type,
+                target_id=target_id,
                 thread=prompt_thread,
                 message=prompt_message,
                 title=title,
                 body=body,
+                audience=audience,
             )
+
+            # Realtime Envelope / Inbox update.
+            if prompt_thread and prompt_message:
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": prompt_message.id,
+                        "thread_id": prompt_thread.id,
+                        "sender_id": prompt_message.sender_id,
+                    },
+                )
+
+                # Realtime Bell update.
+                push_user_realtime_event(
+                    user.id,
+                    "new_notification",
+                    {
+                        "kind": "tenancy_still_living_check",
+                        "notification_id": notification.id,
+                        "message_id": prompt_message.id,
+                        "thread_id": prompt_thread.id,
+                    },
+                )
 
             _maybe_queue_reminder(
                 user,
@@ -1030,21 +1219,101 @@ def task_tenancy_prompts_sweep() -> int:
             
     
     
-    # TEMPORARY QA RULE:
-    # If neither party updates the tenancy after the ending reminder,
-    # the tenancy ends automatically when the 10-minute review window opens.
-    Tenancy.objects.filter(
-        status__in=[
-            Tenancy.STATUS_CONFIRMED,
-            Tenancy.STATUS_ACTIVE,
-        ],
-        review_open_at__isnull=False,
-        review_open_at__lte=now,
-        still_living_confirmed_at__isnull=True,
-    ).update(
-        status=Tenancy.STATUS_ENDED,
-    ) 
-     
+    # ---------------------------------------------------------
+    # QA: CLOSE TENANCY UPDATE WINDOW
+    # ---------------------------------------------------------
+    # Once review_open_at is reached:
+    #
+    # 1. unresolved renewal proposals expire
+    # 2. renewal Accept/Reject actions disappear
+    # 3. Update tenancy actions disappear
+    # 4. tenancy becomes ended
+    # 5. the review phase can begin
+    #
+    # The API also independently rejects stale renewal actions,
+    # so keeping an old browser tab open cannot bypass this rule.
+    tenancies_reaching_review = (
+        Tenancy.objects
+        .filter(
+            status__in=[
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            ],
+            review_open_at__isnull=False,
+            review_open_at__lte=now,
+            still_living_confirmed_at__isnull=True,
+        )
+    )
+
+    for tenancy in tenancies_reaching_review:
+        # -----------------------------------------------------
+        # Expire any unresolved renewal proposal.
+        # -----------------------------------------------------
+        open_extensions = tenancy.extensions.filter(
+            status="proposed",
+        )
+
+        extension_ids = list(
+            open_extensions.values_list(
+                "id",
+                flat=True,
+            )
+        )
+
+        if extension_ids:
+            open_extensions.update(
+                status="canceled",
+            )
+
+            # Remove Accept / Reject from the proposal messages.
+            extension_messages = Message.objects.filter(
+                metadata__extension_id__in=extension_ids,
+                metadata__event_type="tenancy_extension_proposed",
+                metadata__system_event=True,
+            )
+
+            for message in extension_messages:
+                metadata = dict(
+                    message.metadata or {}
+                )
+                metadata["available_actions"] = []
+
+                message.metadata = metadata
+                message.save(
+                    update_fields=["metadata"]
+                )
+
+        # -----------------------------------------------------
+        # Remove Update tenancy from the ending-soon message.
+        # -----------------------------------------------------
+        ending_messages = Message.objects.filter(
+            metadata__tenancy_id=tenancy.id,
+            metadata__event_type="still_living_check",
+            metadata__system_event=True,
+        )
+
+        for message in ending_messages:
+            metadata = dict(
+                message.metadata or {}
+            )
+            metadata["available_actions"] = []
+
+            message.metadata = metadata
+            message.save(
+                update_fields=["metadata"]
+            )
+
+        # -----------------------------------------------------
+        # Tenancy is now closed to all further mutations.
+        # -----------------------------------------------------
+        tenancy.status = Tenancy.STATUS_ENDED
+        tenancy.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        ) 
+        
      
             
             
@@ -1090,58 +1359,113 @@ def task_tenancy_prompts_sweep() -> int:
 
         # Notify the landlord only if the landlord has not reviewed.
         if not landlord_done:
-            _, notification_created = Notification.objects.get_or_create(
-                user=t.landlord,
-                type="review_available",
-                target_type="tenancy_review",
-                target_id=t.id,
-                defaults={
-                    "thread": prompt_thread,
-                    "message": prompt_message,
-                    "title": "Review available",
-                    "body": (
-                        f"You can now leave a review for "
-                        f"{t.room.title}."
-                    ),
-                },
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=t.landlord,
+                    type="review_available",
+                    target_type="tenancy_review",
+                    target_id=t.id,
+                    defaults={
+                        "thread": prompt_thread,
+                        "message": prompt_message,
+                        "audience": Notification.Audience.LANDLORD,
+                        "title": "Review available",
+                        "body": (
+                            f"You can now leave a review for "
+                            f"{t.room.title}."
+                        ),
+                    },
+                )
             )
 
             if notification_created:
+                if prompt_thread and prompt_message:
+                    push_user_realtime_event(
+                        t.landlord.id,
+                        "new_message",
+                        {
+                            "message_id": prompt_message.id,
+                            "thread_id": prompt_thread.id,
+                            "sender_id": prompt_message.sender_id,
+                        },
+                    )
+
+                    push_user_realtime_event(
+                        t.landlord.id,
+                        "new_notification",
+                        {
+                            "kind": "review_available",
+                            "notification_id": notification.id,
+                            "message_id": prompt_message.id,
+                            "thread_id": prompt_thread.id,
+                        },
+                    )
+
                 _maybe_queue_reminder(
                     t.landlord,
                     "tenancy.review_available",
                     deep_link=review_deep_link,
-                    cta_path="/leave-a-review",
+                    cta_path=f"/leave-a-review?tenancy={t.id}",
                     room_title=t.room.title,
+                    tenancy_id=t.id,
                 )
+
                 count += 1
 
         # Notify the tenant only if the tenant has not reviewed.
+        
         if not tenant_done:
-            _, notification_created = Notification.objects.get_or_create(
-                user=t.tenant,
-                type="review_available",
-                target_type="tenancy_review",
-                target_id=t.id,
-                defaults={
-                    "thread": prompt_thread,
-                    "message": prompt_message,
-                    "title": "Review available",
-                    "body": (
-                        f"You can now leave a review for "
-                        f"{t.room.title}."
-                    ),
-                },
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=t.tenant,
+                    type="review_available",
+                    target_type="tenancy_review",
+                    target_id=t.id,
+                    defaults={
+                        "thread": prompt_thread,
+                        "message": prompt_message,
+                        "audience": Notification.Audience.SEEKER,
+                        "title": "Review available",
+                        "body": (
+                            f"You can now leave a review for "
+                            f"{t.room.title}."
+                        ),
+                    },
+                )
             )
 
             if notification_created:
+                if prompt_thread and prompt_message:
+                    push_user_realtime_event(
+                        t.tenant.id,
+                        "new_message",
+                        {
+                            "message_id": prompt_message.id,
+                            "thread_id": prompt_thread.id,
+                            "sender_id": prompt_message.sender_id,
+                        },
+                    )
+
+                    push_user_realtime_event(
+                        t.tenant.id,
+                        "new_notification",
+                        {
+                            "kind": "review_available",
+                            "notification_id": notification.id,
+                            "message_id": prompt_message.id,
+                            "thread_id": prompt_thread.id,
+                        },
+                    )
+
                 _maybe_queue_reminder(
                     t.tenant,
                     "tenancy.review_available",
                     deep_link=review_deep_link,
-                    cta_path="/leave-a-review",
+                    cta_path=f"/leave-a-review?tenancy={t.id}",
                     room_title=t.room.title,
+                    tenancy_id=t.id,
                 )
+
                 count += 1
     # -------------------------------------------------
     # 3) REVEAL + RATING UPDATE (your schema)
@@ -1181,25 +1505,78 @@ def task_tenancy_prompts_sweep() -> int:
 
         if not reviewee:
             continue
+        
+        
+        if reviewee.id == tenancy.landlord_id:
+            reviewee_audience = Notification.Audience.LANDLORD
+        elif reviewee.id == tenancy.tenant_id:
+            reviewee_audience = Notification.Audience.SEEKER
+        else:
+            reviewee_audience = Notification.Audience.BOTH
 
-        # The review has just become visible.
-        # Because only active=False reviews enter to_reveal,
-        # this notification/email is sent only once.
-        _, notification_created = Notification.objects.get_or_create(
-            user=reviewee,
-            type="review_revealed",
-            target_type="tenancy_review",
-            target_id=review.id,
-            defaults={
-                "title": "Review now available",
-                "body": (
-                    f"A review from your tenancy at "
-                    f"{tenancy.room.title} is now available to view."
-                ),
-            },
+        # -------------------------------------------------
+        # Review revealed:
+        # 1) shared RentCrib inbox/envelope message
+        # 2) bell notification for the reviewee
+        # 3) email for the reviewee
+        # 4) realtime envelope update
+        # 5) realtime bell update
+        # -------------------------------------------------
+
+        prompt_thread, prompt_message = _post_tenancy_prompt_message(
+            tenancy,
+            event_type="review_revealed",
+            body=(
+                "A review from this tenancy is now available.\n\n"
+                "Open your reviews to view it."
+            ),
+            available_action="view_review",
+        )
+
+        notification, notification_created = (
+            Notification.objects.get_or_create(
+                user=reviewee,
+                type="review_revealed",
+                target_type="tenancy_review",
+                target_id=review.id,
+                defaults={
+                    "thread": prompt_thread,
+                    "message": prompt_message,
+                    "title": "Review now available",
+                    "audience": reviewee_audience,
+                    "body": (
+                        f"A review from your tenancy at "
+                        f"{tenancy.room.title} is now available to view."
+                    ),
+                },
+            )
         )
 
         if notification_created:
+            if prompt_thread and prompt_message:
+                # Realtime Envelope / Inbox update.
+                push_user_realtime_event(
+                    reviewee.id,
+                    "new_message",
+                    {
+                        "message_id": prompt_message.id,
+                        "thread_id": prompt_thread.id,
+                        "sender_id": prompt_message.sender_id,
+                    },
+                )
+
+                # Realtime Bell update.
+                push_user_realtime_event(
+                    reviewee.id,
+                    "new_notification",
+                    {
+                        "kind": "review_revealed",
+                        "notification_id": notification.id,
+                        "message_id": prompt_message.id,
+                        "thread_id": prompt_thread.id,
+                    },
+                )
+
             _maybe_queue_reminder(
                 reviewee,
                 "tenancy.review_revealed",
@@ -1213,8 +1590,8 @@ def task_tenancy_prompts_sweep() -> int:
                 room_title=tenancy.room.title,
                 tenancy_id=tenancy.id,
             )
+
             count += 1
-            
             
     if revealed_count:
         # refresh tenant ratings for tenants affected by newly revealed landlord->tenant reviews

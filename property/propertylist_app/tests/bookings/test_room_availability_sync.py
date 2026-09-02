@@ -388,3 +388,264 @@ def test_sync_removes_obsolete_unbooked_slots_but_preserves_booked_slot():
         ("10:00", "10:30"),
         ("10:30", "11:00"),
     ]
+    
+    
+@pytest.mark.django_db
+def test_everyday_slots_start_from_future_available_from():
+    room = create_room(username="future_everyday_landlord")
+
+    future_start = timezone.localdate() + timedelta(days=10)
+
+    room.available_from = future_start
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="everyday",
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slots = (
+        AvailabilitySlot.objects
+        .filter(room=room)
+        .order_by("start")
+    )
+
+    assert slots.exists()
+
+    first_slot_date = timezone.localtime(
+        slots.first().start
+    ).date()
+
+    assert first_slot_date == future_start
+
+    assert not any(
+        timezone.localtime(slot.start).date() < future_start
+        for slot in slots
+    )
+
+
+@pytest.mark.django_db
+def test_custom_dates_before_available_from_are_not_generated():
+    room = create_room(username="future_custom_landlord")
+
+    available_from = timezone.localdate() + timedelta(days=10)
+
+    before = available_from - timedelta(days=2)
+    valid_one = available_from + timedelta(days=1)
+    valid_two = available_from + timedelta(days=4)
+
+    room.available_from = available_from
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="custom",
+        custom_dates=[
+            before.isoformat(),
+            valid_one.isoformat(),
+            valid_two.isoformat(),
+        ],
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slot_dates = {
+        timezone.localtime(slot.start).date()
+        for slot in AvailabilitySlot.objects.filter(room=room)
+    }
+
+    assert before not in slot_dates
+    assert valid_one in slot_dates
+    assert valid_two in slot_dates
+
+
+@pytest.mark.django_db
+def test_everyday_slots_start_from_future_available_from():
+    room = create_room(username="future_everyday_landlord")
+
+    future_start = timezone.localdate() + timedelta(days=10)
+
+    room.available_from = future_start
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="everyday",
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slots = (
+        AvailabilitySlot.objects
+        .filter(room=room)
+        .order_by("start")
+    )
+
+    assert slots.exists()
+
+    first_slot_date = timezone.localtime(
+        slots.first().start
+    ).date()
+
+    assert first_slot_date == future_start
+
+    assert not any(
+        timezone.localtime(slot.start).date() < future_start
+        for slot in slots
+    )
+
+
+@pytest.mark.django_db
+def test_custom_dates_before_available_from_are_not_generated():
+    room = create_room(username="future_custom_landlord")
+
+    available_from = timezone.localdate() + timedelta(days=10)
+
+    before = available_from - timedelta(days=2)
+    valid_one = available_from + timedelta(days=1)
+    valid_two = available_from + timedelta(days=4)
+
+    room.available_from = available_from
+    room.save(
+        update_fields=[
+            "available_from",
+        ]
+    )
+
+    update_availability(
+        room,
+        mode="custom",
+        custom_dates=[
+            before.isoformat(),
+            valid_one.isoformat(),
+            valid_two.isoformat(),
+        ],
+        start_time="10:00",
+        end_time="12:00",
+    )
+
+    slot_dates = {
+        timezone.localtime(slot.start).date()
+        for slot in AvailabilitySlot.objects.filter(room=room)
+    }
+
+    assert before not in slot_dates
+    assert valid_one in slot_dates
+    assert valid_two in slot_dates
+    
+    
+@pytest.mark.django_db
+def test_public_availability_dates_exclude_past_slots():
+    room = create_room(username="past_slot_landlord")
+
+    now = timezone.now()
+
+    past_start = now - timedelta(days=2)
+    past_end = past_start + timedelta(minutes=30)
+
+    future_start = now + timedelta(days=2)
+    future_end = future_start + timedelta(minutes=30)
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=past_start,
+        end=past_end,
+        max_bookings=1,
+    )
+
+    AvailabilitySlot.objects.create(
+        room=room,
+        start=future_start,
+        end=future_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse(
+        "v1:room-slots-public",
+        args=[room.id],
+    )
+
+    response = client.get(
+        url,
+        {
+            "mode": "dates",
+            "only_free": "true",
+        },
+    )
+
+    assert response.status_code == 200
+
+    available_dates = response.data["available_dates"]
+
+    past_date = timezone.localtime(
+        past_start
+    ).date().isoformat()
+
+    future_date = timezone.localtime(
+        future_start
+    ).date().isoformat()
+
+    assert past_date not in available_dates
+    assert future_date in available_dates
+
+
+@pytest.mark.django_db
+def test_public_availability_excludes_earlier_today_slots():
+    room = create_room(username="earlier_today_landlord")
+
+    now = timezone.now()
+
+    past_start = now - timedelta(hours=2)
+    past_end = now - timedelta(hours=1, minutes=30)
+
+    future_start = now + timedelta(hours=2)
+    future_end = future_start + timedelta(minutes=30)
+
+    past_slot = AvailabilitySlot.objects.create(
+        room=room,
+        start=past_start,
+        end=past_end,
+        max_bookings=1,
+    )
+
+    future_slot = AvailabilitySlot.objects.create(
+        room=room,
+        start=future_start,
+        end=future_end,
+        max_bookings=1,
+    )
+
+    client = APIClient()
+
+    url = reverse(
+        "v1:room-slots-public",
+        args=[room.id],
+    )
+
+    response = client.get(url)
+
+    assert response.status_code == 200
+
+    returned_ids = {
+        item["id"]
+        for item in response.data["results"]
+    }
+
+    assert past_slot.id not in returned_ids
+    assert future_slot.id in returned_ids        

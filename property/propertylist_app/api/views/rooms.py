@@ -45,7 +45,7 @@ from drf_spectacular.types import OpenApiTypes
 
 
 #Project
-from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking
+from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy
 from propertylist_app.services.image import compress_listing_upload, should_auto_approve_upload
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.validators import (
@@ -698,13 +698,74 @@ class RoomPublishView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        today = timezone.localdate()
+
+        # ---------------------------------------------------------
+        # PAYMENT GUARD
+        # ---------------------------------------------------------
+        # Republishing is free while the room's existing paid
+        # advertising period is still valid.
+        #
+        # If the listing has never been paid for, or its paid period
+        # has expired, it must go through the normal listing-payment
+        # flow before it can become active again.
+        if (
+            room.paid_until is None
+            or room.paid_until < today
+        ):
+            raise ValidationError(
+                {
+                    "detail": (
+                        "This listing does not have an active paid "
+                        "advertising period. Payment is required "
+                        "before it can be published."
+                    ),
+                    "payment_required": True,
+                }
+            )
+
+        # ---------------------------------------------------------
+        # TENANCY GUARD
+        # ---------------------------------------------------------
+        # A genuinely rented room must not be made available merely
+        # because the landlord presses Publish.
+        has_live_tenancy = room.tenancies.filter(
+            status__in=[
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            ],
+        ).exists()
+
+        if has_live_tenancy:
+            raise ValidationError(
+                {
+                    "detail": (
+                        "This room has a current tenancy and cannot "
+                        "be republished as available."
+                    )
+                }
+            )
+
+        # ---------------------------------------------------------
+        # REACTIVATE LISTING
+        # ---------------------------------------------------------
+        # There is no current tenancy and the paid advertising period
+        # is still valid, so republishing restores both lifecycle
+        # fields.
+        update_fields = []
+
         if room.status != "active":
             room.status = "active"
+            update_fields.append("status")
+
+        if not room.is_available:
+            room.is_available = True
+            update_fields.append("is_available")
+
+        if update_fields:
+            update_fields.append("updated_at")
             room.save(
-                update_fields=[
-                    "status",
-                    "updated_at",
-                ]
+                update_fields=update_fields,
             )
 
         return ok_response(
@@ -716,8 +777,6 @@ class RoomPublishView(APIView):
             message="Room published successfully.",
             status_code=status.HTTP_200_OK,
         )
-
-
 
 
         
@@ -1187,7 +1246,12 @@ class RoomAvailabilityPublicView(generics.ListAPIView):
             return AvailabilitySlot.objects.none()
 
         room = get_object_or_404(Room.objects.alive(), pk=self.kwargs["pk"])
-        qs = room.availability_slots.order_by("start")
+        # Never expose viewing slots whose start time has already passed.
+        # Past dates therefore disappear from the seeker booking calendar,
+        # while future booked slots can still be returned when only_free=False.
+        qs = room.availability_slots.filter(
+            start__gt=timezone.now(),
+        ).order_by("start")
 
         date_value = self.request.query_params.get("date")
         f = self.request.query_params.get("from")

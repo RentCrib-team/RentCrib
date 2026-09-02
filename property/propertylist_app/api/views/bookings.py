@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q
-
+from datetime import timedelta
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,12 +16,24 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.throttling import UserRateThrottle
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse,inline_serializer
 
 from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.realtime import push_user_realtime_event
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
-from propertylist_app.models import Booking, IdempotencyKey, Room, AvailabilitySlot, UserProfile, Notification
+from propertylist_app.models import (
+    Booking,
+    IdempotencyKey,
+    Room,
+    AvailabilitySlot,
+    UserProfile,
+    Notification,
+    Message,
+    MessageThread,
+)
 from propertylist_app.validators import ensure_idempotency, validate_no_booking_conflict
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
@@ -271,7 +283,7 @@ class BookingListCreateView(generics.ListCreateAPIView):
                 if active >= slot_locked.max_bookings:
                     raise ValidationError({"detail": "This slot is fully booked."})
 
-                serializer.save(
+                booking = serializer.save(
                     user=self.request.user,
                     room=slot_locked.room,
                     slot=slot_locked,
@@ -281,11 +293,25 @@ class BookingListCreateView(generics.ListCreateAPIView):
 
             profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
             if getattr(profile, "notify_confirmations", True):
-                Notification.objects.create(
+                notification = Notification.objects.create(
                     user=self.request.user,
                     type="confirmation",
+                    target_type="booking",
+                    target_id=booking.id,
                     title="Booking confirmed",
                     body="Your booking has been successfully created.",
+                    audience=Notification.Audience.SEEKER,
+                )
+
+                push_user_realtime_event(
+                    self.request.user.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_confirmation",
+                        "notification_id": notification.id,
+                        "target_type": "booking",
+                        "target_id": booking.id,
+                    },
                 )
             return
 
@@ -314,17 +340,33 @@ class BookingListCreateView(generics.ListCreateAPIView):
             if conflicts:
                 raise ValidationError({"detail": "Selected dates clash with an existing booking."})
 
-            serializer.save(user=self.request.user, room=room)
+            booking = serializer.save(
+                user=self.request.user,
+                room=room,
+            )
 
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         if getattr(profile, "notify_confirmations", True):
-            Notification.objects.create(
-                user=self.request.user,
-                type="confirmation",
-                title="Booking confirmed",
-                body="Your booking has been successfully created.",
-            )
+                notification = Notification.objects.create(
+                    user=self.request.user,
+                    type="confirmation",
+                    target_type="booking",
+                    target_id=booking.id,
+                    title="Booking confirmed",
+                    body="Your booking has been successfully created.",
+                    audience=Notification.Audience.SEEKER,
+                )
 
+                push_user_realtime_event(
+                    self.request.user.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_confirmation",
+                        "notification_id": notification.id,
+                        "target_type": "booking",
+                        "target_id": booking.id,
+                    },
+                )
     @extend_schema(
         responses={
             200: inline_serializer(
@@ -533,40 +575,66 @@ class LandlordViewingsListView(generics.ListAPIView):
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
 
+        def serialize_with_effective_status(objects):
+            serializer = self.get_serializer(objects, many=True)
+            data = list(serializer.data)
+            now = timezone.now()
+
+            booking_by_id = {
+                booking.id: booking
+                for booking in objects
+            }
+
+            for row in data:
+                booking = booking_by_id.get(row.get("id"))
+
+                if not booking:
+                    continue
+
+                if row.get("status") == "cancelled":
+                    continue
+
+                if (
+                    booking.start
+                    and now >= booking.start + timedelta(minutes=10)
+                ):
+                    row["status"] = "completed"
+
+            return data
+
         page = self.paginate_queryset(queryset)
+
         if page is not None:
-            serializer = self.get_serializer(page, many=True)
+            data = serialize_with_effective_status(page)
             meta = _pagination_meta(self.paginator)
 
             return Response(
                 {
                     "ok": True,
                     "message": None,
-                    "data": serializer.data,
+                    "data": data,
                     "meta": meta,
                     "count": meta.get("count"),
                     "next": meta.get("next"),
                     "previous": meta.get("previous"),
-                    "results": serializer.data,
+                    "results": data,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        serializer = self.get_serializer(queryset, many=True)
+        data = serialize_with_effective_status(queryset)
 
         return Response(
             {
                 "ok": True,
                 "message": None,
-                "data": serializer.data,
-                "results": serializer.data,
+                "data": data,
+                "results": data,
             },
             status=status.HTTP_200_OK,
         )
-
-
-
-
+        
+    
 class BookingDetailView(generics.RetrieveAPIView):
     """GET /api/bookings/<id>/ â†’ see my booking"""
     serializer_class = BookingSerializer
@@ -673,54 +741,204 @@ class BookingRescheduleView(APIView):
         booking.save(update_fields=["start", "end"])
 
 
+        # ---------------------------------------------------------
         # Notify the other party after a successful reschedule.
-        # Landlord changes time -> seeker receives the notification.
-        # Seeker changes time -> landlord receives the notification.
-        from notifications.models import NotificationTemplate, OutboundNotification
+        #
+        # Relationship action rule:
+        # 1) shared RentCrib inbox/envelope message
+        # 2) bell notification for the other party
+        # 3) email for the other party
+        # 4) realtime envelope update for both parties
+        # 5) realtime bell update for the recipient
+        # ---------------------------------------------------------
 
-        recipient = seeker if request.user == landlord else landlord
+        from notifications.models import (
+            NotificationTemplate,
+            OutboundNotification,
+        )
 
-        template_exists = NotificationTemplate.objects.filter(
-            key="booking.updated",
-            channel=NotificationTemplate.CHANNEL_EMAIL,
-            is_active=True,
-        ).exists()
+        recipient = (
+            seeker
+            if request.user == landlord
+            else landlord
+        )
 
-        if template_exists and recipient:
-            OutboundNotification.objects.create(
-                user=recipient,
-                channel=NotificationTemplate.CHANNEL_EMAIL,
-                template_key="booking.updated",
-                context={
-                    "user": {
-                        "first_name": recipient.first_name,
-                    },
-                    "changed_by": {
-                        "name": (
-                            request.user.get_full_name().strip()
-                            or request.user.username
-                            or request.user.first_name
-                            or "The other party"
-                        ),
-                    },
-                    "room": {
-                        "title": booking.room.title,
-                    },
+        changed_by_name = (
+            request.user.get_full_name().strip()
+            or request.user.username
+            or request.user.first_name
+            or "The other party"
+        )
+
+        start_local = timezone.localtime(booking.start)
+        end_local = timezone.localtime(booking.end)
+
+        start_text = start_local.strftime(
+            "%d %b %Y, %H:%M"
+        )
+        end_text = end_local.strftime(
+            "%d %b %Y, %H:%M"
+        )
+
+        # ---------------------------------------------------------
+        # 1. SHARED ENVELOPE / INBOX MESSAGE
+        # ---------------------------------------------------------
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
+        )
+
+        event_key = (
+            f"booking:{booking.id}:"
+            f"{booking.start.isoformat()}:"
+            "rescheduled"
+        )
+
+        system_message = (
+            Message.objects
+            .filter(
+                metadata__event_key=event_key
+            )
+            .first()
+        )
+
+        if system_message is None:
+            system_message = Message.objects.create(
+                thread=thread,
+                sender=request.user,
+                body=(
+                    "Viewing rescheduled\n\n"
+                    f"{changed_by_name} changed the viewing "
+                    f"time for {booking.room.title}.\n\n"
+                    f"New time: {start_text} - {end_text}"
+                ),
+                message_type=Message.TYPE_TEXT,
+                metadata={
+                    "system_event": True,
+                    "event_type": "booking_rescheduled",
+                    "event_key": event_key,
                     "booking_id": booking.id,
+                    "room_id": booking.room_id,
+                    "room": {"title": booking.room.title,},  
+                    "changed_by_id": request.user.id,
+                    "changed_by_name": changed_by_name,
                     "new_start": booking.start.isoformat(),
                     "new_end": booking.end.isoformat(),
-
-                    # Mobile app deep link.
-                    "deep_link": f"/app/bookings/{booking.id}",
-
-                    # Web/Vercel route used by email action buttons.
-                    "cta_url": build_absolute_url(
-                        f"/viewings/{booking.id}",
-                        force_login=True,
-                    ),
                 },
             )
 
+            # The shared conversation changed for both parties.
+            for user in (
+                landlord,
+                seeker,
+            ):
+                if not user:
+                    continue
+
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                        "sender_id": system_message.sender_id,
+                    },
+                )
+
+        # ---------------------------------------------------------
+        # 2. BELL NOTIFICATION
+        # ---------------------------------------------------------
+        recipient_profile, _ = (
+            UserProfile.objects.get_or_create(
+                user=recipient
+            )
+        )
+
+        if getattr(
+            recipient_profile,
+            "notify_confirmations",
+            True,
+        ):
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=recipient,
+                    type="booking_rescheduled",
+                    target_type="message",
+                    target_id=system_message.id,
+                    defaults={
+                        "thread": thread,
+                        "audience": (
+                            Notification.Audience.SEEKER
+                            if recipient == seeker
+                            else Notification.Audience.LANDLORD
+                        ),
+                        "message": system_message,
+                        "title": "Viewing rescheduled",
+                        "body": (
+                            f"{changed_by_name} changed the "
+                            f"viewing time for "
+                            f"{booking.room.title} to "
+                            f"{start_text}."
+                        ),
+                    },
+                )
+            )
+
+            if notification_created:
+                push_user_realtime_event(
+                    recipient.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_rescheduled",
+                        "notification_id": notification.id,
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                    },
+                )
+
+            # -----------------------------------------------------
+            # 3. EMAIL
+            # -----------------------------------------------------
+            template_exists = (
+                NotificationTemplate.objects.filter(
+                    key="booking.updated",
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    is_active=True,
+                ).exists()
+            )
+
+            if template_exists:
+                OutboundNotification.objects.create(
+                    user=recipient,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key="booking.updated",
+                    context={
+                        "user": {
+                            "first_name": recipient.first_name,
+                        },
+                        "changed_by": {
+                            "name": changed_by_name,
+                        },
+                        "room": {
+                            "title": booking.room.title,
+                        },
+                        "booking_id": booking.id,
+                        "new_start": booking.start.isoformat(),
+                        "new_end": booking.end.isoformat(),
+
+                        # Mobile app deep link.
+                        "deep_link": (
+                            f"/app/bookings/{booking.id}"
+                        ),
+
+                        # Web/Vercel email action button.
+                        "cta_url": build_absolute_url(
+                            f"/messages?thread={thread.id}",
+                            force_login=True,
+                        ),
+                    },
+                )
 
         return ok_response(
             BookingSerializer(
@@ -805,6 +1023,181 @@ class BookingCancelView(APIView):
         booking.status = Booking.STATUS_CANCELLED
         booking.canceled_at = timezone.now()
         booking.save(update_fields=["status", "canceled_at"])
+
+        landlord = booking.room.property_owner
+        seeker = booking.user
+
+        recipient = (
+            seeker
+            if request.user == landlord
+            else landlord
+        )
+
+        cancelled_by_name = (
+            request.user.get_full_name().strip()
+            or request.user.username
+            or request.user.first_name
+            or "The other party"
+        )
+
+        # ---------------------------------------------------------
+        # 1. SHARED RENTCRIB ENVELOPE / INBOX MESSAGE
+        # ---------------------------------------------------------
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
+        )
+
+        event_key = (
+            f"booking:{booking.id}:cancelled"
+        )
+
+        system_message = (
+            Message.objects
+            .filter(
+                metadata__event_key=event_key,
+            )
+            .first()
+        )
+
+        if system_message is None:
+            system_message = Message.objects.create(
+                thread=thread,
+                sender=request.user,
+                body=(
+                    "Viewing cancelled\n\n"
+                    f"{cancelled_by_name} cancelled the viewing "
+                    f"for {booking.room.title}."
+                ),
+                message_type=Message.TYPE_TEXT,
+                metadata={
+                    "system_event": True,
+                    "event_type": "booking_cancelled",
+                    "event_key": event_key,
+                    "booking_id": booking.id,
+                    "room_id": booking.room_id,
+                    "room": {   "title": booking.room.title,},
+                    "cancelled_by_id": request.user.id,
+                    "cancelled_by_name": cancelled_by_name,
+                },
+            )
+
+            for user in (
+                landlord,
+                seeker,
+            ):
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                        "sender_id": system_message.sender_id,
+                    },
+                )
+
+        # ---------------------------------------------------------
+        # 2. RECIPIENT BELL
+        # ---------------------------------------------------------
+        recipient_profile, _ = (
+            UserProfile.objects.get_or_create(
+                user=recipient,
+            )
+        )
+
+        if getattr(
+            recipient_profile,
+            "notify_confirmations",
+            True,
+        ):
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=recipient,
+                    type="booking_cancelled",
+                    target_type="message",
+                    target_id=system_message.id,
+                    defaults={
+                        "audience": (
+                            Notification.Audience.SEEKER
+                            if recipient == seeker
+                            else Notification.Audience.LANDLORD
+                        ),
+                        "thread": thread,
+                        "message": system_message,
+                        "title": "Viewing cancelled",
+                        "body": (
+                            f"{cancelled_by_name} cancelled the "
+                            f"viewing for {booking.room.title}."
+                        ),
+                    },
+                )
+            )
+
+            if notification_created:
+                push_user_realtime_event(
+                    recipient.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_cancelled",
+                        "notification_id": notification.id,
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                    },
+                )
+                
+                
+                
+            # ---------------------------------------------------------
+            # 3. RECIPIENT EMAIL
+            # ---------------------------------------------------------
+            if getattr(
+                recipient_profile,
+                "notify_confirmations",
+                True,
+            ):
+                from notifications.models import (
+                    NotificationTemplate,
+                    OutboundNotification,
+                )
+
+                template_exists = (
+                    NotificationTemplate.objects.filter(
+                        key="booking.cancelled",
+                        channel=NotificationTemplate.CHANNEL_EMAIL,
+                        is_active=True,
+                    ).exists()
+                )
+
+                if template_exists:
+                    OutboundNotification.objects.create(
+                        user=recipient,
+                        channel=NotificationTemplate.CHANNEL_EMAIL,
+                        template_key="booking.cancelled",
+                        context={
+                            "user": {
+                                "first_name": recipient.first_name,
+                            },
+                            "cancelled_by_name": cancelled_by_name,
+                            "room": {"title": booking.room.title,},
+                            "booking_id": booking.id,
+
+                            # Mobile app destination.
+                            "deep_link": (
+                                f"/app/threads/{thread.id}"
+                            ),
+
+                            # Web/Vercel action button.
+                            "cta_url": build_absolute_url(
+                                f"/messages?thread={thread.id}",
+                                force_login=True,
+                            ),
+                        },
+                    )
+                
+                
+                
+                    
 
         logger.info(
             "booking_cancel_success booking_id=%s user_id=%s status=%s",
@@ -902,6 +1295,200 @@ class BookingSuspendView(APIView):
         booking.canceled_at = timezone.now()
         booking.save(update_fields=["status", "canceled_at"])
 
+        landlord = booking.room.property_owner
+        seeker = booking.user
+
+        suspended_by_name = (
+            request.user.get_full_name().strip()
+            or request.user.username
+            or request.user.first_name
+            or "RentCrib"
+        )
+
+        # If landlord/seeker suspended it, notify the other party.
+        # If staff suspended it, notify both booking participants.
+        if request.user == landlord:
+            notification_recipients = [seeker]
+
+        elif request.user == seeker:
+            notification_recipients = [landlord]
+
+        else:
+            notification_recipients = [
+                user
+                for user in (landlord, seeker)
+                if user
+            ]
+
+        # ---------------------------------------------------------
+        # 1. SHARED RENTCRIB ENVELOPE / INBOX MESSAGE
+        # ---------------------------------------------------------
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
+        )
+
+        event_key = (
+            f"booking:{booking.id}:suspended"
+        )
+
+        system_message = (
+            Message.objects
+            .filter(
+                metadata__event_key=event_key,
+            )
+            .first()
+        )
+
+        if system_message is None:
+            # A system event still requires a real sender FK.
+            # Use the acting participant where possible; otherwise
+            # use the landlord for a staff-triggered suspension.
+            message_sender = (
+                request.user
+                if request.user in {landlord, seeker}
+                else landlord
+            )
+
+            system_message = Message.objects.create(
+                thread=thread,
+                sender=message_sender,
+                body=(
+                    "Viewing suspended\n\n"
+                    f"The viewing for {booking.room.title} "
+                    "has been suspended."
+                ),
+                message_type=Message.TYPE_TEXT,
+                metadata={
+                    "system_event": True,
+                    "event_type": "booking_suspended",
+                    "event_key": event_key,
+                    "booking_id": booking.id,
+                    "room_id": booking.room_id,
+                    "room": {"title": booking.room.title,},
+                    "suspended_by_id": request.user.id,
+                    "suspended_by_name": suspended_by_name,
+                },
+            )
+
+            # Both participants' inbox/envelope should update.
+            for user in (
+                landlord,
+                seeker,
+            ):
+                if not user:
+                    continue
+
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                        "sender_id": system_message.sender_id,
+                    },
+                )
+
+        # ---------------------------------------------------------
+        # 2. BELL NOTIFICATION
+        # ---------------------------------------------------------
+        for recipient in notification_recipients:
+            recipient_profile, _ = (
+                UserProfile.objects.get_or_create(
+                    user=recipient,
+                )
+            )
+
+            if not getattr(
+                recipient_profile,
+                "notify_confirmations",
+                True,
+            ):
+                continue
+
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=recipient,
+                    type="booking_suspended",
+                    target_type="message",
+                    target_id=system_message.id,
+                    defaults={
+                        "thread": thread,
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
+                        ),
+                        "message": system_message,
+                        "title": "Viewing suspended",
+                        "body": (
+                            f"The viewing for "
+                            f"{booking.room.title} "
+                            "has been suspended."
+                        ),
+                    },
+                )
+            )
+
+            if notification_created:
+                push_user_realtime_event(
+                    recipient.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_suspended",
+                        "notification_id": notification.id,
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                    },
+                )
+                
+                
+            # -----------------------------------------------------
+            # 3. RECIPIENT EMAIL
+            # -----------------------------------------------------
+            from notifications.models import (
+                NotificationTemplate,
+                OutboundNotification,
+            )
+
+            template_exists = (
+                NotificationTemplate.objects.filter(
+                    key="booking.suspended",
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    is_active=True,
+                ).exists()
+            )
+
+            if template_exists:
+                OutboundNotification.objects.create(
+                    user=recipient,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key="booking.suspended",
+                    context={
+                        "user": {
+                            "first_name": recipient.first_name,
+                        },
+                        "room": {"title": booking.room.title,},
+                        "booking_id": booking.id,
+                        "suspended_by_name": suspended_by_name,
+
+                        # Mobile app destination.
+                        "deep_link": (
+                            f"/app/threads/{thread.id}"
+                        ),
+
+                        # Web/Vercel action button.
+                        "cta_url": build_absolute_url(
+                            f"/messages?thread={thread.id}",
+                            force_login=True,
+                        ),
+                    },
+                )    
+                
+                
+                
+
         logger.info(
             "booking_suspend_success booking_id=%s user_id=%s status=%s",
             booking.id,
@@ -969,6 +1556,193 @@ class BookingDeleteView(APIView):
         booking.is_deleted = True
         booking.deleted_at = now
         booking.save(update_fields=["is_deleted", "deleted_at"])
+
+        landlord = booking.room.property_owner
+        seeker = booking.user
+
+        deleted_by_name = (
+            request.user.get_full_name().strip()
+            or request.user.username
+            or request.user.first_name
+            or "RentCrib"
+        )
+
+        # Landlord deletes -> notify seeker.
+        # Seeker deletes -> notify landlord.
+        # Staff deletes -> notify both parties.
+        if request.user == landlord:
+            notification_recipients = [seeker]
+
+        elif request.user == seeker:
+            notification_recipients = [landlord]
+
+        else:
+            notification_recipients = [
+                user
+                for user in (landlord, seeker)
+                if user
+            ]
+
+        # ---------------------------------------------------------
+        # 1. SHARED RENTCRIB ENVELOPE / INBOX MESSAGE
+        # ---------------------------------------------------------
+        thread = get_or_create_canonical_thread(
+            landlord=landlord,
+            seeker=seeker,
+            room=booking.room,
+        )
+
+        event_key = (
+            f"booking:{booking.id}:deleted"
+        )
+
+        system_message = (
+            Message.objects
+            .filter(
+                metadata__event_key=event_key,
+            )
+            .first()
+        )
+
+        if system_message is None:
+            message_sender = (
+                request.user
+                if request.user in {landlord, seeker}
+                else landlord
+            )
+
+            system_message = Message.objects.create(
+                thread=thread,
+                sender=message_sender,
+                body=(
+                    "Viewing removed\n\n"
+                    f"{deleted_by_name} removed the viewing "
+                    f"for {booking.room.title}."
+                ),
+                message_type=Message.TYPE_TEXT,
+                metadata={
+                    "system_event": True,
+                    "event_type": "booking_deleted",
+                    "event_key": event_key,
+                    "booking_id": booking.id,
+                    "room_id": booking.room_id,
+                    "room": {"title": booking.room.title,},
+                    "deleted_by_id": request.user.id,
+                    "deleted_by_name": deleted_by_name,
+                },
+            )
+
+            for user in (
+                landlord,
+                seeker,
+            ):
+                if not user:
+                    continue
+
+                push_user_realtime_event(
+                    user.id,
+                    "new_message",
+                    {
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                        "sender_id": system_message.sender_id,
+                    },
+                )
+
+        # ---------------------------------------------------------
+        # 2. BELL NOTIFICATION
+        # ---------------------------------------------------------
+        for recipient in notification_recipients:
+            recipient_profile, _ = (
+                UserProfile.objects.get_or_create(
+                    user=recipient,
+                )
+            )
+
+            if not getattr(
+                recipient_profile,
+                "notify_confirmations",
+                True,
+            ):
+                continue
+
+            notification, notification_created = (
+                Notification.objects.get_or_create(
+                    user=recipient,
+                    type="booking_deleted",
+                    target_type="message",
+                    target_id=system_message.id,
+                    defaults={
+                        "thread": thread,
+                        "audience": (
+                            Notification.Audience.LANDLORD
+                            if recipient == landlord
+                            else Notification.Audience.SEEKER
+                        ),
+                        "message": system_message,
+                        "title": "Viewing removed",
+                        "body": (
+                            f"{deleted_by_name} removed the "
+                            f"viewing for {booking.room.title}."
+                        ),
+                    },
+                )
+            )
+
+            if notification_created:
+                push_user_realtime_event(
+                    recipient.id,
+                    "new_notification",
+                    {
+                        "kind": "booking_deleted",
+                        "notification_id": notification.id,
+                        "message_id": system_message.id,
+                        "thread_id": thread.id,
+                    },
+                )
+                
+                
+                
+            from notifications.models import (
+                NotificationTemplate,
+                OutboundNotification,
+            )
+
+            template_exists = (
+                NotificationTemplate.objects.filter(
+                    key="booking.deleted",
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    is_active=True,
+                ).exists()
+            )
+
+            if template_exists:
+                OutboundNotification.objects.create(
+                    user=recipient,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key="booking.deleted",
+                    context={
+                        "user": {
+                            "first_name": recipient.first_name,
+                        },
+                        "deleted_by_name": deleted_by_name,
+                        "room": {
+                            "title": booking.room.title,
+                        },
+                        "booking_id": booking.id,
+
+                        # Mobile app destination.
+                        "deep_link": f"/app/threads/{thread.id}",
+
+                        # Web/Vercel action button.
+                        "cta_url": build_absolute_url(
+                            f"/messages?thread={thread.id}",
+                            force_login=True,
+                        ),
+                    },
+                )
+            
+                
 
         logger.info(
             "booking_delete_success booking_id=%s user_id=%s is_deleted=%s",

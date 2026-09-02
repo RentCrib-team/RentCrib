@@ -1,4 +1,4 @@
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -194,7 +194,43 @@ Thank you for using RentCrib.
 
 
 
+def _login_gate_cta_url(cta_url: str | None, next_path: str) -> str:
+    """
+    Force internal RentCrib email CTAs through login while leaving
+    external URLs and already login-gated URLs unchanged.
+    """
+    if not cta_url:
+        return build_frontend_login_redirect(next_path)
 
+    value = str(cta_url).strip()
+    base = _frontend_base_url()
+
+    # Relative internal URL.
+    if value.startswith("/"):
+        if value.startswith("/login"):
+            return f"{base}{value}"
+        return build_frontend_login_redirect(value)
+
+    # Absolute URL on our own frontend.
+    parsed = urlsplit(value)
+    base_parsed = urlsplit(base)
+
+    if (
+        parsed.scheme in {"http", "https"}
+        and parsed.netloc == base_parsed.netloc
+    ):
+        internal_path = parsed.path or "/"
+
+        if parsed.query:
+            internal_path += f"?{parsed.query}"
+
+        if internal_path.startswith("/login"):
+            return value
+
+        return build_frontend_login_redirect(internal_path)
+
+    # External URLs must not be rewritten.
+    return value
 
 
 class NotificationService:
@@ -224,7 +260,10 @@ class NotificationService:
 
         # provide standard CTA URLs for templates
         ctx.setdefault("next_path", next_path)
-        ctx.setdefault("cta_url", build_login_redirect_url(next_path))
+        ctx["cta_url"] = _login_gate_cta_url(
+            ctx.get("cta_url"),
+            next_path,
+        )
         ctx.setdefault("inbox_url", build_login_redirect_url("/inbox"))
 
         return ctx
@@ -257,7 +296,10 @@ class NotificationService:
         # Inject new keys that templates can use.
         context_dict.setdefault("frontend_base_url", _frontend_base_url())
         context_dict.setdefault("next_path", next_path)
-        context_dict.setdefault("cta_url", build_frontend_login_redirect(next_path))
+        context_dict["cta_url"] = _login_gate_cta_url(
+            context_dict.get("cta_url"),
+            next_path,
+        )
         context_dict.setdefault("inbox_url", build_frontend_login_redirect("/inbox"))
 
         subject_tpl = Template(template_obj.subject or "")

@@ -1,14 +1,28 @@
 from django.conf import settings
-from urllib.parse import quote
 
 
 def inbox_login_link() -> str:
-    base = getattr(settings, "FRONTEND_BASE_URL", "").rstrip("/")
-    # login then redirect to inbox
-    return f"{base}/login?next={quote('/inbox')}"
+    """
+    Return the direct frontend inbox URL.
+
+    Authentication is handled by the frontend:
+    - signed-in users open the inbox using their existing session;
+    - signed-out users are redirected through login by the frontend
+      and returned to the inbox afterwards.
+    """
+    base = getattr(
+        settings,
+        "FRONTEND_BASE_URL",
+        "",
+    ).rstrip("/")
+
+    return f"{base}/messages"
 
 
-def notification_email_html(title: str, body: str) -> str:
+def notification_email_html(
+    title: str,
+    body: str,
+) -> str:
     link = inbox_login_link()
     safe_title = title or "RentOut notification"
     safe_body = body or ""
@@ -28,7 +42,7 @@ def notification_email_html(title: str, body: str) -> str:
       </a>
 
       <p style="margin:18px 0 0 0;color:#777;font-size:12px;">
-        If the button doesn’t work, copy and paste this link into your browser:<br/>
+        If the button does not work, copy and paste this link into your browser:<br/>
         {link}
       </p>
     </div>

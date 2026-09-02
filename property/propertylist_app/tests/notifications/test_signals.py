@@ -79,6 +79,16 @@ def test_new_message_signal_emits_realtime_message_and_notification():
 
     realtime.assert_any_call(
         recipient.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "thread_unread_count": 1,
+            "account_unread_total": 1,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
         "new_notification",
         {
             "kind": "message",
@@ -87,7 +97,7 @@ def test_new_message_signal_emits_realtime_message_and_notification():
         },
     )
 
-    assert realtime.call_count == 2
+    assert realtime.call_count == 3
 
     assert InAppNotification.objects.filter(
         user=recipient,
@@ -98,8 +108,65 @@ def test_new_message_signal_emits_realtime_message_and_notification():
     assert OutboundNotification.objects.filter(
         user=recipient,
         template_key="message.new",
-    ).count() == 1    
+    ).count() == 1
     
+    
+def test_new_message_realtime_delivery_ignores_notification_preference():
+    from propertylist_app.models import UserProfile
+
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create()
+    thread.participants.add(sender, recipient)
+
+    profile, _ = UserProfile.objects.get_or_create(
+        user=recipient
+    )
+    profile.notify_messages = False
+    profile.save(update_fields=["notify_messages"])
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        msg = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Realtime delivery must remain enabled",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_message",
+        {
+            "message_id": msg.id,
+            "thread_id": thread.id,
+            "sender_id": sender.id,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "thread_unread_count": 1,
+            "account_unread_total": 1,
+        },
+    )
+
+    assert realtime.call_count == 2
+
+    assert not InAppNotification.objects.filter(
+        user=recipient,
+        thread=thread,
+        message=msg,
+    ).exists()
+
+    assert not OutboundNotification.objects.filter(
+        user=recipient,
+        template_key="message.new",
+    ).exists()
     
 
 def test_new_booking_signal_queues_owner_and_booker_emails():
@@ -118,12 +185,24 @@ def test_new_booking_signal_queues_owner_and_booker_emails():
             start = timezone.now()
             end = start + timedelta(hours=1)
 
-            Booking.objects.create(
+            booking = Booking.objects.create(
                 user=booker,
                 room=room,
                 start=start,
                 end=end,
             )
+            
+    thread = (
+        MessageThread.objects
+        .filter(room=room)
+        .filter(participants=owner)
+        .filter(participants=booker)
+        .distinct()
+        .get()
+    )
+
+    assert thread.landlord_id == owner.id
+    assert thread.seeker_id == booker.id        
 
     assert OutboundNotification.objects.filter(template_key="booking.new", user=owner).exists()
     assert OutboundNotification.objects.filter(template_key="booking.confirmation", user=booker).exists()
@@ -180,7 +259,9 @@ def test_new_message_restores_recipient_binned_thread_and_returns_it_in_messages
     )
     
     
-def test_thread_mark_read_emits_realtime_read_and_unread_count():
+def test_thread_mark_read_emits_realtime_read_and_unread_count(
+    django_assert_max_num_queries,
+):
     sender, reader = make_users(2)
 
     thread = MessageThread.objects.create()
@@ -202,18 +283,22 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count():
     client = APIClient()
     client.force_authenticate(user=reader)
 
-    with patch(
-        "propertylist_app.api.views.messaging.push_user_realtime_event"
-    ) as realtime:
-        response = client.post(
-            f"/api/v1/messages/threads/{thread.id}/read/"
-        )
+    with django_assert_max_num_queries(10):
+        with patch(
+            "propertylist_app.api.views.messaging.push_user_realtime_event"
+        ) as realtime:
+            response = client.post(
+                f"/api/v1/messages/threads/{thread.id}/read/"
+            )
 
     assert response.status_code == 200
 
     payload = response.json()
     assert payload["ok"] is True
     assert payload["data"]["marked"] == 2
+    
+    assert payload["data"]["thread_unread_count"] == 0
+    assert payload["data"]["account_unread_total"] == 0
 
     assert MessageRead.objects.filter(
         user=reader,
@@ -235,8 +320,221 @@ def test_thread_mark_read_emits_realtime_read_and_unread_count():
         "unread_count_changed",
         {
             "thread_id": thread.id,
-            "unread_count": 0,
+            "thread_unread_count": 0,
+            "account_unread_total": 0,
         },
     )
 
     assert realtime.call_count == 2    
+    
+    
+def test_bulk_thread_mark_read_updates_realtime_and_account_total(
+    django_assert_max_num_queries,
+):
+    sender, reader = make_users(2)
+
+    first_thread = MessageThread.objects.create()
+    first_thread.participants.add(sender, reader)
+
+    second_thread = MessageThread.objects.create()
+    second_thread.participants.add(sender, reader)
+
+    remaining_thread = MessageThread.objects.create()
+    remaining_thread.participants.add(sender, reader)
+
+    first_messages = [
+        Message.objects.create(
+            thread=first_thread,
+            sender=sender,
+            body=f"First thread {index}",
+            message_type=Message.TYPE_TEXT,
+        )
+        for index in range(2)
+    ]
+
+    second_messages = [
+        Message.objects.create(
+            thread=second_thread,
+            sender=sender,
+            body=f"Second thread {index}",
+            message_type=Message.TYPE_TEXT,
+        )
+        for index in range(2)
+    ]
+
+    remaining_message = Message.objects.create(
+        thread=remaining_thread,
+        sender=sender,
+        body="Must remain unread",
+        message_type=Message.TYPE_TEXT,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=reader)
+
+    with django_assert_max_num_queries(12):
+        with patch(
+            "propertylist_app.api.views.messaging.push_user_realtime_event"
+        ) as realtime:
+            response = client.post(
+                "/api/v1/messages/threads/read/",
+                {
+                    "thread_ids": [
+                        first_thread.id,
+                        second_thread.id,
+                    ],
+                },
+                format="json",
+            )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    data = payload["data"]
+
+    assert data["marked"] == 4
+    assert set(data["thread_ids"]) == {
+        first_thread.id,
+        second_thread.id,
+    }
+    assert data["account_unread_total"] == 1
+
+    assert MessageRead.objects.filter(
+        user=reader,
+        message__in=first_messages + second_messages,
+    ).count() == 4
+
+    assert not MessageRead.objects.filter(
+        user=reader,
+        message=remaining_message,
+    ).exists()
+
+    realtime.assert_any_call(
+        reader.id,
+        "unread_count_changed",
+        {
+            "thread_ids": data["thread_ids"],
+            "thread_unread_counts": {
+                str(thread_id): 0
+                for thread_id in data["thread_ids"]
+            },
+            "account_unread_total": 1,
+        },
+    )  
+    
+def test_new_message_realtime_is_partitioned_by_active_role():
+    from propertylist_app.models import UserProfile
+
+    sender, recipient = make_users(2)
+
+    thread = MessageThread.objects.create(
+        landlord=recipient,
+        seeker=sender,
+    )
+    thread.participants.add(sender, recipient)
+
+    NotificationTemplate.objects.create(
+        key="message.new",
+        channel="email",
+        subject="New message",
+        body="Message",
+        is_active=True,
+    )
+
+    profile, _ = UserProfile.objects.get_or_create(
+        user=recipient
+    )
+
+    # Recipient is the landlord in this thread but is
+    # currently using RentCrib in seeker mode.
+    profile.role = "seeker"
+    profile.save(update_fields=["role"])
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        hidden_message = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Landlord message while seeker mode is active",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    # The message and notification must still be stored.
+    assert Message.objects.filter(
+        pk=hidden_message.pk,
+    ).exists()
+
+    hidden_notification = InAppNotification.objects.get(
+        user=recipient,
+        thread=thread,
+        message=hidden_message,
+    )
+
+    assert (
+        hidden_notification.audience
+        == InAppNotification.Audience.LANDLORD
+    )
+
+    # Email remains independent of the currently selected role.
+    assert OutboundNotification.objects.filter(
+        user=recipient,
+        template_key="message.new",
+    ).count() == 1
+
+    # But no landlord realtime event may leak into seeker mode.
+    assert realtime.call_count == 0
+
+    # Switch the same account back to landlord mode.
+    profile.role = "landlord"
+    profile.save(update_fields=["role"])
+
+    with patch(
+        "propertylist_app.signals.push_user_realtime_event"
+    ) as realtime:
+        visible_message = Message.objects.create(
+            thread=thread,
+            sender=sender,
+            body="Landlord message while landlord mode is active",
+            message_type=Message.TYPE_TEXT,
+        )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_message",
+        {
+            "message_id": visible_message.id,
+            "thread_id": thread.id,
+            "sender_id": sender.id,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "unread_count_changed",
+        {
+            "thread_id": thread.id,
+            "thread_unread_count": 2,
+            "account_unread_total": 2,
+        },
+    )
+
+    realtime.assert_any_call(
+        recipient.id,
+        "new_notification",
+        {
+            "kind": "message",
+            "message_id": visible_message.id,
+            "thread_id": thread.id,
+        },
+    )
+
+    assert realtime.call_count == 3
+
+    # Switching roles did not delete the first message.
+    assert Message.objects.filter(
+        id__in=[
+            hidden_message.id,
+            visible_message.id,
+        ]
+    ).count() == 2      

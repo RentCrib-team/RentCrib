@@ -15,14 +15,25 @@ from rest_framework.views import APIView
 from rest_framework import filters
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.throttling import ScopedRateThrottle, UserRateThrottle
-from drf_spectacular.utils import extend_schema, OpenApiResponse,inline_serializer,OpenApiParameter
+from drf_spectacular.utils import (
+    extend_schema,
+    extend_schema_view,
+    OpenApiResponse,
+    inline_serializer,
+    OpenApiParameter,
+)
 from drf_spectacular.types import OpenApiTypes
 
+
+from propertylist_app.services.message_threads import (
+    get_or_create_canonical_thread,
+)
 
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-
+from django.db.models import Count, Exists, Max, OuterRef, Q, Subquery, Prefetch, IntegerField
+from django.db.models.functions import Coalesce
 
 
 
@@ -75,6 +86,34 @@ from .common import ok_response, _pagination_meta, _wrap_response_success
 class EmptyDataSerializer(serializers.Serializer):
     pass
 
+def _role_scoped_threads(user):
+    profile, _ = UserProfile.objects.get_or_create(
+        user=user
+    )
+    active_role = profile.role
+
+    qs = MessageThread.objects.filter(
+        participants=user
+    )
+
+    if active_role == "landlord":
+        return qs.filter(
+            Q(landlord=user)
+            | Q(
+                landlord__isnull=True,
+                seeker__isnull=True,
+            )
+        )
+
+    return qs.filter(
+        Q(seeker=user)
+        | Q(
+            landlord__isnull=True,
+            seeker__isnull=True,
+        )
+    )
+
+
 
 
 
@@ -112,9 +151,20 @@ class InboxListView(APIView):
         user = request.user
 
         # 1) notifications
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
+        active_role = profile.role
+
         notif_qs = (
             Notification.objects
-            .filter(user=user)
+            .filter(
+                user=user,
+                audience__in=[
+                    active_role,
+                    Notification.Audience.BOTH,
+                ],
+            )
             .order_by("-created_at")[:200]
         )
 
@@ -140,37 +190,65 @@ class InboxListView(APIView):
 
         # 2) message threads (use latest message timestamp as created_at)
         threads = (
-            MessageThread.objects
-            .filter(participants=user)
+            _role_scoped_threads(user)
             .annotate(
                 last_msg_at=Max("messages__created"),
                 unread_count=Count(
                     "messages",
-                    filter=~Q(messages__sender=user) & ~Q(messages__reads__user=user),
+                    filter=(
+                        (
+                            Q(messages__metadata__system_event=True)
+                            | ~Q(messages__sender=user)
+                        )
+                        & ~Q(messages__reads__user=user)
+                    ),
                     distinct=True,
                 ),
             )
             .prefetch_related(
                 "participants__profile",
-                "messages",
+                Prefetch(
+                    "messages",
+                    queryset=(
+                        Message.objects
+                        .order_by("-created")[:1]
+                    ),
+                    to_attr="_prefetched_last_messages",
+                ),
             )
             .order_by("-last_msg_at")
         )[:200]
 
         thread_items = []
         for t in threads:
+            prefetched_messages = getattr(
+                t,
+                "_prefetched_last_messages",
+                [],
+            )
             last_msg = (
-                t.messages.order_by("-created").first()       # FIX: created not created_at
-                if hasattr(t, "messages") else None
+                prefetched_messages[0]
+                if prefetched_messages
+                else None
             )
             if not last_msg:
                 continue
 
             unread = getattr(t, "unread_count", 0)
 
-            other_party = (
-                t.participants.exclude(id=user.id).first()
-                if hasattr(t, "participants") else None
+            prefetched_participants = getattr(
+                t,
+                "_prefetched_objects_cache",
+                {},
+            ).get("participants", [])
+
+            other_party = next(
+                (
+                    participant
+                    for participant in prefetched_participants
+                    if participant.id != user.id
+                ),
+                None,
             )
             title = getattr(other_party, "username", None) or "Message"
 
@@ -430,17 +508,37 @@ class MySavedRoomsView(generics.ListAPIView):
 #---------------------
 # Messaging
 # --------------------
+
+@extend_schema_view(
+    get=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="role",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["landlord", "seeker"],
+                description=(
+                    "Return threads where the authenticated user has "
+                    "the authoritative landlord or seeker role."
+                ),
+            ),
+        ],
+    ),
+)
 class MessageThreadListCreateView(generics.ListCreateAPIView):
 
     """
-    GET /api/messages/threads/
+    GET /api/v1/messages/threads/
 
     Query params:
       - folder : inbox (default) | sent | bin | new | waiting_reply
-      - label  : filter by per-user label (Viewing scheduled, Good fit, etc.)
+      - role   : landlord | seeker
+      - label  : filter by per-user label
       - q      : search in message body or participant username
       - sort_by: latest (default) | oldest
     """
+    
     serializer_class = MessageThreadSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardLimitOffsetPagination
@@ -449,29 +547,91 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return MessageThread.objects.none()
+
         user = self.request.user
         params = self.request.query_params
 
+        unread_messages = (
+            Message.objects
+            .filter(thread=OuterRef("pk"))
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
+            .exclude(reads__user=user)
+            .values("thread")
+            .annotate(total=Count("id", distinct=True))
+            .values("total")[:1]
+        )
+
         qs = (
-                MessageThread.objects
-                .filter(participants=user)
-                .annotate(
-                    unread_count=Count(
-                        "messages",
-                        filter=~Q(messages__sender=user) & ~Q(messages__reads__user=user),
-                        distinct=True,
+            MessageThread.objects
+            .filter(participants=user)
+            .annotate(
+                unread_count=Coalesce(
+                    Subquery(
+                        unread_messages,
+                        output_field=IntegerField(),
                     ),
-                )
-                .prefetch_related(
-                    "participants__profile",
+                    0,
+                ),
+            )
+            .prefetch_related(
+                "participants__profile",
+                Prefetch(
                     "messages",
+                    queryset=(
+                        Message.objects
+                        .select_related("sender")
+                        .prefetch_related("reads")
+                        .order_by("-created")[:1]
+                    ),
+                    to_attr="_prefetched_last_messages",
+                ),
+            )
+        )
+
+
+        requested_role = (params.get("role") or "").strip().lower()
+
+        if requested_role not in {"", "landlord", "seeker"}:
+            raise ValidationError(
+                {
+                    "role": (
+                        "Invalid role. Expected 'landlord' or 'seeker'."
+                    )
+                }
+            )
+
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
+        active_role = profile.role
+
+        if active_role == "landlord":
+            qs = qs.filter(
+                Q(landlord=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
                 )
             )
+        else:
+            qs = qs.filter(
+                Q(seeker=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+
+
 
         folder = (params.get("folder") or "").strip().lower()
 
         bin_thread_ids = list(
-            MessageThreadState.objects.filter(user=user, in_bin=True)
+            MessageThreadState.objects
+            .filter(user=user, in_bin=True)
             .values_list("thread_id", flat=True)
         )
 
@@ -482,15 +642,21 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 qs = qs.exclude(id__in=bin_thread_ids)
 
             if folder == "new":
-                unread_exists = Message.objects.filter(
-                    thread=OuterRef("pk")
-                ).exclude(
-                    sender=user
-                ).exclude(
-                    reads__user=user
+                unread_exists = (
+                    Message.objects
+                    .filter(thread=OuterRef("pk"))
+                    .filter(
+                        Q(metadata__system_event=True)
+                        | ~Q(sender=user)
+                    )
+                    .exclude(reads__user=user)
                 )
-                qs = qs.annotate(has_unread=Exists(unread_exists))
-                qs = qs.filter(has_unread=True)
+
+                qs = qs.annotate(
+                    has_unread=Exists(unread_exists)
+                ).filter(
+                    has_unread=True
+                )
 
             elif folder == "sent":
                 last_sender_subq = (
@@ -499,19 +665,30 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                     .order_by("-created")
                     .values("sender_id")[:1]
                 )
-                qs = qs.annotate(last_sender_id=Subquery(last_sender_subq))
-                qs = qs.filter(last_sender_id=user.id)
+
+                qs = qs.annotate(
+                    last_sender_id=Subquery(last_sender_subq)
+                ).filter(
+                    last_sender_id=user.id
+                )
 
         label = (params.get("label") or "").strip()
+
         if label:
-            label_ids = MessageThreadState.objects.filter(
-                user=user,
-                label=label,
-                in_bin=False,
-            ).values_list("thread_id", flat=True)
+            label_ids = (
+                MessageThreadState.objects
+                .filter(
+                    user=user,
+                    label=label,
+                    in_bin=False,
+                )
+                .values_list("thread_id", flat=True)
+            )
+
             qs = qs.filter(id__in=label_ids)
 
         search = (params.get("q") or "").strip()
+
         if search:
             qs = qs.filter(
                 Q(messages__body__icontains=search)
@@ -534,8 +711,11 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 .values("username")[:1]
             )
 
-            qs = qs.annotate(other_username=Subquery(other_username_subq)).order_by(
-                "other_username", "-created_at"
+            qs = qs.annotate(
+                other_username=Subquery(other_username_subq)
+            ).order_by(
+                "other_username",
+                "-created_at",
             )
 
         else:
@@ -591,6 +771,18 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
                 required=False,
                 description="Maximum number of threads to return.",
             ),
+            OpenApiParameter(
+                name="role",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["landlord", "seeker"],
+                description=(
+                    "Return only threads where the authenticated user has "
+                    "the authoritative landlord or seeker role."
+                ),
+            ),
+            
             OpenApiParameter(
                 name="offset",
                 type=int,
@@ -689,6 +881,101 @@ class MessageThreadListCreateView(generics.ListCreateAPIView):
 
 
 
+class MessageThreadDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/v1/messages/threads/<thread_id>/
+
+    Return one message thread when the authenticated user is a participant.
+    """
+
+    serializer_class = MessageThreadSerializer
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [UserRateThrottle, MessagingScopedThrottle]
+
+    lookup_url_kwarg = "thread_id"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return MessageThread.objects.none()
+
+        user = self.request.user
+        
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user
+        )
+        active_role = profile.role
+
+        unread_messages = (
+            Message.objects
+            .filter(thread=OuterRef("pk"))
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
+            .exclude(reads__user=user)
+            .values("thread")
+            .annotate(total=Count("id", distinct=True))
+            .values("total")[:1]
+        )
+
+        qs = (
+            MessageThread.objects
+            .filter(participants=user)
+        )
+
+        if active_role == "landlord":
+            qs = qs.filter(
+                Q(landlord=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+        else:
+            qs = qs.filter(
+                Q(seeker=user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+
+        return (
+            qs
+            .annotate(
+                unread_count=Coalesce(
+                    Subquery(
+                        unread_messages,
+                        output_field=IntegerField(),
+                    ),
+                    0,
+                ),
+            )
+            .prefetch_related(
+                "participants__profile",
+                "messages",
+            )
+            .distinct()
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        states = MessageThreadState.objects.filter(
+            user=request.user,
+            thread=instance,
+        ).first()
+
+        setattr(instance, "_state_for_user", states)
+
+        serializer = self.get_serializer(instance)
+
+        return ok_response(
+            serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
 
 
 class MessageThreadStateView(APIView):
@@ -713,8 +1000,34 @@ class MessageThreadStateView(APIView):
         }
     )
     def patch(self, request, thread_id):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
+        qs = MessageThread.objects.filter(
+            participants=request.user
+        )
+
+        if active_role == "landlord":
+            qs = qs.filter(
+                Q(landlord=request.user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+        else:
+            qs = qs.filter(
+                Q(seeker=request.user)
+                | Q(
+                    landlord__isnull=True,
+                    seeker__isnull=True,
+                )
+            )
+
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            qs,
             pk=thread_id,
         )
 
@@ -783,15 +1096,13 @@ class MessageStatsView(APIView):
                 },
             )
         },
-        description="Return message statistics for the authenticated user, including total threads, total unread messages, and good-fit thread counts.",
+            description="Return message statistics for the authenticated user, including total threads, total unread messages, and good-fit thread counts.",
     )
     def get(self, request):
         user = request.user
 
-        # Base threads: I am a participant
-        base_threads = MessageThread.objects.filter(
-            participants=user
-        )
+        # Base threads: visible in my active role
+        base_threads = _role_scoped_threads(user)
 
         # Exclude threads that *I* put in Bin
         bin_thread_ids = list(
@@ -815,20 +1126,30 @@ class MessageStatsView(APIView):
         total_threads = base_threads.distinct().count()
         total_good_fit = good_fit_threads.distinct().count()
 
-        # Unread = messages not from me & not read by me
+        # Keep stats consistent with the thread-list unread rule:
+        # system events or messages from the other participant remain
+        # unread until this user reads them.
         total_unread = (
             Message.objects
             .filter(thread__in=base_threads)
-            .exclude(sender=user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
             .exclude(reads__user=user)
+            .distinct()
             .count()
         )
 
         good_fit_unread = (
             Message.objects
             .filter(thread__in=good_fit_threads)
-            .exclude(sender=user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=user)
+            )
             .exclude(reads__user=user)
+            .distinct()
             .count()
         )
 
@@ -873,7 +1194,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
 
         # HARD GUARD: user must be a participant (otherwise 404)
         get_object_or_404(
-            MessageThread.objects.filter(participants=user),
+            _role_scoped_threads(user),
             id=thread_id,
         )
 
@@ -892,7 +1213,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=self.request.user),
+            _role_scoped_threads(self.request.user),
             id=self.kwargs["thread_id"]
         )
         serializer.save(thread=thread, sender=self.request.user)
@@ -1013,7 +1334,11 @@ class ThreadMarkReadView(APIView):
                     "message": serializers.CharField(required=False, allow_null=True),
                     "data": inline_serializer(
                         name="ThreadMarkReadData",
-                        fields={"marked": serializers.IntegerField()},
+                        fields={
+                            "marked": serializers.IntegerField(),
+                            "thread_unread_count": serializers.IntegerField(),
+                            "account_unread_total": serializers.IntegerField(),
+                        },
                     ),
                 },
             ),
@@ -1024,17 +1349,27 @@ class ThreadMarkReadView(APIView):
     )
     def post(self, request, thread_id):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
-        # Materialise before creating MessageRead rows.
-        # Otherwise re-evaluating the queryset afterwards can incorrectly
-        # report zero because the messages have just become read.
+        
+
+        # A normal human message is inbound when someone else sent it.
+        #
+        # A RentCrib system message is addressed to the thread participants
+        # regardless of which real user had to be stored in Message.sender.
+        #
+        # Therefore system_event messages must be markable as read by BOTH
+        # participants, including the user whose id happens to be in sender_id.
         messages_to_mark = list(
             thread.messages
-            .exclude(sender=request.user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
             .exclude(reads__user=request.user)
+            .distinct()
         )
 
         MessageRead.objects.bulk_create(
@@ -1048,10 +1383,17 @@ class ThreadMarkReadView(APIView):
             ignore_conflicts=True,
         )
 
-        # Tell each original sender which of their messages were read.
+        # Only genuine human messages produce read receipts back to their
+        # original sender. RentCrib system events do not have a meaningful
+        # human sender even though the model requires one.
         message_ids_by_sender = {}
 
         for message in messages_to_mark:
+            metadata = message.metadata or {}
+
+            if metadata.get("system_event") is True:
+                continue
+
             message_ids_by_sender.setdefault(
                 message.sender_id,
                 [],
@@ -1068,11 +1410,12 @@ class ThreadMarkReadView(APIView):
                 },
             )
 
-        # Use the same unread definition as MessageStatsView:
-        # participant threads, excluding threads this user placed in Bin.
-        base_threads = MessageThread.objects.filter(
-            participants=request.user,
-        )
+        # Calculate the global unread-envelope count using exactly the same rule:
+        #
+        # - normal messages count when another user sent them
+        # - system_event messages count for every participant until that
+        #   participant has their own MessageRead row
+        base_threads = _role_scoped_threads(request.user)
 
         bin_thread_ids = list(
             MessageThreadState.objects
@@ -1094,8 +1437,12 @@ class ThreadMarkReadView(APIView):
         total_unread = (
             Message.objects
             .filter(thread__in=base_threads)
-            .exclude(sender=request.user)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
             .exclude(reads__user=request.user)
+            .distinct()
             .count()
         )
 
@@ -1104,18 +1451,166 @@ class ThreadMarkReadView(APIView):
             "unread_count_changed",
             {
                 "thread_id": thread.id,
-                "unread_count": total_unread,
+                "thread_unread_count": 0,
+                "account_unread_total": total_unread,
             },
         )
 
         return ok_response(
             {
                 "marked": len(messages_to_mark),
+                "thread_unread_count": 0,
+                "account_unread_total": total_unread,
             },
             status_code=status.HTTP_200_OK,
         )
+        
+        
+class ThreadsBulkMarkReadView(APIView):
+    """
+    POST /api/v1/messages/threads/read/
 
+    Mark multiple message threads as read for the authenticated user.
+    """
 
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        thread_ids = request.data.get("thread_ids") or []
+
+        if not isinstance(thread_ids, list) or not thread_ids:
+            raise ValidationError(
+                {"thread_ids": "Provide a non-empty list of thread ids."}
+            )
+
+        try:
+            thread_ids = list({int(thread_id) for thread_id in thread_ids})
+        except (TypeError, ValueError):
+            raise ValidationError(
+                {"thread_ids": "All thread ids must be integers."}
+            )
+
+        threads = list(
+            _role_scoped_threads(request.user)
+            .filter(
+                id__in=thread_ids,
+            )
+            .distinct()
+        )
+
+        found_ids = {thread.id for thread in threads}
+        missing_ids = sorted(set(thread_ids) - found_ids)
+
+        if missing_ids:
+            raise ValidationError(
+                {
+                    "thread_ids": (
+                        "One or more threads do not exist or do not belong "
+                        f"to this user: {missing_ids}"
+                    )
+                }
+            )
+
+        messages_to_mark = list(
+            Message.objects
+            .filter(thread__in=threads)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
+            .exclude(reads__user=request.user)
+            .distinct()
+        )
+
+        MessageRead.objects.bulk_create(
+            [
+                MessageRead(
+                    message=message,
+                    user=request.user,
+                )
+                for message in messages_to_mark
+            ],
+            ignore_conflicts=True,
+        )
+
+        message_ids_by_sender_and_thread = {}
+
+        for message in messages_to_mark:
+            metadata = message.metadata or {}
+
+            if metadata.get("system_event") is True:
+                continue
+
+            key = (message.sender_id, message.thread_id)
+
+            message_ids_by_sender_and_thread.setdefault(
+                key,
+                [],
+            ).append(message.id)
+
+        for (sender_id, thread_id), message_ids in message_ids_by_sender_and_thread.items():
+            push_user_realtime_event(
+                sender_id,
+                "message_read",
+                {
+                    "thread_id": thread_id,
+                    "reader_id": request.user.id,
+                    "message_ids": message_ids,
+                },
+            )
+
+        base_threads = _role_scoped_threads(request.user)
+
+        bin_thread_ids = list(
+            MessageThreadState.objects
+            .filter(
+                user=request.user,
+                in_bin=True,
+            )
+            .values_list(
+                "thread_id",
+                flat=True,
+            )
+        )
+
+        if bin_thread_ids:
+            base_threads = base_threads.exclude(
+                id__in=bin_thread_ids,
+            )
+
+        total_unread = (
+            Message.objects
+            .filter(thread__in=base_threads)
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
+            .exclude(reads__user=request.user)
+            .distinct()
+            .count()
+        )
+
+        push_user_realtime_event(
+            request.user.id,
+            "unread_count_changed",
+            {
+                "thread_ids": thread_ids,
+                "thread_unread_counts": {
+                    str(thread_id): 0
+                    for thread_id in thread_ids
+                },
+                "account_unread_total": total_unread,
+            },
+        )
+
+        return ok_response(
+            {
+                "marked": len(messages_to_mark),
+                "thread_ids": thread_ids,
+                "account_unread_total": total_unread,
+            },
+            status_code=status.HTTP_200_OK,
+        )        
 
 
 class ThreadSetLabelView(APIView):
@@ -1153,7 +1648,7 @@ class ThreadSetLabelView(APIView):
     def post(self, request, thread_id):
         # Only allow labels for threads I am in
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
@@ -1230,7 +1725,7 @@ class ThreadMoveToBinView(APIView):
     )
     def post(self, request, thread_id):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
@@ -1283,7 +1778,7 @@ class ThreadRestoreFromBinView(APIView):
     )
     def post(self, request, thread_id):
         thread = get_object_or_404(
-            MessageThread.objects.filter(participants=request.user),
+            _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
@@ -1342,26 +1837,11 @@ class StartThreadFromRoomView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        users = [room.property_owner, request.user]
-
-        existing = (
-            MessageThread.objects
-            .filter(Q(room=room) | Q(room__isnull=True))
-            .filter(participants=room.property_owner)
-            .filter(participants=request.user)
-            .distinct()
-            .first()
+        thread = get_or_create_canonical_thread(
+            landlord=room.property_owner,
+            seeker=request.user,
+            room=room,
         )
-
-        thread = existing or MessageThread.objects.create(room=room)
-
-        if existing and thread.room_id is None:
-            thread.room = room
-            thread.save(update_fields=["room"])
-
-        if not existing:
-            thread.participants.set(users)
-
         body = (request.data or {}).get("body", "").strip()
         if body:
             Message.objects.create(thread=thread, sender=request.user, body=body)

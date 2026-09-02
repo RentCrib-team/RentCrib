@@ -5,12 +5,28 @@ from rest_framework.views import APIView
 
 from propertylist_app.admin_api.permissions import IsAdminUser
 from propertylist_app.api.views.common import ok_response, error_response
-from propertylist_app.models import LandlordVerificationRequest, UserProfile
+
 
 from .serializers import (
     AdminLandlordVerificationActionSerializer,
     AdminLandlordVerificationRequestSerializer,
 )
+from django.utils import timezone
+
+from notifications.models import (
+    NotificationTemplate,
+    OutboundNotification,
+)
+
+from propertylist_app.models import (
+    LandlordVerificationRequest,
+    Notification,
+    UserProfile,
+)
+
+from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.realtime import push_user_realtime_event
+
 
 
 class IsSupportOrSuperAdmin(IsAdminUser):
@@ -94,6 +110,73 @@ class AdminLandlordVerificationActionView(APIView):
             profile.advertiser_verified = True
             profile.save(update_fields=["advertiser_verified"])
 
+            # -----------------------------------------------------
+            # Verification approved:
+            # Bell + realtime Bell + email.
+            # No inbox/envelope message.
+            # -----------------------------------------------------
+            notification = Notification.objects.create(
+                user=verification_request.user,
+                type="identity_verification_approved",
+                target_type="identity_verification",
+                target_id=verification_request.id,
+                title="Identity verified",
+                audience=Notification.Audience.LANDLORD,
+                body=(
+                    "Your identity verification has been approved."
+                ),
+            )
+
+            push_user_realtime_event(
+                verification_request.user.id,
+                "new_notification",
+                {
+                    "kind": "identity_verification_approved",
+                    "notification_id": notification.id,
+                    "target_type": "identity_verification",
+                    "target_id": verification_request.id,
+                },
+            )
+
+            template_exists = (
+                NotificationTemplate.objects.filter(
+                    key="identity_verification.approved",
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    is_active=True,
+                ).exists()
+            )
+
+            if template_exists:
+                OutboundNotification.objects.create(
+                    user=verification_request.user,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key="identity_verification.approved",
+                    scheduled_for=timezone.now(),
+                    context={
+                        "user_name": (
+                            verification_request.user.first_name
+                            or verification_request.user.username
+                        ),
+
+                        # Permanent frontend verification route.
+                        "dashboard_url": build_absolute_url(
+                            "/identity-verification",
+                            force_login=True,
+                        ),
+
+                        # Existing support route.
+                        "support_url": build_absolute_url(
+                            "/contact",
+                            force_login=False,
+                        ),
+
+                        "current_year": timezone.now().year,
+                        "verification_request_id": verification_request.id,
+                    },
+                )
+
+
+
             return ok_response(
                 message="Landlord verification request approved.",
                 data=AdminLandlordVerificationRequestSerializer(verification_request).data,
@@ -120,6 +203,76 @@ class AdminLandlordVerificationActionView(APIView):
                     "updated_at",
                 ]
             )
+
+
+            # -----------------------------------------------------
+            # Verification rejected:
+            # Bell + realtime Bell + email.
+            # No inbox/envelope message.
+            # -----------------------------------------------------
+            notification = Notification.objects.create(
+                user=verification_request.user,
+                type="identity_verification_rejected",
+                target_type="identity_verification",
+                target_id=verification_request.id,
+                title="Identity verification needs attention",
+                body=(
+                    "We couldn't approve your identity verification. "
+                    "Review the reason and submit a new verification request."
+                ),
+                audience=Notification.Audience.LANDLORD,
+            )
+
+            push_user_realtime_event(
+                verification_request.user.id,
+                "new_notification",
+                {
+                    "kind": "identity_verification_rejected",
+                    "notification_id": notification.id,
+                    "target_type": "identity_verification",
+                    "target_id": verification_request.id,
+                },
+            )
+
+            template_exists = (
+                NotificationTemplate.objects.filter(
+                    key="identity_verification.rejected",
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    is_active=True,
+                ).exists()
+            )
+
+            if template_exists:
+                OutboundNotification.objects.create(
+                    user=verification_request.user,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key="identity_verification.rejected",
+                    scheduled_for=timezone.now(),
+                    context={
+                        "user_name": (
+                            verification_request.user.first_name
+                            or verification_request.user.username
+                        ),
+                        "rejection_reason": rejection_reason,
+
+                        # Permanent frontend resubmission/status route.
+                        "resubmit_url": build_absolute_url(
+                            "/identity-verification",
+                            force_login=True,
+                        ),
+
+                        # Existing support route.
+                        "support_url": build_absolute_url(
+                            "/contact",
+                            force_login=False,
+                        ),
+
+                        "current_year": timezone.now().year,
+                        "verification_request_id": verification_request.id,
+                    },
+                )
+
+
 
             return ok_response(
                 message="Landlord verification request rejected.",

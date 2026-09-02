@@ -3,7 +3,7 @@ User = get_user_model()
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 import re
-
+from django.db.models import Q
 from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, time, timedelta
 from datetime import date as _date  # add if not already present
@@ -100,10 +100,12 @@ class UserReviewListSerializer(serializers.ModelSerializer):
 
 class ReviewSerializer(serializers.ModelSerializer):
     review_mode = serializers.SerializerMethodField()
+    review_location = serializers.SerializerMethodField()
     display_summary = serializers.SerializerMethodField()
     positive_labels = serializers.SerializerMethodField()
     negative_labels = serializers.SerializerMethodField()
-
+    room_id = serializers.SerializerMethodField()
+    room_title = serializers.SerializerMethodField()
     reviewer_name = serializers.SerializerMethodField()
     reviewer_username = serializers.SerializerMethodField()
     reviewer_avatar = serializers.SerializerMethodField()
@@ -124,11 +126,14 @@ class ReviewSerializer(serializers.ModelSerializer):
             "notes",
             "display_summary",
             "review_mode",
+            "review_location",
             "positive_labels",
             "negative_labels",
             "submitted_at",
             "reveal_at",
             "active",
+            "room_id",
+            "room_title",
         ]
         read_only_fields = fields
 
@@ -256,6 +261,48 @@ class ReviewSerializer(serializers.ModelSerializer):
             self.FLAG_LABELS.get(k, k)
             for k in sorted(pos)
         ]
+        
+        
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_room_id(self, obj):
+        tenancy = getattr(obj, "tenancy", None)
+        return getattr(tenancy, "room_id", None)
+
+    
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_review_location(self, obj) -> str:
+        tenancy = getattr(obj, "tenancy", None)
+        room = getattr(tenancy, "room", None)
+
+        if not room:
+            return ""
+
+        location = (getattr(room, "location", "") or "").strip()
+        if not location:
+            return ""
+
+        import re
+
+        compact = location.upper().replace(" ", "")
+
+        match = re.search(
+            r"([A-Z]{1,2}\d[A-Z\d]?)\d[A-Z]{2}$",
+            compact,
+        )
+
+        if not match:
+            return ""
+
+        return f"{match.group(1)} area"
+
+
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_room_title(self, obj) -> str:
+        tenancy = getattr(obj, "tenancy", None)
+        room = getattr(tenancy, "room", None)
+        return getattr(room, "title", "") or ""    
+        
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_negative_labels(self, obj) -> List[str]:
@@ -315,8 +362,7 @@ class ReviewCreateSerializer(serializers.Serializer):
         allow_empty=True,
     )
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    ALLOWED_FLAGS = {
-    # Tenant -> Landlord
+    TENANT_TO_LANDLORD_FLAGS = {
     "responsive",
     "maintenance_good",
     "accurate_listing",
@@ -325,20 +371,21 @@ class ReviewCreateSerializer(serializers.Serializer):
     "maintenance_poor",
     "misleading_listing",
     "unfair_treatment",
+    }
 
-    # Landlord -> Tenant
-    "clean_and_tidy",
-    "friendly",
-    "good_communication",
-    "paid_on_time",
-    "property_care_good",
-    "followed_rules",
-    "messy",
-    "rude",
-    "poor_communication",
-    "late_payment",
-    "property_care_poor",
-    "broke_rules",
+    LANDLORD_TO_TENANT_FLAGS = {
+        "clean_and_tidy",
+        "friendly",
+        "good_communication",
+        "paid_on_time",
+        "property_care_good",
+        "followed_rules",
+        "messy",
+        "rude",
+        "poor_communication",
+        "late_payment",
+        "property_care_poor",
+        "broke_rules",
     }
 
 
@@ -390,11 +437,29 @@ class ReviewCreateSerializer(serializers.Serializer):
         notes = attrs.get("notes")
         manual_rating = attrs.get("overall_rating")
 
-        # Reject unknown flags
-        invalid_flags = [f for f in flags if f not in self.ALLOWED_FLAGS]
+        # Review attributes are role-specific.
+        # A tenant reviews landlord behaviour; a landlord reviews tenant behaviour.
+        if role == Review.ROLE_TENANT_TO_LANDLORD:
+            allowed_flags = self.TENANT_TO_LANDLORD_FLAGS
+        else:
+            allowed_flags = self.LANDLORD_TO_TENANT_FLAGS
+
+        invalid_flags = [
+            flag
+            for flag in flags
+            if flag not in allowed_flags
+        ]
+
         if invalid_flags:
             raise serializers.ValidationError(
-                {"review_flags": [f"Invalid review flag(s): {', '.join(sorted(set(invalid_flags)))}"]}
+                {
+                    "review_flags": [
+                        (
+                            f"Invalid review flag(s) for {role}: "
+                            f"{', '.join(sorted(set(invalid_flags)))}"
+                        )
+                    ]
+                }
             )
 
         has_flags = len(flags) > 0
@@ -433,6 +498,12 @@ class ReviewCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         # tenancy_id is only an input field; tenancy is already in validated_data
         validated_data.pop("tenancy_id", None)
+
+        # Tenancy reviews are double-blind until reveal_at.
+        # The reveal sweep activates them and then queues the
+        # tenancy.review_revealed notification/email.
+        validated_data["active"] = False
+
         return Review.objects.create(**validated_data)
 
 
@@ -1258,7 +1329,7 @@ class RoomSerializer(serializers.ModelSerializer):
     allow_null=True,
     write_only=True,
     )
-
+    avg_rating = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField(read_only=True)
     distance_miles = serializers.SerializerMethodField(read_only=True)
     allow_search_indexing_effective = serializers.SerializerMethodField(read_only=True)
@@ -1373,7 +1444,10 @@ class RoomSerializer(serializers.ModelSerializer):
 
 
 
-
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_avg_rating(self, obj):
+        value = getattr(obj, "avg_rating", 0) or 0
+        return round(float(value), 1)
 
 
     def validate(self, attrs):
@@ -1622,6 +1696,7 @@ class RoomSerializer(serializers.ModelSerializer):
         - paid_until exists
         - paid_until has not expired
         """
+        
         today = date.today()
 
         # Rented / unavailable always takes priority.
@@ -1796,6 +1871,16 @@ class RoomSerializer(serializers.ModelSerializer):
 
         slot_minutes = 30
         today = timezone.localdate()
+
+        available_from = getattr(room, "available_from", None)
+
+        # Viewing availability must never begin before the room's advertised
+        # available-from date. If that date has already passed, begin today.
+        start_date = max(
+            today,
+            available_from or today,
+        )
+
         desired_dates = []
 
         if mode == "custom":
@@ -1808,13 +1893,14 @@ class RoomSerializer(serializers.ModelSerializer):
                     except (TypeError, ValueError):
                         continue
 
-                if selected_date >= today:
+                if selected_date >= start_date:
                     desired_dates.append(selected_date)
 
         else:
-            # Generate today plus the following 29 days.
+            # Generate the first valid availability date plus the following
+            # 29 calendar days.
             for day_offset in range(30):
-                selected_date = today + timedelta(days=day_offset)
+                selected_date = start_date + timedelta(days=day_offset)
 
                 if (
                     mode == "weekdays"
@@ -2403,41 +2489,52 @@ class RoomSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_state(self, obj) -> str:
         """
-        Returns one of: 'draft', 'active', 'expired', 'hidden', 'rented'.
-        Used by the 'My Listings' page to group listings into tabs.
+        Authoritative state used by My Listings.
+
+        Returns one of:
+        draft, active, pending_review, expired, hidden, rented.
+
+        Lifecycle states take priority over image moderation:
+        a rented, draft, expired, or hidden listing must remain in that
+        lifecycle bucket regardless of its image status.
         """
+        # MyListingsView calculates the authoritative state at queryset level.
+        # Reuse it when present so filtering and serialized output can never
+        # disagree.
+        annotated_state = getattr(obj, "listing_state", None)
+        if annotated_state:
+            return str(annotated_state)
+        
+        
+        
         if not getattr(obj, "is_available", True):
             return "rented"
 
-        # If the queryset annotated a listing_state, reuse it.
-        state = getattr(obj, "listing_state", None)
-        if state:
-            return str(state)
-
         today = date.today()
 
-        # 1) Explicit hidden + past paid_until = expired
-        if obj.status == "hidden" and obj.paid_until and obj.paid_until < today:
-            return "expired"
+        if obj.status == "draft":
+            return "draft"
 
-        # 2) Hidden but not clearly expired
-        if obj.status == "hidden":
-            return "hidden"
-
-        # 3) No paid_until at all = draft (never paid / not live yet)
         if obj.paid_until is None:
             return "draft"
 
-        # 4) Paid until date in the past = expired
         if obj.paid_until < today:
             return "expired"
 
-        # 5) Otherwise treat as active
-        return "active"
+        if obj.status == "hidden":
+            return "hidden"
 
-    # --- New helpers for 'View Available Days' ---
+        # Only otherwise-live listings are classified by image moderation.
+        image_status = self._image_payload(obj)["image_status"]
 
+        if image_status != "approved":
+            return "pending_review"
 
+        if obj.status == "active" and obj.paid_until >= today:
+            return "active"
+
+        # Fail closed: an unknown combination must never be exposed as active.
+        return "draft"
 
 class MyListingRoomSerializer(RoomSerializer):
     viewing_summary = serializers.SerializerMethodField()
@@ -3731,6 +3828,7 @@ class AvatarUploadRequestSerializer(serializers.Serializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.SerializerMethodField()
+    body = serializers.SerializerMethodField()
     is_read = serializers.SerializerMethodField()
     read_at = serializers.SerializerMethodField()
     available_actions = serializers.SerializerMethodField()
@@ -3774,6 +3872,113 @@ class MessageSerializer(serializers.ModelSerializer):
     
     
     
+    @extend_schema_field(serializers.CharField())
+    def get_body(self, obj):
+        metadata = obj.metadata or {}
+
+        # Only tenancy proposal messages need viewer-specific wording.
+        if (
+            obj.message_type != Message.TYPE_TENANCY_PROPOSAL
+            or metadata.get("event_type") != "proposed"
+        ):
+            return obj.body
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return obj.body
+
+        # The other party must continue to receive the existing
+        # actionable proposal copy.
+        if user.id != obj.sender_id:
+            return obj.body
+
+        # The person who submitted the tenancy information must not see
+        # instructions telling them to review/respond to their own proposal.
+        room_title = (
+            metadata.get("room_title")
+            or "this property"
+        )
+
+        move_in_date = metadata.get("move_in_date")
+        duration_months = metadata.get("duration_months")
+        monthly_rent = metadata.get("monthly_rent")
+        
+        formatted_duration = (
+            f"{duration_months} months"
+            if duration_months is not None
+            else "Not provided"
+        )
+
+        formatted_rent = (
+            f"£{monthly_rent}"
+            if monthly_rent not in (None, "")
+            else "Not provided"
+        )
+
+        # Make the stored ISO date human-readable where possible.
+        formatted_move_in = move_in_date or "Not provided"
+
+        if move_in_date:
+            try:
+                from datetime import date
+
+                parsed_date = date.fromisoformat(
+                    str(move_in_date)
+                )
+                formatted_move_in = (
+                    f"{parsed_date.day} "
+                    f"{parsed_date.strftime('%B %Y')}"
+                )
+            except (TypeError, ValueError):
+                pass
+
+        details = [
+            (
+                "You submitted tenancy information for "
+                f"{room_title}."
+            ),
+            "",
+            "The details you submitted are:",
+            "",
+            f"Move-in date: {formatted_move_in}",
+            f"Duration: {formatted_duration}",
+            f"Monthly rent: {formatted_rent}",
+            "",
+        ]
+
+        # Mirror the acknowledgement depending on who submitted.
+        try:
+            tenancy_id = metadata.get("tenancy_id")
+            tenancy = Tenancy.objects.only(
+                "id",
+                "landlord_id",
+                "tenant_id",
+            ).get(id=tenancy_id)
+        except (Tenancy.DoesNotExist, TypeError, ValueError):
+            tenancy = None
+
+        if tenancy and user.id == tenancy.tenant_id:
+            details.append(
+                "Your landlord has been asked to review these details. "
+                "You will be notified when they respond."
+            )
+        elif tenancy and user.id == tenancy.landlord_id:
+            details.append(
+                "Your tenant has been asked to review these details. "
+                "You will be notified when they respond."
+            )
+        else:
+            details.append(
+                "The other party has been asked to review these details. "
+                "You will be notified when they respond."
+            )
+
+        return "\n".join(details)
+        
+        
+        
 
     @extend_schema_field(
         serializers.ListField(
@@ -3783,6 +3988,39 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_available_actions(self, obj):
         metadata = obj.metadata or {}
         event_type = metadata.get("event_type")
+        
+        if event_type == "booking_completed":
+            booking_id = metadata.get("booking_id")
+            if not booking_id:
+                return []
+
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+
+            if not user or not user.is_authenticated:
+                return []
+
+            try:
+                booking = Booking.objects.select_related(
+                    "room__property_owner"
+                ).get(id=booking_id)
+            except Booking.DoesNotExist:
+                return []
+
+            owner_id = booking.room.property_owner_id
+
+            if user.id not in {
+                booking.user_id,
+                owner_id,
+            }:
+                return []
+
+            return ["update_tenancy"]
+                
+                
+                
+                
+                
 
         # Timer 2 thread message.
         if event_type == "still_living_check":
@@ -3809,6 +4047,23 @@ class MessageSerializer(serializers.ModelSerializer):
             ):
                 return []
 
+            now = timezone.now()
+
+            if tenancy.status not in {
+                Tenancy.STATUS_CONFIRMED,
+                Tenancy.STATUS_ACTIVE,
+            }:
+                return []
+
+            if tenancy.still_living_confirmed_at is not None:
+                return []
+
+            if (
+                tenancy.review_open_at is not None
+                and now >= tenancy.review_open_at
+            ):
+                return []
+
             return ["update_tenancy"]
 
         # Timer 3 thread message.
@@ -3827,8 +4082,13 @@ class MessageSerializer(serializers.ModelSerializer):
                 tenancy,
                 context=self.context,
             )
+            can_leave_review, _ = (
+                serializer._get_review_eligibility(
+                    tenancy
+                )
+            )
 
-            if serializer.data.get("can_leave_review"):
+            if can_leave_review:
                 return ["leave_review"]
 
             return []
@@ -3858,8 +4118,57 @@ class MessageSerializer(serializers.ModelSerializer):
             tenancy,
             context=self.context,
         )
+        permissions = (
+            serializer._get_tenancy_action_permissions(
+                tenancy
+            )
+        )
+        return permissions["available_actions"]
+    
+    
+    
+    def _get_read_for_user(self, obj):
+        request = self.context.get("request")
 
-        return serializer.data.get("available_actions", [])
+        if not request or not request.user.is_authenticated:
+            return None
+
+        user = request.user
+
+        if obj.sender_id == user.id:
+            return None
+
+        cached_user_id = getattr(
+            obj,
+            "_read_cache_user_id",
+            None,
+        )
+
+        if cached_user_id == user.id:
+            return getattr(obj, "_read_cache_value", None)
+
+        prefetched_reads = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get("reads")
+
+        if prefetched_reads is not None:
+            read = next(
+                (
+                    item
+                    for item in prefetched_reads
+                    if item.user_id == user.id
+                ),
+                None,
+            )
+        else:
+            read = obj.reads.filter(user=user).first()
+
+        obj._read_cache_user_id = user.id
+        obj._read_cache_value = read
+
+        return read
 
 
     def get_is_read(self, obj):
@@ -3868,11 +4177,37 @@ class MessageSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return False
 
-        # The sender has already "read" their own message.
-        if obj.sender_id == request.user.id:
-            return True
+        metadata = obj.metadata or {}
 
-        return obj.reads.filter(user=request.user).exists()
+        # RentCrib system messages do not have a meaningful human
+        # sender/recipient read receipt.
+        if metadata.get("system_event") is True:
+            return self._get_read_for_user(obj) is not None
+
+        # Recipient viewing an inbound human message:
+        # report whether THIS user has read it.
+        if obj.sender_id != request.user.id:
+            return self._get_read_for_user(obj) is not None
+
+        # Sender viewing their own human message:
+        # it is only "read" if another participant has actually created
+        # a MessageRead row for this message.
+        prefetched_reads = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get("reads")
+
+        if prefetched_reads is not None:
+            return any(
+                read.user_id != obj.sender_id
+                for read in prefetched_reads
+            )
+
+        return obj.reads.exclude(
+            user_id=obj.sender_id,
+        ).exists()
+
 
     def get_read_at(self, obj):
         request = self.context.get("request")
@@ -3880,11 +4215,46 @@ class MessageSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
 
-        # For sender's own message, no receiver read timestamp is available here.
-        if obj.sender_id == request.user.id:
-            return None
+        metadata = obj.metadata or {}
 
-        read = obj.reads.filter(user=request.user).first()
+        if metadata.get("system_event") is True:
+            read = self._get_read_for_user(obj)
+            return read.read_at if read else None
+
+        # Recipient sees their own read timestamp.
+        if obj.sender_id != request.user.id:
+            read = self._get_read_for_user(obj)
+            return read.read_at if read else None
+
+        # Sender sees when the recipient actually read the message.
+        prefetched_reads = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get("reads")
+
+        if prefetched_reads is not None:
+            recipient_reads = [
+                read
+                for read in prefetched_reads
+                if read.user_id != obj.sender_id
+            ]
+
+            if not recipient_reads:
+                return None
+
+            return min(
+                read.read_at
+                for read in recipient_reads
+            )
+
+        read = (
+            obj.reads
+            .exclude(user_id=obj.sender_id)
+            .order_by("read_at")
+            .first()
+        )
+
         return read.read_at if read else None
 
 
@@ -3895,6 +4265,25 @@ class MessageThreadSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     other_user = serializers.SerializerMethodField(read_only=True)
+    
+    participant_role = serializers.SerializerMethodField()
+    relationship_type = serializers.SerializerMethodField()
+    inbox_side = serializers.SerializerMethodField()
+    relationship_id = serializers.SerializerMethodField()
+    property_id = serializers.SerializerMethodField()
+
+    room_id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    landlord_id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
+    seeker_id = serializers.IntegerField(
+        read_only=True,
+        allow_null=True,
+    )
 
     # NEW: per-user state fields
     label = serializers.SerializerMethodField()
@@ -3906,6 +4295,14 @@ class MessageThreadSerializer(serializers.ModelSerializer):
             "id",
             "participants",
             "other_user",
+            "participant_role",
+            "relationship_type",
+            "room_id",
+            "landlord_id",
+            "seeker_id",
+            "inbox_side",
+            "relationship_id",
+            "property_id",
             "created_at",
             "last_message",
             "unread_count",
@@ -3915,12 +4312,104 @@ class MessageThreadSerializer(serializers.ModelSerializer):
 
 
 
+  
+    
+    
     @extend_schema_field(
-    serializers.DictField(
-        child=serializers.CharField(allow_null=True),
+        serializers.ChoiceField(
+            choices=[
+                ("landlord", "Landlord"),
+                ("seeker", "Seeker"),
+                ("unscoped", "Unscoped"),
+            ],
+            allow_null=True,
+        )
+    )
+    def get_participant_role(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if not user or not user.is_authenticated:
+            return None
+
+        matching_roles = []
+
+        if obj.landlord_id == user.id:
+            matching_roles.append("landlord")
+
+        if obj.seeker_id == user.id:
+            matching_roles.append("seeker")
+
+        if len(matching_roles) == 1:
+            return matching_roles[0]
+
+        # Historical roomless or malformed threads are explicitly unscoped.
+        # Never infer their role from message order, sender or message text.
+        return "unscoped"
+
+
+
+    @extend_schema_field(
+    serializers.ChoiceField(
+        choices=[
+            ("landlord", "Landlord"),
+            ("seeker", "Seeker"),
+            ("unscoped", "Unscoped"),
+        ],
         allow_null=True,
     )
-)
+    )
+    def get_inbox_side(self, obj):
+        return self.get_participant_role(obj)
+
+
+
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=[
+                ("room_enquiry", "Room enquiry"),
+                ("legacy_direct", "Legacy direct"),
+            ],
+        )
+    )
+    def get_relationship_type(self, obj):
+        if obj.room_id:
+            return "room_enquiry"
+
+        return "legacy_direct"
+    
+    
+    
+    @extend_schema_field(
+        serializers.IntegerField(
+            read_only=True,
+            allow_null=True,
+        )
+    )
+    def get_relationship_id(self, obj):
+        # A conversation is scoped to its room/property lifecycle.
+        # Booking and tenancy IDs remain event-specific message metadata.
+        return obj.room_id
+
+
+    @extend_schema_field(
+        serializers.IntegerField(
+            read_only=True,
+            allow_null=True,
+        )
+    )
+    def get_property_id(self, obj):
+        return obj.room_id
+    
+    
+    @extend_schema_field(
+    serializers.DictField(
+            child=serializers.CharField(allow_null=True),
+            allow_null=True,
+        )
+    )
+    
+    
     def get_other_user(self, obj):
         request = self.context.get("request")
         current_user = getattr(request, "user", None)
@@ -3962,17 +4451,33 @@ class MessageThreadSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(MessageSerializer(allow_null=True))
     def get_last_message(self, obj):
-        prefetched_messages = getattr(obj, "_prefetched_objects_cache", {}).get("messages")
+        prefetched_messages = getattr(
+            obj,
+            "_prefetched_last_messages",
+            None,
+        )
 
         if prefetched_messages is not None:
-            msg = max(prefetched_messages, key=lambda m: m.created, default=None)
+            msg = (
+                prefetched_messages[0]
+                if prefetched_messages
+                else None
+            )
         else:
-            msg = obj.messages.order_by("-created").first()
+            msg = (
+                obj.messages
+                .select_related("sender")
+                .prefetch_related("reads")
+                .order_by("-created")
+                .first()
+            )
 
         return (
             MessageSerializer(
                 msg,
-                context={"request": self.context.get("request")},
+                context={
+                    "request": self.context.get("request"),
+                },
             ).data
             if msg
             else None
@@ -3986,28 +4491,31 @@ class MessageThreadSerializer(serializers.ModelSerializer):
         if hasattr(obj, "unread_count"):
             return obj.unread_count
 
-        return obj.messages.exclude(sender=request.user).exclude(
-            reads__user=request.user
-        ).count()
+        return (
+            obj.messages
+            .filter(
+                Q(metadata__system_event=True)
+                | ~Q(sender=request.user)
+            )
+            .exclude(reads__user=request.user)
+            .distinct()
+            .count()
+        )
 
     def _get_state_for_user(self, obj):
-        """
-        Helper to get MessageThreadState for the current user.
-        If the view has pre-attached obj._state_for_user, use that;
-        otherwise do a small DB lookup.
-        """
         request = self.context.get("request")
         user = getattr(request, "user", None)
+
         if not user or not user.is_authenticated:
             return None
 
-        # If view pre-attached a state
-        st = getattr(obj, "_state_for_user", None)
-        if st is not None:
-            return st
+        if hasattr(obj, "_state_for_user"):
+            return obj._state_for_user
 
-        # Fallback: 1 query per thread
-        return MessageThreadState.objects.filter(user=user, thread=obj).first()
+        return MessageThreadState.objects.filter(
+            user=user,
+            thread=obj,
+        ).first()
 
     @extend_schema_field(serializers.CharField(allow_null=True, required=False))
     def get_label(self, obj):
@@ -4280,6 +4788,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "id",
             "type",
             "title",
+            "audience",
             "body",
             "thread",
             "message",
@@ -4336,17 +4845,50 @@ class NotificationSerializer(serializers.ModelSerializer):
         Mobile continues to use deep_link.
         """
 
+        notification_type = getattr(obj, "type", None)
+        target_type = getattr(obj, "target_type", None)
+        target_id = getattr(obj, "target_id", None)
+        
+        
+        # Landlord tenancy-expiry reminder targets the completed viewing because
+        # "Update tenancy information" lives on the viewing detail page.
+        if (
+            notification_type == "tenancy_still_living_check"
+            and target_type == "booking"
+            and target_id
+        ):
+            return f"/viewings/{target_id}"
+
+        # Viewing-completed notifications open the Completed tab.
+        if notification_type in {
+            "booking_completed",
+            "booking_completed_landlord",
+        }:
+            return "/viewings?tab=completed"
+
+        # Tenancy expiry / still-living reminders must open the tenancy itself.
+        # Both tenant and landlord can act on the same tenancy record.
+        if target_type == "still_living_check" and target_id:
+            return f"/tenancies/{target_id}"
+
+        # Other tenancy notifications should also prefer their tenancy target
+        # over the associated message thread.
+        if target_type == "tenancy" and target_id:
+            return f"/tenancies/{target_id}"
+
+        if target_type == "tenancy_extension" and target_id:
+            return f"/tenancies/{target_id}"
+
+        if target_type == "tenancy_review" and target_id:
+            return f"/leave-a-review?tenancy={target_id}"
+
+        # Message notifications/conversation-driven events can use the thread.
         if getattr(obj, "thread_id", None):
             return f"/messages?thread={obj.thread_id}"
 
-        if getattr(obj, "target_type", None) and getattr(obj, "target_id", None):
-            t = obj.target_type
-
-            if t == "booking":
-                return f"/viewings/{obj.target_id}"
-
-            if t == "tenancy_review":
-                return "/leave-a-review"
+        # Generic booking target.
+        if target_type == "booking" and target_id:
+            return f"/viewings/{target_id}"
 
         return self.get_deep_link(obj)
 

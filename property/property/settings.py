@@ -164,7 +164,10 @@ if not DEBUG and not TESTING and len(missing_stripe) > 0:
 
 
 # Frontend base URL used for links in emails
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://rentcrib.co.uk")
+FRONTEND_BASE_URL = os.getenv(
+    "FRONTEND_BASE_URL",
+    "https://rent-crib-web.vercel.app",
+).rstrip("/")
 IDEAL_POSTCODES_API_KEY = os.getenv("IDEAL_POSTCODES_API_KEY", "").strip()
 
 GOOGLE_WEB_CLIENT_ID = os.getenv("GOOGLE_WEB_CLIENT_ID", "").strip()

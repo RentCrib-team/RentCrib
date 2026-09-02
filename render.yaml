@@ -1,15 +1,17 @@
 services:
   - type: web
     name: rentout-staging-v2
+    branch: staging
+    autoDeployTrigger: commit
     runtime: python
     rootDir: property
-    plan: starter
+    plan: standard
     buildCommand: |
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
       python manage.py migrate
-    startCommand: gunicorn property.wsgi:application
-    healthCheckPath: /
+    startCommand: daphne -b 0.0.0.0 -p $PORT property.asgi:application
+    healthCheckPath: /health/
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: property.settings
@@ -70,11 +72,13 @@ services:
 
   - type: worker
     name: rentout-staging-worker
+    branch: staging
+    autoDeployTrigger: commit
     runtime: python
     rootDir: property
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A celery_app worker -l info
+    startCommand: celery -A celery_app worker -l info --concurrency=1 -Q celery,emails,maintenance
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: property.settings
@@ -83,6 +87,8 @@ services:
 
   - type: worker
     name: rentout-staging-beat
+    branch: staging
+    autoDeployTrigger: commit
     runtime: python
     rootDir: property
     plan: starter
@@ -93,5 +99,3 @@ services:
         value: property.settings
       - key: DJANGO_DEBUG
         value: "false"
-
-        

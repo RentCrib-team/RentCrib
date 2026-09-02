@@ -2,9 +2,13 @@
 from datetime import datetime, timezone as dt_timezone
 import logging
 import jwt
+import hashlib
+import time
 from jwt import PyJWKClient
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+
+
 
 from notifications.services import send_security_code_email
 
@@ -96,6 +100,13 @@ from ..serializers import (
 #Logger
 logger_auth = logging.getLogger("rentout.auth")
 logger = logger_auth
+# Refresh tokens rotate and are blacklisted after one use. A short shared
+# Redis grace result prevents legitimate concurrent requests from racing the
+# same single-use token across different web/server instances.
+REFRESH_DEDUPE_TTL_SECONDS = 30
+REFRESH_LOCK_TTL_SECONDS = 5
+REFRESH_WAIT_SECONDS = 6
+REFRESH_POLL_SECONDS = 0.05
 
 #DRF throttling
 from rest_framework.throttling import ScopedRateThrottle
@@ -112,7 +123,19 @@ from .common import error_response
 class TokenRefreshEnvelopeView(TokenRefreshView):
     """
     Wrap SimpleJWT refresh response in the API success envelope.
+
+    Refresh requests are throttled independently from other auth endpoints.
+    Concurrent presentations of the same rotating refresh token are
+    deduplicated through the shared cache.
     """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    throttle_classes = [
+        TokenRefreshScopedThrottle,
+    ]
+    throttle_scope = "token-refresh"
 
     @extend_schema(
         request=inline_serializer(
@@ -149,51 +172,227 @@ class TokenRefreshEnvelopeView(TokenRefreshView):
 
         refresh_str = (ser.validated_data.get("refresh") or "").strip()
         if not refresh_str:
-            raise ValidationError({"refresh": "Refresh token is required."})
+            raise ValidationError(
+                {"refresh": "Refresh token is required."}
+            )
 
-        jwt_ser = SimpleJWTTokenRefreshSerializer(data={"refresh": refresh_str})
+        # Never put a raw refresh token into Redis/cache keys.
+        token_hash = hashlib.sha256(
+            refresh_str.encode("utf-8")
+        ).hexdigest()
+
+        result_key = f"auth:refresh:result:{token_hash}"
+        lock_key = f"auth:refresh:lock:{token_hash}"
+
+        User = get_user_model()
+
+        def get_cached_rotation():
+            cached = cache.get(result_key)
+
+            if not isinstance(cached, dict):
+                return None
+
+            cached_data = cached.get("data")
+            cached_user_id = cached.get("user_id")
+
+            if (
+                not isinstance(cached_data, dict)
+                or not cached_user_id
+            ):
+                cache.delete(result_key)
+                return None
+
+            # Do not let the grace cache bypass account deactivation.
+            if not User.objects.filter(
+                pk=cached_user_id,
+                is_active=True,
+            ).exists():
+                cache.delete(result_key)
+                return None
+
+            return cached_data
+
+        # A previous request may already have completed this exact rotation.
+        cached_data = get_cached_rotation()
+        if cached_data is not None:
+            return ok_response(
+                cached_data,
+                status_code=status.HTTP_200_OK,
+            )
+
+        # cache.add() is atomic on the shared Redis backend. Exactly one
+        # instance gets to rotate this refresh token.
+        acquired_lock = False
+        deadline = time.monotonic() + REFRESH_WAIT_SECONDS
+
+        while time.monotonic() < deadline:
+            # Recheck before trying the lock because another instance may
+            # have completed the rotation while this request was waiting.
+            cached_data = get_cached_rotation()
+            if cached_data is not None:
+                return ok_response(
+                    cached_data,
+                    status_code=status.HTTP_200_OK,
+                )
+
+            acquired_lock = cache.add(
+                lock_key,
+                "1",
+                timeout=REFRESH_LOCK_TTL_SECONDS,
+            )
+
+            if acquired_lock:
+                break
+
+            time.sleep(REFRESH_POLL_SECONDS)
+
+        if not acquired_lock:
+            # One last recheck in case the winner completed at the deadline.
+            cached_data = get_cached_rotation()
+            if cached_data is not None:
+                return ok_response(
+                    cached_data,
+                    status_code=status.HTTP_200_OK,
+                )
+
+            raise ValidationError(
+                {
+                    "refresh": (
+                        "Refresh is already being processed. "
+                        "Please retry."
+                    )
+                }
+            )
+
+        # We may have acquired the lock immediately after an earlier owner
+        # finished and its lock expired, so recheck before rotating.
+        cached_data = get_cached_rotation()
+        if cached_data is not None:
+            return ok_response(
+                cached_data,
+                status_code=status.HTTP_200_OK,
+            )
+
         try:
-            jwt_ser.is_valid(raise_exception=True)
-        except Exception:
-            raise ValidationError({"refresh": "Invalid or expired refresh token."})
-
-        payload = jwt_ser.validated_data
-
-        try:
-            access_token = AccessToken(payload["access"])
-            access_exp = datetime.fromtimestamp(int(access_token["exp"]), tz=dt_timezone.utc)
-        except Exception:
-            raise ValidationError({"detail": "Unable to determine access token expiry."})
-
-        data = {
-            "access": payload["access"],
-            "access_expires_at": access_exp,
-        }
-
-        if "refresh" in payload:
-            try:
-                rotated_refresh = RefreshToken(payload["refresh"])
-                refresh_exp = datetime.fromtimestamp(int(rotated_refresh["exp"]), tz=dt_timezone.utc)
-                data["refresh"] = payload["refresh"]
-                data["refresh_expires_at"] = refresh_exp
-            except Exception:
-                raise ValidationError({"detail": "Unable to determine refresh token expiry."})
-        else:
+            # Read the token owner before rotation. Invalid, malformed, expired,
+            # or otherwise unusable refresh tokens must remain a normal 400
+            # validation response rather than becoming a server error.
             try:
                 original_refresh = RefreshToken(refresh_str)
-                refresh_exp = datetime.fromtimestamp(int(original_refresh["exp"]), tz=dt_timezone.utc)
-                data["refresh_expires_at"] = refresh_exp
             except Exception:
-                raise ValidationError({"detail": "Unable to determine refresh token expiry."})
+                raise ValidationError(
+                    {
+                        "refresh":
+                        "Invalid or expired refresh token."
+                    }
+                )
 
-        return ok_response(
-            data,
-            status_code=status.HTTP_200_OK,
-        )
+            user_id_claim = settings.SIMPLE_JWT.get(
+                "USER_ID_CLAIM",
+                "user_id",
+            )
 
+            refresh_user_id = original_refresh.get(
+                user_id_claim
+            )
 
+            if not refresh_user_id:
+                raise ValidationError(
+                    {"refresh": "Invalid or expired refresh token."}
+                )
 
+            jwt_ser = SimpleJWTTokenRefreshSerializer(
+                data={"refresh": refresh_str}
+            )
 
+            try:
+                jwt_ser.is_valid(raise_exception=True)
+            except Exception:
+                raise ValidationError(
+                    {
+                        "refresh":
+                        "Invalid or expired refresh token."
+                    }
+                )
+
+            payload = jwt_ser.validated_data
+            
+            try:
+                access_token = AccessToken(payload["access"])
+                access_exp = datetime.fromtimestamp(
+                    int(access_token["exp"]),
+                    tz=dt_timezone.utc,
+                )
+            except Exception:
+                raise ValidationError(
+                    {
+                        "detail":
+                        "Unable to determine access token expiry."
+                    }
+                )
+
+            data = {
+                "access": payload["access"],
+                "access_expires_at": access_exp,
+            }
+
+            if "refresh" in payload:
+                try:
+                    rotated_refresh = RefreshToken(
+                        payload["refresh"]
+                    )
+                    refresh_exp = datetime.fromtimestamp(
+                        int(rotated_refresh["exp"]),
+                        tz=dt_timezone.utc,
+                    )
+
+                    data["refresh"] = payload["refresh"]
+                    data["refresh_expires_at"] = refresh_exp
+
+                except Exception:
+                    raise ValidationError(
+                        {
+                            "detail":
+                            "Unable to determine refresh token expiry."
+                        }
+                    )
+            else:
+                try:
+                    refresh_exp = datetime.fromtimestamp(
+                        int(original_refresh["exp"]),
+                        tz=dt_timezone.utc,
+                    )
+                    data["refresh_expires_at"] = refresh_exp
+
+                except Exception:
+                    raise ValidationError(
+                        {
+                            "detail":
+                            "Unable to determine refresh token expiry."
+                        }
+                    )
+
+            # Store the exact rotation result under the hash of the consumed
+            # token. Concurrent requests receive this same token pair instead
+            # of attempting to spend the blacklisted token again.
+            cache.set(
+                result_key,
+                {
+                    "user_id": refresh_user_id,
+                    "data": data,
+                },
+                timeout=REFRESH_DEDUPE_TTL_SECONDS,
+            )
+
+            return ok_response(
+                data,
+                status_code=status.HTTP_200_OK,
+            )
+
+        except Exception:
+            # A failed rotation must not unnecessarily block another attempt.
+            cache.delete(lock_key)
+            raise
 
 
 
@@ -295,7 +494,7 @@ def generate_unique_username_from_email(email: str) -> str:
 
 
 class RegistrationView(generics.CreateAPIView):
-    
+
     serializer_class = RegistrationSerializer
     permission_classes = [AllowAny]
     throttle_classes = [RegisterAnonThrottle]
@@ -383,7 +582,7 @@ class RegistrationView(generics.CreateAPIView):
 
                 masked = (
                     existing_user.email[:2]
-                    + "â€¢â€¢â€¢@"
+                    + "Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢@"
                     + existing_user.email.split("@")[-1]
                 )
 
@@ -436,9 +635,9 @@ class RegistrationView(generics.CreateAPIView):
     #         raise ValidationError("Security check failed")
 
     #     serializer.save()
+
         
-        
-        
+
         
     # TEMPORARY (STAGING ONLY)
     # Turnstile enforcement is disabled while frontend/mobile complete integration.
@@ -459,9 +658,9 @@ class RegistrationView(generics.CreateAPIView):
                 raise ValidationError("Security check failed")
 
         serializer.save()
-        
+
     
-    
+
 
 def build_login_payload(user):
     profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -488,7 +687,7 @@ def _mask_email(email):
     if "@" not in email:
         return ""
     local, domain = email.split("@", 1)
-    return f"{local[:2]}•••@{domain}"
+    return f"{local[:2]}â€¢â€¢â€¢@{domain}"
 
 
 def _send_account_reactivation_otp(user):
@@ -892,12 +1091,12 @@ class LoginView(APIView):
             "Returns JWT refresh/access tokens on success."
         ),
     )
-    
+
     
     def post(self, request, *args, **kwargs):
+
         
-        
-        
+
 
         # turnstile_token = request.data.get("turnstile_token")
 
@@ -917,9 +1116,9 @@ class LoginView(APIView):
         # TEMPORARY (STAGING ONLY)
         # Turnstile enforcement is disabled while frontend/mobile complete integration.
         # Re-enable before production launch.
+
         
-        
-        
+
         if getattr(settings, "TURNSTILE_REQUIRED", False):
             turnstile_token = request.data.get("turnstile_token")
 
@@ -960,14 +1159,7 @@ class LoginView(APIView):
                     code="lockout",
                 )
 
-            if getattr(settings, "ENABLE_CAPTCHA", False):
-                token = (data.get("captcha_token") or "").strip()
-                if not views_mod.verify_captcha(token, ip):
-                    logger.warning("login_captcha_failed ip=%s identifier=%s", ip, (identifier_for_lock or "-"))
-                    return error_response(
-                        message="CAPTCHA verification failed.",
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
+
 
             ser = LoginSerializer(data=data)
             ser.is_valid(raise_exception=True)
@@ -975,27 +1167,72 @@ class LoginView(APIView):
             identifier = ser.validated_data["identifier"]
             password = ser.validated_data["password"]
 
-            lookup_username = identifier
-            if "@" in identifier:
-                try:
-                    u = get_user_model().objects.get(email__iexact=identifier)
-                    lookup_username = u.username
-                except get_user_model().DoesNotExist:
-                    pass
-                
-                
-                
-                
-            candidate_user = None
             UserModel = get_user_model()
 
-            try:
-                if "@" in identifier:
-                    candidate_user = UserModel.objects.get(email__iexact=identifier)
-                else:
-                    candidate_user = UserModel.objects.get(username__iexact=lookup_username)
-            except UserModel.DoesNotExist:
-                candidate_user = None
+            lookup_username = identifier
+            candidate_user = None
+
+            if "@" in identifier:
+                # Email is intended to identify exactly one RentCrib account.
+                # Fetch at most two rows so corrupted/legacy duplicate data can never
+                # raise MultipleObjectsReturned or cause us to choose an account
+                # arbitrarily.
+                email_matches = list(
+                    UserModel.objects
+                    .filter(email__iexact=identifier)
+                    .order_by("id")[:2]
+                )
+
+                if len(email_matches) > 1:
+                    logger.error(
+                        "login_duplicate_email ip=%s identifier=%s user_ids=%s",
+                        ip,
+                        identifier,
+                        [user.id for user in email_matches],
+                    )
+
+                    return error_response(
+                        message=(
+                            "Unable to sign in with this email. "
+                            "Please contact support."
+                        ),
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        code="account_conflict",
+                    )
+
+                if len(email_matches) == 1:
+                    candidate_user = email_matches[0]
+                    lookup_username = candidate_user.username
+
+            else:
+                # Username is normally unique, but use the same defensive rule for
+                # case-insensitive matches so malformed data can never cause a 500.
+                username_matches = list(
+                    UserModel.objects
+                    .filter(username__iexact=identifier)
+                    .order_by("id")[:2]
+                )
+
+                if len(username_matches) > 1:
+                    logger.error(
+                        "login_duplicate_username ip=%s identifier=%s user_ids=%s",
+                        ip,
+                        identifier,
+                        [user.id for user in username_matches],
+                    )
+
+                    return error_response(
+                        message=(
+                            "Unable to sign in with this username. "
+                            "Please contact support."
+                        ),
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        code="account_conflict",
+                    )
+
+                if len(username_matches) == 1:
+                    candidate_user = username_matches[0]
+                    lookup_username = candidate_user.username
 
             if candidate_user and candidate_user.check_password(password) and not candidate_user.is_active:
                 profile, _ = UserProfile.objects.get_or_create(user=candidate_user)
@@ -1297,7 +1534,7 @@ class TokenRefreshView(APIView):
             )
 
         try:
-            
+
             refresh_claims = RefreshToken(refresh_str)
             user_id = refresh_claims.get("user_id")
             User = get_user_model()
@@ -1389,7 +1626,7 @@ class PasswordResetRequestView(APIView):
         email = ser.validated_data["email"].strip()
         UserModel = get_user_model()
 
-        # Always return a generic response (donâ€™t reveal if email exists)
+        # Always return a generic response (donÃ¢â‚¬â„¢t reveal if email exists)
         generic_response = ok_response(
             {"detail": "If that email exists, a reset code has been sent."},
             status_code=status.HTTP_200_OK,

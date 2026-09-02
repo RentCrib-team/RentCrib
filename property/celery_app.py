@@ -53,23 +53,26 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=2, minute=30),
     },
 
-    # Tenancy sweeps
+    # ---------------------------------------------------------
+    # TENANCY SWEEPS
+    # ---------------------------------------------------------
+
+    # Production schedule — disabled while QA uses accelerated timers.
     # "tenancy-prompts-sweep-daily-03:20": {
     #     "task": "propertylist_app.tasks.task_tenancy_prompts_sweep",
     #     "schedule": crontab(hour=3, minute=20),
     # },
-    # "refresh-tenancy-status-and-review-windows-daily": {
-    #     "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
-    #     "schedule": 60 * 60 * 24,
-    # },
-    
-    
-    # Tenancy sweeps
+
+    # QA schedule — required for the accelerated tenancy lifecycle tests.
+    "tenancy-prompts-sweep-every-minute": {
+        "task": "propertylist_app.tasks.task_tenancy_prompts_sweep",
+        "schedule": crontab(minute="*"),
+    },
+
     "refresh-tenancy-status-and-review-windows-daily": {
         "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
         "schedule": 60 * 60 * 24,
     },
-        
     
     
 }

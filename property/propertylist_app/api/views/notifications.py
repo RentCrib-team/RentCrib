@@ -35,6 +35,7 @@ class NotificationListView(APIView):
                     "ok": serializers.BooleanField(),
                     "message": serializers.CharField(required=False, allow_null=True),
                     "data": NotificationSerializer(many=True),
+                    "unread_total": serializers.IntegerField(),
                 },
             ),
             401: OpenApiResponse(description="Authentication required."),
@@ -42,15 +43,49 @@ class NotificationListView(APIView):
         description="List notifications for the current user. Returns ok_response envelope (not paginated).",
     )
     def get(self, request):
-        qs = Notification.objects.filter(user=request.user).order_by("is_read", "-created_at")
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
+        qs = Notification.objects.filter(
+            user=request.user,
+            audience__in=[
+                active_role,
+                Notification.Audience.BOTH,
+            ],
+        ).order_by(
+            "is_read",
+            "-created_at",
+        )
+
+        unread_total = qs.filter(
+            is_read=False,
+        ).count()
 
         paginator = self.pagination_class()
-        page = paginator.paginate_queryset(qs, request, view=self)
-        data = NotificationSerializer(page, many=True).data
+        page = paginator.paginate_queryset(
+            qs,
+            request,
+            view=self,
+        )
+        data = NotificationSerializer(
+            page,
+            many=True,
+        ).data
 
-        return _wrap_response_success(
+        response = _wrap_response_success(
             paginator.get_paginated_response(data)
         )
+
+        # Authoritative unread count across every page.
+        response.data["unread_total"] = unread_total
+        response.data.setdefault(
+            "meta",
+            {},
+        )["unread_total"] = unread_total
+
+        return response
     
     
 
@@ -79,7 +114,20 @@ class NotificationMarkReadView(APIView):
         description="Mark a notification as read for the current user.",
     )
     def post(self, request, pk: int):
-        notif = get_object_or_404(Notification, pk=pk, user=request.user)
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
+        notif = get_object_or_404(
+            Notification,
+            pk=pk,
+            user=request.user,
+            audience__in=[
+                active_role,
+                Notification.Audience.BOTH,
+            ],
+        )
 
         if not notif.is_read:
             notif.is_read = True
@@ -115,17 +163,26 @@ class NotificationMarkAllReadView(APIView):
         description="Mark all notifications as read for the current user.",
     )
     def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=request.user
+        )
+        active_role = profile.role
+
         updated_count = Notification.objects.filter(
             user=request.user,
-            is_read=False
+            audience__in=[
+                active_role,
+                Notification.Audience.BOTH,
+            ],
+            is_read=False,
         ).update(is_read=True)
 
         return ok_response(
             {"marked": updated_count},
             status_code=status.HTTP_200_OK,
         )
-    
-    
+        
+        
     
 class MyNotificationPreferencesView(APIView):
     permission_classes = [IsAuthenticated]

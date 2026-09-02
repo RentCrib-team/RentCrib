@@ -41,7 +41,7 @@ from propertylist_app.api.views import (
 
     # Messaging
     MessageThreadListCreateView, MessageListCreateView, ThreadMarkReadView, StartThreadFromRoomView,ThreadMoveToBinView,ThreadRestoreFromBinView,ThreadSetLabelView,
-    MessageThreadStateView,MessageStatsView,InboxListView,
+    MessageThreadStateView,MessageStatsView,InboxListView,MessageThreadDetailView,ThreadsBulkMarkReadView,
 
     # Bookings & Availability
     create_booking, BookingListCreateView, LandlordViewingsListView, BookingDetailView, BookingCancelView, BookingRescheduleView,
@@ -56,7 +56,7 @@ from propertylist_app.api.views import (
     PasswordResetRequestView, PasswordResetConfirmView,
     MeView, UserProfileView,
     UserAvatarUploadView, ChangeEmailView, ChangePasswordView, DeactivateAccountView, MyRoomsView,MyProfilePageView,
-    CreatePasswordView,TokenRefreshView,GoogleRegisterView, AppleRegisterView,
+    CreatePasswordView,TokenRefreshView,GoogleRegisterView, AppleRegisterView,TokenRefreshEnvelopeView,
 
 
     # Soft delete
@@ -166,6 +166,16 @@ urlpatterns = [
 
     # --- Messaging ---
     path("messages/threads/",                              MessageThreadListCreateView.as_view(), name="message-threads"),
+        path(
+        "messages/threads/read/",
+        ThreadsBulkMarkReadView.as_view(),
+        name="message-threads-bulk-read",
+    ),
+    path(
+        "messages/threads/<int:thread_id>/",
+        MessageThreadDetailView.as_view(),
+        name="message-thread-detail",
+    ),
     path("messages/threads/<int:thread_id>/messages/",     MessageListCreateView.as_view(),       name="thread-messages"),
     path("messages/threads/<int:thread_id>/read/",         ThreadMarkReadView.as_view(),          name="thread-mark-read"),
     path("rooms/<int:room_id>/start-thread/",              StartThreadFromRoomView.as_view(),     name="start-thread-from-room"),
@@ -285,7 +295,11 @@ urlpatterns = [
     path("auth/logout/",                 LogoutView.as_view(),               name="auth-logout"),
     path("auth/password-reset/",         PasswordResetRequestView.as_view(), name="auth-password-reset"),
     path("auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="auth-token-refresh"),
+    path(
+        "auth/token/refresh/",
+        TokenRefreshEnvelopeView.as_view(),
+        name="auth-token-refresh",
+    ),
 
 
 
