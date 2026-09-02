@@ -770,8 +770,8 @@ def task_tenancy_prompts_sweep() -> int:
         # Mobile fallback for older tenancy records with no conversation yet.
         deep_link = f"/app/tenancies/{tenancy.id}"
 
-        # No confirmed web tenancy route available here yet.
-        cta_path = None
+        # Web fallback for tenancy records with no conversation yet.
+        cta_path = f"/tenancies/{tenancy.id}"
 
         return deep_link, cta_path
     
