@@ -1,0 +1,17 @@
+name: Trigger Vercel from backend staging
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  trigger-vercel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger rent-crib-web deployment
+        run: |
+          curl --fail --show-error --silent \
+            -X POST \
+            "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
