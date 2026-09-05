@@ -230,7 +230,7 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
         )
 
         landlord_booking_url = build_absolute_url(
-            "/viewings",
+            f"/viewings/{booking.id}",
             force_login=False,
         )
 
