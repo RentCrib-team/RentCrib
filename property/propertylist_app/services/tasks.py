@@ -225,13 +225,13 @@ def notify_upcoming_bookings(minutes_ahead: int = 5) -> int:
         start_str = start_local.strftime("%d %b %Y, %H:%M")
 
         seeker_booking_url = build_absolute_url(
-            f"/my-bookings/{booking.id}",
-            force_login=True,
+            "/my-bookings",
+            force_login=False,
         )
 
         landlord_booking_url = build_absolute_url(
-            f"/viewings/{booking.id}",
-            force_login=True,
+            "/viewings",
+            force_login=False,
         )
 
         seeker_name = (
