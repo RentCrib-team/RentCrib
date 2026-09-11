@@ -147,8 +147,6 @@ from .payments import stripe
 
 
 from .public import (
-    HomePageView,
-    CityListView,
     SearchRoomsView,
     NearbyRoomsView,
     FindAddressView,
@@ -158,6 +156,11 @@ from .public import (
     PhoneOTPVerifyView,
     HealthCheckView,
 )
+
+# Canonical city catalogue public endpoints. These intentionally replace the
+# legacy HomePageView/CityListView implementations that derived cities from
+# Room.location (full property address/postcode data).
+from .public_locations import HomePageView, CityListView
 
 
 from .notifications import (
