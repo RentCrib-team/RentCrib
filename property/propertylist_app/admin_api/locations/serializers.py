@@ -1,11 +1,18 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.text import slugify
 from rest_framework import serializers
 
 from propertylist_app.models import City
+from propertylist_app.services.city_images import (
+    city_has_uploaded_image,
+    city_image_url,
+    prepare_city_image,
+)
 
 
 class AdminCitySerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    has_image = serializers.SerializerMethodField()
     room_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -16,6 +23,7 @@ class AdminCitySerializer(serializers.ModelSerializer):
             "slug",
             "image",
             "image_url",
+            "has_image",
             "image_alt",
             "is_active",
             "is_featured",
@@ -27,6 +35,7 @@ class AdminCitySerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "image_url",
+            "has_image",
             "room_count",
             "created_at",
             "updated_at",
@@ -41,14 +50,13 @@ class AdminCitySerializer(serializers.ModelSerializer):
         }
 
     def get_image_url(self, obj):
-        if not obj.image:
-            return None
+        return city_image_url(
+            obj,
+            request=self.context.get("request"),
+        )
 
-        url = obj.image.url
-        request = self.context.get("request")
-        if request is not None:
-            return request.build_absolute_uri(url)
-        return url
+    def get_has_image(self, obj):
+        return city_has_uploaded_image(obj)
 
     def get_room_count(self, obj):
         annotated_count = getattr(obj, "room_count", None)
@@ -83,6 +91,15 @@ class AdminCitySerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError("A city with this slug already exists.")
         return value
+
+    def validate_image(self, value):
+        if value is None:
+            return None
+
+        try:
+            return prepare_city_image(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
 
 
 class AdminCityListDataSerializer(serializers.Serializer):
