@@ -11,6 +11,11 @@ SEARCH_URL = "/api/v1/search/rooms/"
 ROOMS_URL = "/api/v1/rooms/"
 
 
+@pytest.fixture(autouse=True)
+def _empty_seeded_city_catalogue(db):
+    City.objects.all().delete()
+
+
 def _results(response):
     payload = response.json()
     if isinstance(payload, list):
