@@ -2,7 +2,7 @@ from django.db.models import Case, IntegerField, When
 
 
 def install_search_default_rotation_optimization():
-    """Limit default fair-rotation ordering to the first 40 rooms only."""
+    """Bound default fair-rotation work to the first 40 rooms."""
     from propertylist_app.api.views.public import SearchRoomsView
 
     if getattr(SearchRoomsView, "_bounded_fair_rotation_installed", False):
@@ -11,52 +11,48 @@ def install_search_default_rotation_optimization():
     original_get_queryset = SearchRoomsView.get_queryset
 
     def get_queryset(self):
-        qs = original_get_queryset(self)
         params = self.request.query_params
         postcode = (params.get("postcode") or "").strip()
         raw_ordering_param = params.get("ordering")
-
         apply_fair_rotation = (
             not postcode
-            and self._ordered_ids is None
             and raw_ordering_param in (None, "", "default")
         )
 
         if not apply_fair_rotation:
-            return qs
+            return original_get_queryset(self)
+
+        # Prevent the legacy implementation from entering its expensive
+        # fair-rotation branch. Explicit newest ordering is logically the same
+        # base order as default browsing, but it skips materialising every
+        # remaining room id into Python.
+        mutable_params = self.request._request.GET.copy()
+        mutable_params["ordering"] = "newest"
+        original_params = self.request._request.GET
+        self.request._request.GET = mutable_params
+        try:
+            qs = original_get_queryset(self)
+        finally:
+            self.request._request.GET = original_params
 
         room_ids = list(
             qs.order_by("-created_at")
             .values_list("id", flat=True)[:40]
         )
+
         if len(room_ids) <= 1:
             return qs
 
-        # Reuse the already-shuffled order from the original view if possible.
-        # The first 40 are the only cohort that RentCrib intentionally rotates;
-        # everything after them should remain newest-first and be left for DB
-        # pagination rather than materialised into Python.
-        first_40_order = []
-        ordering = getattr(qs.query, "order_by", ())
-        if ordering:
-            expression = ordering[0]
-            case = getattr(expression, "expression", expression)
-            cases = getattr(case, "cases", ())
-            for when in cases[:40]:
-                condition = getattr(when, "condition", None)
-                children = getattr(condition, "children", ()) if condition is not None else ()
-                for key, value in children:
-                    if key in {"id", "id__exact"}:
-                        first_40_order.append(value)
-                        break
+        # Preserve RentCrib's existing behaviour: only the first 40 default
+        # listings are shuffled. Everything after that remains newest-first and
+        # is left to database pagination instead of being loaded into Python.
+        import random
 
-        if len(first_40_order) != len(room_ids):
-            first_40_order = room_ids
-
+        random.shuffle(room_ids)
         preserved_first_40 = Case(
             *[
                 When(id=pk, then=position)
-                for position, pk in enumerate(first_40_order)
+                for position, pk in enumerate(room_ids)
             ],
             default=40,
             output_field=IntegerField(),
