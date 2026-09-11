@@ -34,6 +34,12 @@ def get_admin_cities_queryset(params):
     if is_featured is not None:
         qs = qs.filter(is_featured=is_featured)
 
+    has_image = _parse_bool(params.get("has_image"))
+    if has_image is True:
+        qs = qs.exclude(Q(image__isnull=True) | Q(image=""))
+    elif has_image is False:
+        qs = qs.filter(Q(image__isnull=True) | Q(image=""))
+
     return qs.order_by("display_order", "name")
 
 
