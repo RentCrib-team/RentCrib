@@ -10,6 +10,11 @@ CITIES_URL = "/api/v1/cities/"
 HOME_URL = "/api/v1/home/"
 
 
+@pytest.fixture(autouse=True)
+def _empty_seeded_city_catalogue(db):
+    City.objects.all().delete()
+
+
 @pytest.mark.django_db
 def test_public_cities_are_canonical_and_never_derived_from_room_location(
     api_client,
