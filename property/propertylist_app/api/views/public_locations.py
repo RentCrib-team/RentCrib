@@ -8,6 +8,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serial
 
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.serializers import RoomSerializer
+from propertylist_app.data.uk_cities import BANGOR_SLUGS
 from propertylist_app.models import City, Room, UserProfile
 
 from .common import _wrap_response_success, ok_response
@@ -16,6 +17,7 @@ from .common import _wrap_response_success, ok_response
 class PublicCitySummarySerializer(serializers.ModelSerializer):
     """Public city-card payload. Property addresses/postcodes never appear here."""
 
+    name = serializers.SerializerMethodField()
     room_count = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -29,6 +31,14 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
             "room_count",
         )
         read_only_fields = fields
+
+    def get_name(self, obj):
+        # The official UK city list contains two Bangors. Their internal names
+        # carry nation qualifiers to satisfy the current unique-name constraint,
+        # while public cards continue to display the city name only.
+        if obj.slug in BANGOR_SLUGS:
+            return "Bangor"
+        return obj.name
 
 
 class PublicHomeSummarySerializer(serializers.Serializer):
