@@ -1,4 +1,5 @@
 from django.db import migrations
+from django.db.models import Q
 
 from propertylist_app.data.uk_cities import (
     OFFICIAL_UK_CITIES,
@@ -44,15 +45,18 @@ def unseed_official_uk_cities(apps, schema_editor):
         is_southampton = item["slug"] == SOUTHAMPTON_SLUG
         expected_order = 1 if is_southampton else 100 + position
 
-        city = City.objects.filter(
-            slug=item["slug"],
-            name=item["name"],
-            image="",
-            image_alt=item["display_name"],
-            is_active=True,
-            is_featured=is_southampton,
-            display_order=expected_order,
-        ).first()
+        city = (
+            City.objects.filter(
+                slug=item["slug"],
+                name=item["name"],
+                image_alt=item["display_name"],
+                is_active=True,
+                is_featured=is_southampton,
+                display_order=expected_order,
+            )
+            .filter(Q(image__isnull=True) | Q(image=""))
+            .first()
+        )
 
         if city is None:
             continue
