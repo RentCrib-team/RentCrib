@@ -33,9 +33,9 @@ def test_official_uk_city_dataset_has_complete_unique_slug_set():
     }
 
 
-def test_migration_0098_freezes_the_same_76_city_slug_set():
+def test_migration_0100_freezes_the_same_76_city_slug_set():
     migration = importlib.import_module(
-        "propertylist_app.migrations.0098_seed_official_uk_cities"
+        "propertylist_app.migrations.0100_seed_official_uk_cities"
     )
     frozen_slugs = {item[1] for item in migration.SEEDED_UK_CITIES}
     runtime_slugs = {item["slug"] for item in OFFICIAL_UK_CITIES}
