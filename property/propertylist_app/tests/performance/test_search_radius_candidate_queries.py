@@ -2,8 +2,6 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
-from django.db import connection
-from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
@@ -22,8 +20,16 @@ def test_radius_search_prefilters_candidates_in_database(django_user_model):
     )
 
     paid_until = timezone.localdate() + timedelta(days=30)
-    Room.objects.bulk_create(
-        [
+    rooms = []
+    for index in range(65):
+        if index < 5:
+            latitude = 50.90 + (index * 0.002)
+            longitude = -1.40 + (index * 0.002)
+        else:
+            latitude = 52.00 + (index * 0.01)
+            longitude = -3.00 + (index * 0.01)
+
+        rooms.append(
             Room(
                 title=f"Search radius perf room {index}",
                 description="x",
@@ -34,12 +40,12 @@ def test_radius_search_prefilters_candidates_in_database(django_user_model):
                 status="active",
                 is_available=True,
                 paid_until=paid_until,
-                latitude=50.90 + (index * 0.01),
-                longitude=-1.40 + (index * 0.01),
+                latitude=latitude,
+                longitude=longitude,
             )
-            for index in range(65)
-        ]
-    )
+        )
+
+    Room.objects.bulk_create(rooms)
 
     factory = APIRequestFactory()
     request = factory.get(
@@ -50,25 +56,20 @@ def test_radius_search_prefilters_candidates_in_database(django_user_model):
     view.args = ()
     view.kwargs = {}
 
+    from propertylist_app.api.views import public as public_views
+
+    real_haversine = public_views.haversine_miles
+
     with patch(
         "propertylist_app.api.views.public.geocode_postcode_cached",
         return_value=(50.90, -1.40),
-    ):
-        with CaptureQueriesContext(connection) as captured:
-            view.get_queryset()
+    ), patch(
+        "propertylist_app.api.views.public.haversine_miles",
+        wraps=real_haversine,
+    ) as haversine_mock:
+        view.get_queryset()
 
-    candidate_queries = [
-        query["sql"]
-        for query in captured.captured_queries
-        if 'SELECT "propertylist_app_room"."id", "propertylist_app_room"."latitude", "propertylist_app_room"."longitude"' in query["sql"]
-        and '"propertylist_app_room"."latitude" IS NOT NULL' in query["sql"]
-        and '"propertylist_app_room"."longitude" IS NOT NULL' in query["sql"]
-    ]
-
-    assert candidate_queries, "Radius-search candidate query was not captured."
-
-    candidate_sql = candidate_queries[-1].upper()
-    assert '"PROPERTYLIST_APP_ROOM"."LATITUDE" >=' in candidate_sql
-    assert '"PROPERTYLIST_APP_ROOM"."LATITUDE" <=' in candidate_sql
-    assert '"PROPERTYLIST_APP_ROOM"."LONGITUDE" >=' in candidate_sql
-    assert '"PROPERTYLIST_APP_ROOM"."LONGITUDE" <=' in candidate_sql
+    assert haversine_mock.call_count < 65, (
+        "Radius search calculated Haversine distance for every geocoded room; "
+        "candidates were not narrowed in the database first."
+    )
