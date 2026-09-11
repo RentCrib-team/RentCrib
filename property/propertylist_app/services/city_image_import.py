@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 
+from PIL import Image
 from django.core.files import File
 from django.db import transaction
 
@@ -32,6 +33,14 @@ LICENSE_LINK_REQUIRED_SOURCE_TYPES = {
 }
 CREDIT_REQUIRED_SOURCE_TYPES = {"cc_by", "cc_by_sa"}
 TRUTHY = {"1", "true", "yes", "y"}
+PIL_FORMAT_CONTENT_TYPES = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+    "AVIF": "image/avif",
+    "HEIC": "image/heic",
+    "HEIF": "image/heif",
+}
 
 
 class CityImageImportError(ValueError):
@@ -92,6 +101,31 @@ def _validate_rights(row):
         raise CityImageImportError(
             f"{source_type} images require photographer/creator credit"
         )
+
+
+def _managed_upload(source_handle, source_path):
+    """Wrap a local manifest asset with truthful upload metadata.
+
+    Django's File wrapper does not provide ``content_type`` for ordinary files,
+    while the shared listing-image validator deliberately requires it. Detect
+    the actual image format with Pillow rather than trusting the filename, then
+    attach the equivalent MIME type before running the normal validation path.
+    """
+
+    try:
+        source_handle.seek(0)
+        with Image.open(source_handle) as image:
+            image_format = (image.format or "").upper()
+            content_type = (
+                PIL_FORMAT_CONTENT_TYPES.get(image_format)
+                or Image.MIME.get(image_format, "")
+            )
+    finally:
+        source_handle.seek(0)
+
+    uploaded = File(source_handle, name=source_path.name)
+    uploaded.content_type = content_type
+    return uploaded
 
 
 def _target_filename(city, prepared_file, source_path):
@@ -160,7 +194,7 @@ def _validate_candidate(*, row_number, row, assets_root, replace):
     # The file is deliberately reopened during the write phase so a dry-run has
     # no persistent file handles and apply can be all-or-nothing.
     with source_path.open("rb") as source_handle:
-        uploaded = File(source_handle, name=source_path.name)
+        uploaded = _managed_upload(source_handle, source_path)
         prepare_city_image(uploaded)
 
     return {
@@ -273,7 +307,7 @@ def import_city_images(
 
                 source_path = item["source_path"]
                 with source_path.open("rb") as source_handle:
-                    uploaded = File(source_handle, name=source_path.name)
+                    uploaded = _managed_upload(source_handle, source_path)
                     prepared = prepare_city_image(uploaded)
                     target_name = _target_filename(city, prepared, source_path)
                     city.image.save(target_name, prepared, save=False)
