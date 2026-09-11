@@ -7,3 +7,8 @@ class PropertylistAppConfig(AppConfig):
     def ready(self):
         # import signals so receivers are registered
         from . import signals  # noqa: F401
+        from .services.search_default_rotation_optimization import (
+            install_search_default_rotation_optimization,
+        )
+
+        install_search_default_rotation_optimization()
