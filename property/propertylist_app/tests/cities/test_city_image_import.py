@@ -2,9 +2,11 @@ import csv
 from io import BytesIO
 
 import pytest
+from django.conf import settings
 from django.test import override_settings
 from PIL import Image
 
+from propertylist_app.data.uk_cities import OFFICIAL_UK_CITIES
 from propertylist_app.models import City
 from propertylist_app.services.city_image_import import import_city_images
 
@@ -36,6 +38,23 @@ def _write_manifest(path, rows):
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def test_repository_city_image_manifest_covers_all_official_cities():
+    manifest = (
+        settings.BASE_DIR
+        / "propertylist_app"
+        / "data"
+        / "city_image_manifest.csv"
+    )
+    with manifest.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == len(OFFICIAL_UK_CITIES) == 76
+    assert rows[0]["slug"] == "southampton"
+    assert {row["slug"] for row in rows} == {
+        item["slug"] for item in OFFICIAL_UK_CITIES
+    }
 
 
 @pytest.mark.django_db
