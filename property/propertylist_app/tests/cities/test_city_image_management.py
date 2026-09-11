@@ -51,7 +51,7 @@ def test_public_city_without_upload_uses_backend_fallback(api_client):
     assert city["image_url"].endswith(FALLBACK_SUFFIX)
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_ops_admin_can_upload_filter_and_clear_city_image(
     api_client,
     user_factory,
