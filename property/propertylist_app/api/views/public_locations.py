@@ -41,9 +41,6 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_name(self, obj):
-        # The official UK city list contains two Bangors. Their internal names
-        # carry nation qualifiers to satisfy the current unique-name constraint,
-        # while public cards continue to display the city name only.
         if obj.slug in BANGOR_SLUGS:
             return "Bangor"
         return obj.name
@@ -67,8 +64,6 @@ class PublicHomeSummarySerializer(serializers.Serializer):
 
 
 def _city_room_count_filter(today):
-    """Match the public search definition of a currently discoverable room."""
-
     return Q(
         rooms__is_deleted=False,
         rooms__status="active",
@@ -97,12 +92,7 @@ def _public_cities_queryset(*, featured=None):
 
 
 class HomePageView(APIView):
-    """
-    Public homepage data using the canonical City catalogue.
-
-    City cards are sourced only from City records. Room.location is still used
-    internally for property addresses/geocoding, but is never exposed as a city.
-    """
+    """Public homepage data using the canonical City catalogue."""
 
     permission_classes = [AllowAny]
 
@@ -125,12 +115,15 @@ class HomePageView(APIView):
     def get(self, request):
         today = timezone.localdate()
 
-        # Preserve the existing homepage room contract. Only city sourcing changes.
         base_rooms = (
             Room.objects.alive()
             .filter(status="active")
             .filter(Q(paid_until__isnull=True) | Q(paid_until__gte=today))
-            .select_related("category", "property_owner")
+            .select_related(
+                "category",
+                "property_owner",
+                "property_owner__profile",
+            )
         )
 
         featured_rooms_qs = base_rooms.order_by(
