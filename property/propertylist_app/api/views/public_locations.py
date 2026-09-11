@@ -10,6 +10,10 @@ from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.serializers import RoomSerializer
 from propertylist_app.data.uk_cities import BANGOR_SLUGS
 from propertylist_app.models import City, Room, UserProfile
+from propertylist_app.services.city_images import (
+    city_has_uploaded_image,
+    city_image_url,
+)
 
 from .common import _wrap_response_success, ok_response
 
@@ -18,6 +22,8 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
     """Public city-card payload. Property addresses/postcodes never appear here."""
 
     name = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+    has_image = serializers.SerializerMethodField()
     room_count = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -27,6 +33,8 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "image",
+            "image_url",
+            "has_image",
             "image_alt",
             "room_count",
         )
@@ -39,6 +47,15 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
         if obj.slug in BANGOR_SLUGS:
             return "Bangor"
         return obj.name
+
+    def get_image_url(self, obj):
+        return city_image_url(
+            obj,
+            request=self.context.get("request"),
+        )
+
+    def get_has_image(self, obj):
+        return city_has_uploaded_image(obj)
 
 
 class PublicHomeSummarySerializer(serializers.Serializer):
@@ -174,8 +191,10 @@ class CityListView(APIView):
             )
         },
         description=(
-            "List active canonical cities with city images and discoverable-room "
-            "counts. Property addresses and postcodes are never returned as cities."
+            "List active canonical cities with managed city-card images and "
+            "discoverable-room counts. Property addresses and postcodes are never "
+            "returned as cities. image_url always resolves to either an uploaded "
+            "city image or the RentCrib fallback artwork."
         ),
     )
     def get(self, request):
