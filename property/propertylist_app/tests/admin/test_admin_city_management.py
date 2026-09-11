@@ -16,7 +16,7 @@ def _set_admin_role(user, role):
 @pytest.mark.django_db
 def test_ops_admin_can_create_city(api_client, user_factory):
     user = _set_admin_role(
-        user_factory(username="ops-city-admin"),
+        user_factory(username="ops-city-admin", is_staff=True),
         "ops_admin",
     )
     api_client.force_authenticate(user=user)
@@ -41,9 +41,9 @@ def test_ops_admin_can_create_city(api_client, user_factory):
 
 
 @pytest.mark.django_db
-def test_non_ops_admin_cannot_manage_cities(api_client, user_factory):
+def test_support_admin_cannot_manage_cities_even_when_staff(api_client, user_factory):
     user = _set_admin_role(
-        user_factory(username="support-city-admin"),
+        user_factory(username="support-city-admin", is_staff=True),
         "support_admin",
     )
     api_client.force_authenticate(user=user)
@@ -62,7 +62,7 @@ def test_non_ops_admin_cannot_manage_cities(api_client, user_factory):
 def test_city_names_are_unique_case_insensitively(api_client, user_factory):
     City.objects.create(name="London")
     user = _set_admin_role(
-        user_factory(username="ops-city-duplicate"),
+        user_factory(username="ops-city-duplicate", is_staff=True),
         "ops_admin",
     )
     api_client.force_authenticate(user=user)
@@ -99,7 +99,7 @@ def test_admin_city_list_filters_featured_and_orders_by_display_order(
     )
 
     user = _set_admin_role(
-        user_factory(username="ops-city-list"),
+        user_factory(username="ops-city-list", is_staff=True),
         "ops_admin",
     )
     api_client.force_authenticate(user=user)
@@ -125,7 +125,7 @@ def test_ops_admin_can_update_city_controls(api_client, user_factory):
         display_order=0,
     )
     user = _set_admin_role(
-        user_factory(username="ops-city-update"),
+        user_factory(username="ops-city-update", is_staff=True),
         "ops_admin",
     )
     api_client.force_authenticate(user=user)
