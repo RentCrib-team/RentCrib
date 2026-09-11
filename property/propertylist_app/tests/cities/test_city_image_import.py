@@ -265,3 +265,63 @@ def test_blank_manifest_rows_are_pending_not_errors(tmp_path):
     assert result["rows"] == 1
     assert result["pending"] == 1
     assert result["errors"] == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_city_image_apply_imports_nothing_if_any_selected_row_fails_validation(tmp_path):
+    City.objects.all().delete()
+    southampton = City.objects.create(name="Southampton")
+    london = City.objects.create(name="London")
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    _write_jpeg(assets / "southampton.jpg")
+    _write_jpeg(assets / "london.jpg")
+
+    manifest = tmp_path / "manifest.csv"
+    _write_manifest(
+        manifest,
+        [
+            {
+                "slug": "southampton",
+                "filename": "southampton.jpg",
+                "image_alt": "Southampton waterfront skyline",
+                "source_type": "rentcrib_owned",
+                "source_name": "RentCrib",
+                "source_url": "",
+                "license_name": "",
+                "license_url": "",
+                "credit": "",
+                "rights_confirmed": "yes",
+            },
+            {
+                "slug": "london",
+                "filename": "london.jpg",
+                "image_alt": "London skyline",
+                "source_type": "licensed_stock",
+                "source_name": "Example stock provider",
+                "source_url": "https://example.com/photo",
+                "license_name": "Commercial licence",
+                "license_url": "",
+                "credit": "",
+                "rights_confirmed": "no",
+            },
+        ],
+    )
+
+    media_root = tmp_path / "media"
+    with override_settings(MEDIA_ROOT=media_root):
+        result = import_city_images(
+            manifest_path=manifest,
+            assets_root=assets,
+            apply=True,
+        )
+
+    assert result["validated"] == 1
+    assert result["imported"] == 0
+    assert len(result["errors"]) == 1
+
+    southampton.refresh_from_db()
+    london.refresh_from_db()
+    assert not southampton.image
+    assert not london.image
