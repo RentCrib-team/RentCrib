@@ -48,3 +48,67 @@ Replacing or clearing a city image removes the superseded storage object after t
 `GET /api/v1/admin/locations/cities/?has_image=false` returns cities still using the fallback. This gives the admin dashboard a clean queue for image completion.
 
 `python manage.py city_image_coverage` provides the same coverage check for operations/QA.
+
+## Controlled bulk population workflow
+
+The initial 76-city rollout uses `propertylist_app/data/city_image_manifest.csv` as the source-control audit manifest. Southampton is intentionally the first row because it is the launch city.
+
+Each populated manifest row must include:
+
+- `slug`: canonical RentCrib city slug.
+- `filename`: file relative to the approved assets root.
+- `image_alt`: accessibility text.
+- `source_type`: one of `rentcrib_owned`, `commissioned`, `licensed_stock`, `public_domain`, `cc0`, `cc_by`, `cc_by_sa`.
+- `source_name`: photographer/provider/internal source label.
+- `source_url`: required for third-party sources.
+- `license_name`: required for third-party sources.
+- `license_url`: required for public-domain/Creative Commons sources.
+- `credit`: required for CC BY / CC BY-SA sources.
+- `rights_confirmed`: must be `yes`, `true`, or `1` before import.
+
+Blank `filename` rows are treated as pending work rather than failures, so the 76-city manifest can be completed incrementally.
+
+The importer is dry-run by default:
+
+```bash
+python manage.py import_city_images
+```
+
+To validate only Southampton first:
+
+```bash
+python manage.py import_city_images --slug southampton
+```
+
+After the dry-run is clean, persist Southampton to configured media storage:
+
+```bash
+python manage.py import_city_images --slug southampton --apply
+```
+
+Then expand to all approved rows:
+
+```bash
+python manage.py import_city_images --apply
+```
+
+Existing city images are skipped by default. Replacing an already-managed image requires the explicit `--replace` flag.
+
+The importer never downloads `source_url`. That URL is provenance evidence only. The approved binary must already exist under the configured assets root, which prevents arbitrary remote image fetching and hotlinking.
+
+The default staging directory is `property/city_image_assets/`, but operations can provide a private directory instead:
+
+```bash
+python manage.py import_city_images \
+  --assets-root /secure/approved-city-images \
+  --manifest /secure/city_image_manifest.csv \
+  --apply
+```
+
+After each batch, run:
+
+```bash
+python manage.py city_image_coverage
+```
+
+to verify which cities still use the fallback.
