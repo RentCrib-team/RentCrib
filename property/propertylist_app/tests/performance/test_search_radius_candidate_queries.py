@@ -56,20 +56,20 @@ def test_radius_search_prefilters_candidates_in_database(django_user_model):
     view.args = ()
     view.kwargs = {}
 
-    from propertylist_app.api.views import public as public_views
+    from propertylist_app.services import search_radius_candidate_optimization
 
-    real_haversine = public_views.haversine_miles
+    real_haversine = search_radius_candidate_optimization.haversine_miles
 
     with patch(
-        "propertylist_app.api.views.public.geocode_postcode_cached",
+        "propertylist_app.services.search_radius_candidate_optimization.geocode_postcode_cached",
         return_value=(50.90, -1.40),
     ), patch(
-        "propertylist_app.api.views.public.haversine_miles",
+        "propertylist_app.services.search_radius_candidate_optimization.haversine_miles",
         wraps=real_haversine,
     ) as haversine_mock:
         view.get_queryset()
 
-    assert haversine_mock.call_count < 65, (
-        "Radius search calculated Haversine distance for every geocoded room; "
-        "candidates were not narrowed in the database first."
+    assert 0 < haversine_mock.call_count < 65, (
+        "Radius search should calculate exact Haversine distance for nearby "
+        "database-prefiltered candidates, not every geocoded room."
     )
