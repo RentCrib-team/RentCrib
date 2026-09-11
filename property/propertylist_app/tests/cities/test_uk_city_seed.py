@@ -1,3 +1,5 @@
+import importlib
+
 import pytest
 
 from propertylist_app.data.uk_cities import (
@@ -29,6 +31,17 @@ def test_official_uk_city_dataset_has_complete_unique_slug_set():
         "Scotland": 8,
         "Wales": 7,
     }
+
+
+def test_migration_0098_freezes_the_same_76_city_slug_set():
+    migration = importlib.import_module(
+        "propertylist_app.migrations.0098_seed_official_uk_cities"
+    )
+    frozen_slugs = {item[1] for item in migration.SEEDED_UK_CITIES}
+    runtime_slugs = {item["slug"] for item in OFFICIAL_UK_CITIES}
+
+    assert len(migration.SEEDED_UK_CITIES) == OFFICIAL_UK_CITY_COUNT == 76
+    assert frozen_slugs == runtime_slugs
 
 
 @pytest.mark.django_db
