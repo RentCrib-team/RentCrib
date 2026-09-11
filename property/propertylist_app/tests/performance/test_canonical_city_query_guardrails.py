@@ -63,7 +63,6 @@ def test_canonical_city_list_applies_limit_offset_in_database():
         for query in captured.captured_queries
         if "propertylist_app_city" in query["sql"].lower()
         and "select" in query["sql"].lower()
-        and "count(" not in query["sql"].lower()
     ]
 
     assert city_select_queries, "No canonical City SELECT query was captured."
