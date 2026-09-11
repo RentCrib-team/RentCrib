@@ -23,6 +23,12 @@ class AdminCityListCreateView(APIView):
             OpenApiParameter(name="search", type=str, required=False),
             OpenApiParameter(name="is_active", type=bool, required=False),
             OpenApiParameter(name="is_featured", type=bool, required=False),
+            OpenApiParameter(
+                name="has_image",
+                type=bool,
+                required=False,
+                description="Filter cities with or without an uploaded city image.",
+            ),
         ],
         responses=AdminCityListResponseSerializer,
     )
