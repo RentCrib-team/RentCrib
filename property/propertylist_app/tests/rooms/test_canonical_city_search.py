@@ -3,11 +3,12 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from propertylist_app.models import City
+from propertylist_app.models import City, Room, RoomCategorie
 from propertylist_app.services.city_assignment import backfill_room_cities
 
 
 SEARCH_URL = "/api/v1/search/rooms/"
+ROOMS_URL = "/api/v1/rooms/"
 
 
 def _results(response):
@@ -21,6 +22,64 @@ def _results(response):
     ):
         return payload["data"]["results"]
     return payload.get("results", [])
+
+
+def _room_create_payload(category, city_id):
+    return {
+        "category_id": category.id,
+        "title": "Canonical city listing",
+        "description": (
+            "This is a canonical city listing with enough descriptive words to "
+            "satisfy the listing validation rules while keeping the test focused "
+            "on assigning the room to a normalized city record in the backend."
+        ),
+        "property_type": "flat",
+        "location": "10 Test Street, Southampton, SO14 1AA",
+        "price_per_month": "750.00",
+        "is_available": True,
+        "city": city_id,
+    }
+
+
+@pytest.mark.django_db
+def test_room_create_accepts_canonical_city_foreign_key(auth_client):
+    city = City.objects.create(name="Southampton")
+    category = RoomCategorie.objects.create(
+        name="City Assignment",
+        key="city-assignment",
+        slug="city-assignment",
+        active=True,
+    )
+
+    response = auth_client.post(
+        ROOMS_URL,
+        _room_create_payload(category, city.id),
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    room_id = response.data["data"]["id"]
+    room = Room.objects.get(pk=room_id)
+    assert room.city_id == city.id
+
+
+@pytest.mark.django_db
+def test_room_create_rejects_nonexistent_city_foreign_key(auth_client):
+    category = RoomCategorie.objects.create(
+        name="Invalid City Assignment",
+        key="invalid-city-assignment",
+        slug="invalid-city-assignment",
+        active=True,
+    )
+
+    response = auth_client.post(
+        ROOMS_URL,
+        _room_create_payload(category, 99999999),
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert not Room.objects.filter(title="Canonical city listing").exists()
 
 
 @pytest.mark.django_db
