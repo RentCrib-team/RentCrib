@@ -13,8 +13,8 @@ def get_admin_users_queryset():
         .exclude(profile__admin_role="")
         .order_by("first_name", "last_name", "username")
     )
-
-
+    
+    
 def get_admin_role_permissions():
     return {
         "super_admin": [
@@ -48,4 +48,5 @@ def get_admin_role_permissions():
             "manage_messages",
             "assist_users",
         ],
-    }
+    }    
+    
