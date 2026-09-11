@@ -44,6 +44,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.tenancy_extension_lock import (
             install_tenancy_extension_rejection_lock,
         )
+        from .services.search_default_rotation_optimization import (
+            install_search_default_rotation_optimization,
+        )
 
         install_bell_notification_routing()
         install_room_serializer_image_cache()
@@ -58,3 +61,4 @@ class PropertylistAppConfig(AppConfig):
         install_profile_review_query_optimization()
         install_city_list_query_optimization()
         install_tenancy_extension_rejection_lock()
+        install_search_default_rotation_optimization()
