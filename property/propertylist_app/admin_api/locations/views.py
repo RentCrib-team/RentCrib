@@ -4,8 +4,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from propertylist_app.api.permissions import IsOpsAdmin
-
+from .permissions import IsLocationAdmin
 from .selectors import get_admin_cities_queryset, get_admin_city
 from .serializers import (
     AdminCityListResponseSerializer,
@@ -16,7 +15,7 @@ from .services import create_city, update_city
 
 
 class AdminCityListCreateView(APIView):
-    permission_classes = [IsOpsAdmin]
+    permission_classes = [IsLocationAdmin]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
@@ -69,7 +68,7 @@ class AdminCityListCreateView(APIView):
 
 
 class AdminCityDetailView(APIView):
-    permission_classes = [IsOpsAdmin]
+    permission_classes = [IsLocationAdmin]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(responses=AdminCityResponseSerializer)
