@@ -109,6 +109,54 @@ class RoomCategorie(models.Model):
 
 
 # ----
+# City
+# ----
+class City(models.Model):
+    """Canonical city used for city cards and city-based room discovery."""
+
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=120, unique=True, blank=True, db_index=True)
+    image = models.ImageField(upload_to="city_images/", null=True, blank=True)
+    image_alt = models.CharField(max_length=160, blank=True, default="")
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_featured = models.BooleanField(default=False, db_index=True)
+    display_order = models.PositiveIntegerField(default=0, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_order", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                name="uq_city_name_lower",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.name = (self.name or "").strip()
+        if not self.name:
+            raise ValidationError({"name": "City name is required."})
+
+        base = slugify(self.slug or self.name) or "city"
+        candidate = base[:120]
+        i = 2
+        while City.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+            suffix = f"-{i}"
+            candidate = base[: (120 - len(suffix))] + suffix
+            i += 1
+        self.slug = candidate
+
+        if not (self.image_alt or "").strip():
+            self.image_alt = self.name
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+# ----
 # Room
 # ----
 class Room(SoftDeleteModel):
@@ -123,6 +171,14 @@ class Room(SoftDeleteModel):
         help_text="Security deposit in GBP.",
     )
     location = models.CharField(max_length=255)
+    city = models.ForeignKey(
+        City,
+        on_delete=models.PROTECT,
+        related_name="rooms",
+        null=True,
+        blank=True,
+        help_text="Canonical city used for city browsing and city cards.",
+    )
     category = models.ForeignKey(
         RoomCategorie,
         on_delete=models.CASCADE,
@@ -1946,6 +2002,5 @@ class PhoneOTP(models.Model):
             code=make_password(str(code).strip()),
             expires_at=expires_at,
         )
-
 
 
