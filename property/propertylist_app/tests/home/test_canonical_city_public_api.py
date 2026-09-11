@@ -61,11 +61,17 @@ def test_public_cities_are_canonical_and_never_derived_from_room_location(
 def test_public_city_room_count_only_counts_discoverable_rooms(
     api_client,
     room_factory,
+    user_factory,
 ):
     city = City.objects.create(name="Manchester")
     today = timezone.localdate()
+    owner = user_factory(
+        username="manchester-owner",
+        email="manchester-owner@example.com",
+    )
 
     room_factory(
+        property_owner=owner,
         title="Live Manchester room",
         city=city,
         paid_until=today + timedelta(days=10),
@@ -73,6 +79,7 @@ def test_public_city_room_count_only_counts_discoverable_rooms(
         is_available=True,
     )
     room_factory(
+        property_owner=owner,
         title="Unavailable Manchester room",
         city=city,
         paid_until=today + timedelta(days=10),
@@ -80,6 +87,7 @@ def test_public_city_room_count_only_counts_discoverable_rooms(
         is_available=False,
     )
     room_factory(
+        property_owner=owner,
         title="Expired Manchester room",
         city=city,
         paid_until=today - timedelta(days=1),
@@ -87,6 +95,7 @@ def test_public_city_room_count_only_counts_discoverable_rooms(
         is_available=True,
     )
     room_factory(
+        property_owner=owner,
         title="Unpaid Manchester room",
         city=city,
         paid_until=None,
@@ -126,6 +135,7 @@ def test_public_city_search_filters_city_name_not_property_address(
 def test_homepage_uses_only_active_featured_canonical_cities_in_admin_order(
     api_client,
     room_factory,
+    user_factory,
 ):
     southampton = City.objects.create(
         name="Southampton",
@@ -153,7 +163,12 @@ def test_homepage_uses_only_active_featured_canonical_cities_in_admin_order(
     )
 
     today = timezone.localdate()
+    owner = user_factory(
+        username="featured-city-owner",
+        email="featured-city-owner@example.com",
+    )
     room_factory(
+        property_owner=owner,
         title="Southampton live room",
         city=southampton,
         location="99 Completely Different Address, SO14 1AA",
@@ -162,6 +177,7 @@ def test_homepage_uses_only_active_featured_canonical_cities_in_admin_order(
         is_available=True,
     )
     room_factory(
+        property_owner=owner,
         title="Leeds live room",
         city=leeds,
         location="2 Main Street, KA6 7QL",
