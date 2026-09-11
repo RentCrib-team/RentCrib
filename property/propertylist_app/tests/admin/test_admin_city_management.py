@@ -6,6 +6,11 @@ from propertylist_app.models import City
 ADMIN_CITIES_URL = "/api/v1/admin/locations/cities/"
 
 
+@pytest.fixture(autouse=True)
+def _empty_seeded_city_catalogue(db):
+    City.objects.all().delete()
+
+
 def _set_admin_role(user, role):
     profile = user.profile
     profile.admin_role = role
