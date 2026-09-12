@@ -74,6 +74,31 @@ jobs:
         working-directory: property
         run: python manage.py spectacular --file openapi_generated.yaml
 
+      - name: Validate city OpenAPI contract
+        working-directory: property
+        run: |
+          python - <<'PY'
+          import yaml
+
+          with open("openapi_generated.yaml", "r", encoding="utf-8") as handle:
+              schema = yaml.safe_load(handle)
+
+          paths = schema["paths"]
+          assert "/api/v1/cities/" in paths
+          assert "/api/v1/admin/locations/cities/" in paths
+          assert "/api/v1/admin/locations/cities/{city_id}/" in paths
+
+          schemas = schema["components"]["schemas"]
+          room_city = schemas["Room"]["properties"]["city"]
+          assert room_city["type"] == "integer"
+          assert room_city.get("nullable") is True
+
+          assert schemas["AdminCity"]["properties"]["has_image"]["type"] == "boolean"
+          assert schemas["AdminCity"]["properties"]["room_count"]["type"] == "integer"
+          assert schemas["PublicCitySummary"]["properties"]["has_image"]["type"] == "boolean"
+          assert schemas["PublicCitySummary"]["properties"]["room_count"]["type"] == "integer"
+          PY
+
       - name: Upload generated OpenAPI schema
         uses: actions/upload-artifact@v4
         with:
