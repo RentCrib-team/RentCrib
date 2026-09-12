@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">RentCrib city image placeholder</title>
+  <desc id="desc">A neutral city skyline placeholder used until a managed city image is uploaded.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8edf3"/>
+      <stop offset="1" stop-color="#cbd5df"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <circle cx="1260" cy="190" r="86" fill="#f7f9fb" opacity="0.9"/>
+  <path d="M0 650 L150 590 L260 625 L390 520 L520 610 L680 475 L820 590 L980 500 L1120 610 L1290 520 L1450 590 L1600 545 L1600 900 L0 900 Z" fill="#aebbc8" opacity="0.75"/>
+  <g fill="#6f7f8f">
+    <rect x="120" y="500" width="180" height="300" rx="8"/>
+    <rect x="335" y="405" width="210" height="395" rx="8"/>
+    <rect x="585" y="530" width="160" height="270" rx="8"/>
+    <rect x="780" y="350" width="240" height="450" rx="8"/>
+    <rect x="1060" y="460" width="175" height="340" rx="8"/>
+    <rect x="1270" y="390" width="205" height="410" rx="8"/>
+  </g>
+  <g fill="#d9e1e8" opacity="0.9">
+    <rect x="155" y="545" width="38" height="46" rx="3"/>
+    <rect x="225" y="545" width="38" height="46" rx="3"/>
+    <rect x="155" y="625" width="38" height="46" rx="3"/>
+    <rect x="225" y="625" width="38" height="46" rx="3"/>
+    <rect x="380" y="465" width="44" height="50" rx="3"/>
+    <rect x="455" y="465" width="44" height="50" rx="3"/>
+    <rect x="380" y="550" width="44" height="50" rx="3"/>
+    <rect x="455" y="550" width="44" height="50" rx="3"/>
+    <rect x="835" y="420" width="48" height="54" rx="3"/>
+    <rect x="915" y="420" width="48" height="54" rx="3"/>
+    <rect x="835" y="515" width="48" height="54" rx="3"/>
+    <rect x="915" y="515" width="48" height="54" rx="3"/>
+    <rect x="1320" y="455" width="46" height="52" rx="3"/>
+    <rect x="1390" y="455" width="46" height="52" rx="3"/>
+    <rect x="1320" y="545" width="46" height="52" rx="3"/>
+    <rect x="1390" y="545" width="46" height="52" rx="3"/>
+  </g>
+  <rect y="800" width="1600" height="100" fill="#526170"/>
+</svg>
