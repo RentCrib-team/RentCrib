@@ -93,6 +93,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "bathroom_type",
         "bills_included",
         "category",
+        "city",
         "created_at",
         "deleted_at",
         "description",
@@ -176,6 +177,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
 
     # Minimal type locks for key fields
     assert_is_int(first["id"], "id")
+    assert first["city"] is None or isinstance(first["city"], int)
     assert_is_bool(first["is_saved"], "is_saved")
     assert_is_bool(first["is_available"], "is_available")
     assert_is_bool(first["is_deleted"], "is_deleted")
