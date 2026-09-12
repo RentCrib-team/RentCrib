@@ -64,6 +64,7 @@ def test_booking_confirmation_email_pipeline_works_without_manual_template_seed(
         template_key="booking.confirmation",
     )
     assert outbound.status == OutboundNotification.STATUS_QUEUED
+    assert outbound.context.get("booking_id") == booking.id
 
     with patch("notifications.services.send_mail", return_value=1) as send_mail:
         result = send_due_notifications()
@@ -81,4 +82,3 @@ def test_booking_confirmation_email_pipeline_works_without_manual_template_seed(
         and "viewing request" in call.kwargs.get("subject", "").lower()
     )
     assert booking_call.kwargs["recipient_list"] == [booker.email]
-    assert str(booking.id) in outbound.context.get("booking_id", "") or outbound.context.get("booking_id") == booking.id
