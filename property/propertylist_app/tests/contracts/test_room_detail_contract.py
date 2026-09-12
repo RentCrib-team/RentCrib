@@ -114,6 +114,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "bathroom_type",
         "bills_included",
         "category",
+        "city",
         "created_at",
         "deleted_at",
         "description",
@@ -194,6 +195,7 @@ def test_room_detail_contract_v1_shape_and_types():
     assert_exact_keys(payload, expected_keys)
 
     assert_is_int(payload["id"], "id")
+    assert payload["city"] is None or isinstance(payload["city"], int)
     assert_is_bool(payload["is_saved"], "is_saved")
     assert_is_bool(payload["is_available"], "is_available")
     assert_is_bool(payload["is_deleted"], "is_deleted")
