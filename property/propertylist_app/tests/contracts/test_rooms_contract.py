@@ -93,6 +93,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "bathroom_type",
         "bills_included",
         "category",
+        "city",
         "created_at",
         "deleted_at",
         "description",
@@ -180,6 +181,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
     assert_is_bool(first["is_available"], "is_available")
     assert_is_bool(first["is_deleted"], "is_deleted")
     assert_is_bool(first["is_shared_room"], "is_shared_room")
+    assert first["city"] is None or isinstance(first["city"], int)
     
     
     assert first["cover_image"] is None or isinstance(first["cover_image"], str)
