@@ -1,5 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.text import slugify
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from propertylist_app.models import City
@@ -49,15 +51,18 @@ class AdminCitySerializer(serializers.ModelSerializer):
             "display_order": {"required": False},
         }
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_image_url(self, obj):
         return city_image_url(
             obj,
             request=self.context.get("request"),
         )
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_has_image(self, obj):
         return city_has_uploaded_image(obj)
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_room_count(self, obj):
         annotated_count = getattr(obj, "room_count", None)
         if annotated_count is not None:
