@@ -16,7 +16,7 @@ app.autodiscover_tasks(["propertylist_app"], related_name="city_image_tasks")
 def install_city_image_autofill_schedule(sender, **kwargs):
     sender.add_periodic_task(
         crontab(minute="*/10"),
-        sender.signature("propertylist_app.autofill_missing_city_images"),
+        sender.signature("propertylist_app.enqueue_missing_city_images"),
         name="autofill-missing-city-images",
         expires=9 * 60,
     )

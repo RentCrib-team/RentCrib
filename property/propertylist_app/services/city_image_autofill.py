@@ -1,33 +1,46 @@
+import html
 import json
-import os
+import re
 from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from django.apps import apps
-from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 
-PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
-PEXELS_LICENSE_URL = "https://www.pexels.com/license/"
+ENWIKI_API_URL = "https://en.wikipedia.org/w/api.php"
+COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
 PROVENANCE_PREFIX = "city_image_provenance"
-DEFAULT_BATCH_LIMIT = 5
+USER_AGENT = "RentCrib/1.0 (https://rentcrib.co.uk; team@rentcrib.co.uk)"
 
-SEARCH_NAME_OVERRIDES = {
-    "bangor-northern-ireland": "Bangor Northern Ireland",
-    "bangor-wales": "Bangor Wales",
-    "kingston-upon-hull": "Hull",
-    "londonderry": "Derry Londonderry",
+PAGE_TITLE_OVERRIDES = {
+    "bath": "Bath, Somerset",
+    "brighton-hove": "Brighton and Hove",
+    "durham": "Durham, England",
+    "kingston-upon-hull": "Kingston upon Hull",
     "newcastle-upon-tyne": "Newcastle upon Tyne",
-    "st-asaph": "Saint Asaph",
-    "st-davids": "Saint Davids",
+    "southend-on-sea": "Southend-on-Sea",
+    "stoke-on-trent": "Stoke-on-Trent",
+    "wells": "Wells, Somerset",
+    "westminster": "City of Westminster",
+    "bangor-northern-ireland": "Bangor, County Down",
+    "londonderry": "Derry",
+    "perth": "Perth, Scotland",
+    "bangor-wales": "Bangor, Gwynedd",
+    "newport": "Newport, Wales",
+}
+
+ACCEPTED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/tiff",
 }
 
 
@@ -43,15 +56,6 @@ def _runtime_dependencies():
     return city_model, OFFICIAL_UK_CITIES, prepare_city_image
 
 
-def _api_key(explicit_key=None):
-    if explicit_key is not None:
-        return _clean(explicit_key)
-    return _clean(
-        getattr(settings, "PEXELS_API_KEY", "")
-        or os.getenv("PEXELS_API_KEY", "")
-    )
-
-
 def _catalogue_by_slug(catalogue):
     return {
         _clean(item.get("slug")).lower(): item
@@ -60,80 +64,248 @@ def _catalogue_by_slug(catalogue):
     }
 
 
-def _search_queries(item):
-    slug = _clean(item.get("slug")).lower()
-    display_name = _clean(item.get("display_name") or item.get("name"))
-    nation = _clean(item.get("nation"))
-    search_name = SEARCH_NAME_OVERRIDES.get(slug, display_name)
-
-    return [
-        f"{search_name} {nation} United Kingdom city skyline".strip(),
-        f"{search_name} {nation} United Kingdom city centre".strip(),
-        f"{search_name} {nation} United Kingdom".strip(),
-    ]
+def _strip_markup(value):
+    text = html.unescape(_clean(value))
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def _download_url(photo):
-    src = photo.get("src") or {}
+def _meta_value(extmetadata, key):
+    raw = (extmetadata or {}).get(key) or {}
+    if isinstance(raw, dict):
+        return _strip_markup(raw.get("value"))
+    return _strip_markup(raw)
+
+
+def _license_is_usable(license_name):
+    normalised = re.sub(r"\s+", " ", _clean(license_name)).upper()
     return (
-        src.get("large2x")
-        or src.get("large")
-        or src.get("landscape")
-        or src.get("medium")
+        normalised.startswith("CC BY")
+        or normalised.startswith("CC0")
+        or "PUBLIC DOMAIN" in normalised
     )
 
 
-def _find_photo(*, item, api_key, http_get):
-    last_error = None
-    for query in _search_queries(item):
-        try:
-            response = http_get(
-                PEXELS_SEARCH_URL,
-                headers={"Authorization": api_key},
-                params={
-                    "query": query,
-                    "orientation": "landscape",
-                    "size": "large",
-                    "per_page": 5,
-                    "page": 1,
-                },
-                timeout=30,
-            )
-            if response.status_code == 401:
-                raise RuntimeError("Pexels API rejected PEXELS_API_KEY")
-            response.raise_for_status()
-            photos = (response.json() or {}).get("photos") or []
-        except Exception as exc:
-            last_error = exc
+def _request_json(http_get, url, params):
+    response = http_get(
+        url,
+        headers={"User-Agent": USER_AGENT},
+        params=params,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json() or {}
+
+
+def _article_title(item):
+    slug = _clean(item.get("slug")).lower()
+    display_name = _clean(item.get("display_name") or item.get("name"))
+    return PAGE_TITLE_OVERRIDES.get(slug, display_name)
+
+
+def _pageimage_file_names(*, item, http_get):
+    title = _article_title(item)
+    payload = _request_json(
+        http_get,
+        ENWIKI_API_URL,
+        {
+            "action": "query",
+            "format": "json",
+            "formatversion": 2,
+            "redirects": 1,
+            "prop": "pageimages",
+            "titles": title,
+            "piprop": "name|thumbnail",
+            "pilicense": "free",
+            "pithumbsize": 1600,
+        },
+    )
+    names = []
+    for page in ((payload.get("query") or {}).get("pages") or []):
+        name = _clean(page.get("pageimage"))
+        if name:
+            names.append((name, _clean(page.get("title")) or title))
+    return names
+
+
+def _imageinfo_candidate(*, api_url, file_name, page_title, http_get):
+    payload = _request_json(
+        http_get,
+        api_url,
+        {
+            "action": "query",
+            "format": "json",
+            "formatversion": 2,
+            "prop": "imageinfo",
+            "titles": f"File:{file_name}",
+            "iiprop": "url|mime|extmetadata",
+            "iiurlwidth": 1600,
+            "iiextmetadatalanguage": "en",
+            "iiextmetadatafilter": (
+                "LicenseShortName|LicenseUrl|Artist|Credit|UsageTerms|AttributionRequired"
+            ),
+        },
+    )
+    pages = (payload.get("query") or {}).get("pages") or []
+    for page in pages:
+        infos = page.get("imageinfo") or []
+        if not infos:
             continue
+        info = infos[0]
+        mime = _clean(info.get("mime")).lower()
+        if mime not in ACCEPTED_MIME_TYPES:
+            continue
+        ext = info.get("extmetadata") or {}
+        license_name = _meta_value(ext, "LicenseShortName") or _meta_value(ext, "UsageTerms")
+        if not _license_is_usable(license_name):
+            continue
+        artist = _meta_value(ext, "Artist") or "Wikimedia Commons contributor"
+        credit = _meta_value(ext, "Credit") or artist
+        return {
+            "file_name": file_name,
+            "page_title": page_title,
+            "download_url": _clean(info.get("thumburl") or info.get("url")),
+            "source_url": _clean(info.get("descriptionurl")),
+            "license_name": license_name,
+            "license_url": _meta_value(ext, "LicenseUrl"),
+            "artist": artist,
+            "credit": credit,
+            "mime": mime,
+        }
+    return None
 
-        for photo in photos:
-            if _download_url(photo):
-                return photo, query
 
-    if last_error:
-        raise RuntimeError(f"Pexels search failed: {last_error}") from last_error
-    raise RuntimeError("Pexels returned no usable city image")
+def _commons_search_candidates(*, item, http_get):
+    display_name = _clean(item.get("display_name") or item.get("name"))
+    nation = _clean(item.get("nation"))
+    queries = [
+        f"{display_name} {nation} city skyline",
+        f"{display_name} {nation} city centre",
+        f"{display_name} {nation} United Kingdom",
+    ]
+    for query in queries:
+        payload = _request_json(
+            http_get,
+            COMMONS_API_URL,
+            {
+                "action": "query",
+                "format": "json",
+                "formatversion": 2,
+                "generator": "search",
+                "gsrnamespace": 6,
+                "gsrsearch": query,
+                "gsrlimit": 10,
+                "prop": "imageinfo",
+                "iiprop": "url|mime|extmetadata",
+                "iiurlwidth": 1600,
+                "iiextmetadatalanguage": "en",
+                "iiextmetadatafilter": (
+                    "LicenseShortName|LicenseUrl|Artist|Credit|UsageTerms|AttributionRequired"
+                ),
+            },
+        )
+        for page in ((payload.get("query") or {}).get("pages") or []):
+            infos = page.get("imageinfo") or []
+            if not infos:
+                continue
+            info = infos[0]
+            mime = _clean(info.get("mime")).lower()
+            if mime not in ACCEPTED_MIME_TYPES:
+                continue
+            ext = info.get("extmetadata") or {}
+            license_name = _meta_value(ext, "LicenseShortName") or _meta_value(ext, "UsageTerms")
+            if not _license_is_usable(license_name):
+                continue
+            title = _clean(page.get("title"))
+            file_name = title[5:] if title.lower().startswith("file:") else title
+            artist = _meta_value(ext, "Artist") or "Wikimedia Commons contributor"
+            credit = _meta_value(ext, "Credit") or artist
+            download_url = _clean(info.get("thumburl") or info.get("url"))
+            if not download_url:
+                continue
+            yield {
+                "file_name": file_name,
+                "page_title": _article_title(item),
+                "download_url": download_url,
+                "source_url": _clean(info.get("descriptionurl")),
+                "license_name": license_name,
+                "license_url": _meta_value(ext, "LicenseUrl"),
+                "artist": artist,
+                "credit": credit,
+                "mime": mime,
+                "search_query": query,
+            }
 
 
-def _normalise_downloaded_image(*, content, slug):
+def _resolve_candidate(*, item, http_get):
+    errors = []
     try:
-        with Image.open(BytesIO(content)) as image:
-            image = ImageOps.exif_transpose(image).convert("RGB")
+        for file_name, page_title in _pageimage_file_names(item=item, http_get=http_get):
+            for api_url in (COMMONS_API_URL, ENWIKI_API_URL):
+                try:
+                    candidate = _imageinfo_candidate(
+                        api_url=api_url,
+                        file_name=file_name,
+                        page_title=page_title,
+                        http_get=http_get,
+                    )
+                except Exception as exc:
+                    errors.append(str(exc))
+                    continue
+                if candidate and candidate.get("download_url"):
+                    candidate["search_query"] = f"Wikipedia page image: {page_title}"
+                    return candidate
+    except Exception as exc:
+        errors.append(str(exc))
+
+    try:
+        for candidate in _commons_search_candidates(item=item, http_get=http_get):
+            return candidate
+    except Exception as exc:
+        errors.append(str(exc))
+
+    detail = f": {'; '.join(errors[-3:])}" if errors else ""
+    raise RuntimeError(f"No usable free Wikimedia city image found{detail}")
+
+
+def _needs_visible_attribution(license_name):
+    normalised = _clean(license_name).upper()
+    return normalised.startswith("CC BY")
+
+
+def _normalise_downloaded_image(*, content, slug, candidate):
+    try:
+        with Image.open(BytesIO(content)) as source:
+            source = ImageOps.exif_transpose(source).convert("RGB")
+            width, height = source.size
+            if width < 640 or height < 360:
+                raise ValueError(
+                    f"source image is too small ({width}x{height}); minimum is 640x360"
+                )
             image = ImageOps.fit(
-                image,
+                source,
                 (1600, 900),
                 method=Image.Resampling.LANCZOS,
                 centering=(0.5, 0.5),
             )
-            handle = BytesIO()
-            image.save(
-                handle,
-                "JPEG",
-                quality=88,
-                optimize=True,
-                progressive=True,
+
+        if _needs_visible_attribution(candidate.get("license_name")):
+            label = (
+                f"Photo: {_clean(candidate.get('artist'))[:70]} · "
+                f"{_clean(candidate.get('license_name'))} · Wikimedia Commons"
             )
+            draw = ImageDraw.Draw(image)
+            try:
+                font = ImageFont.truetype("DejaVuSans.ttf", 18)
+            except Exception:
+                font = ImageFont.load_default()
+            left, top, right, bottom = draw.textbbox((0, 0), label, font=font)
+            strip_height = max(34, (bottom - top) + 16)
+            draw.rectangle((0, 900 - strip_height, 1600, 900), fill=(0, 0, 0))
+            draw.text((12, 900 - strip_height + 8), label, fill=(255, 255, 255), font=font)
+
+        handle = BytesIO()
+        image.save(handle, "JPEG", quality=88, optimize=True, progressive=True)
     except Exception as exc:
         raise RuntimeError(f"Downloaded city image is invalid: {exc}") from exc
 
@@ -147,25 +319,6 @@ def _normalise_downloaded_image(*, content, slug):
 def _prepared_filename(slug, prepared):
     suffix = Path(_clean(getattr(prepared, "name", ""))).suffix.lower()
     return f"{slug}{suffix or '.jpg'}"
-
-
-def _provenance_payload(*, city, item, photo, query, image_name, now):
-    photographer = _clean(photo.get("photographer")) or "Unknown photographer"
-    return {
-        "city_slug": city.slug,
-        "city_name": _clean(item.get("display_name") or item.get("name") or city.name),
-        "provider": "Pexels",
-        "provider_photo_id": str(photo.get("id") or ""),
-        "photographer": photographer,
-        "source_url": _clean(photo.get("url")) or "https://www.pexels.com/",
-        "license_name": "Pexels License",
-        "license_url": PEXELS_LICENSE_URL,
-        "credit": f"Photo by {photographer} on Pexels",
-        "rights_confirmed": True,
-        "search_query": query,
-        "stored_image": image_name,
-        "recorded_at": now.isoformat(),
-    }
 
 
 def _save_provenance(storage, slug, payload):
@@ -189,10 +342,9 @@ def _delete_safely(storage, name):
         pass
 
 
-def autofill_missing_city_images(
+def autofill_city_image(
+    city_id,
     *,
-    limit=DEFAULT_BATCH_LIMIT,
-    api_key=None,
     http_get=None,
     city_model=None,
     catalogue=None,
@@ -200,31 +352,7 @@ def autofill_missing_city_images(
     atomic_context=None,
     now_func=None,
 ):
-    """Populate a bounded batch of missing canonical city images.
-
-    Existing city images are never replaced. Each successful third-party image
-    is validated through RentCrib's normal city-image pipeline and receives a
-    durable provenance JSON sidecar in the same configured media storage.
-    """
-
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("limit must be an integer") from exc
-    if limit < 1 or limit > 20:
-        raise ValueError("limit must be between 1 and 20")
-
-    resolved_key = _api_key(api_key)
-    if not resolved_key:
-        return {
-            "status": "disabled",
-            "reason": "PEXELS_API_KEY is not configured",
-            "attempted": 0,
-            "imported": 0,
-            "skipped": 0,
-            "failed": 0,
-            "errors": [],
-        }
+    """Populate one canonical city image without any external API secret."""
 
     if city_model is None or catalogue is None or prepare_image is None:
         runtime_city_model, runtime_catalogue, runtime_prepare_image = _runtime_dependencies()
@@ -233,96 +361,84 @@ def autofill_missing_city_images(
         prepare_image = prepare_image or runtime_prepare_image
 
     http_get = http_get or requests.get
-    now_func = now_func or timezone.now
     atomic_context = atomic_context or transaction.atomic
+    now_func = now_func or timezone.now
     catalogue_index = _catalogue_by_slug(catalogue)
 
-    queryset = (
-        city_model.objects.filter(is_active=True)
-        .filter(Q(image="") | Q(image__isnull=True))
-        .order_by("display_order", "name")
-    )
-    city_ids = list(queryset.values_list("pk", flat=True)[:limit])
+    image_storage = None
+    new_image_name = ""
+    provenance_name = ""
+    slug = ""
 
-    result = {
-        "status": "ok",
-        "attempted": len(city_ids),
-        "imported": 0,
-        "skipped": 0,
-        "failed": 0,
-        "errors": [],
-    }
+    try:
+        context = atomic_context() if callable(atomic_context) else nullcontext()
+        with context:
+            city = city_model.objects.select_for_update().get(pk=city_id)
+            slug = _clean(city.slug).lower()
+            if city.image:
+                return {"status": "existing", "city_id": city_id, "slug": slug}
+            if not getattr(city, "is_active", True):
+                return {"status": "inactive", "city_id": city_id, "slug": slug}
 
-    for city_id in city_ids:
-        image_storage = None
-        new_image_name = ""
-        provenance_name = ""
-        slug = ""
+            item = catalogue_index.get(slug)
+            if item is None:
+                raise RuntimeError("City is missing from the official UK catalogue")
 
-        try:
-            context = atomic_context() if callable(atomic_context) else nullcontext()
-            with context:
-                city = city_model.objects.select_for_update().get(pk=city_id)
-                slug = _clean(city.slug).lower()
-
-                if city.image:
-                    result["skipped"] += 1
-                    continue
-
-                item = catalogue_index.get(slug)
-                if item is None:
-                    raise RuntimeError("City is missing from the official UK catalogue")
-
-                photo, query = _find_photo(
-                    item=item,
-                    api_key=resolved_key,
-                    http_get=http_get,
-                )
-                download_url = _download_url(photo)
-                image_response = http_get(download_url, timeout=60)
-                image_response.raise_for_status()
-
-                uploaded = _normalise_downloaded_image(
-                    content=image_response.content,
-                    slug=slug,
-                )
-                prepared = prepare_image(uploaded)
-                target_name = _prepared_filename(slug, prepared)
-
-                image_storage = city.image.storage
-                city.image.save(target_name, prepared, save=False)
-                new_image_name = _clean(city.image.name)
-
-                payload = _provenance_payload(
-                    city=city,
-                    item=item,
-                    photo=photo,
-                    query=query,
-                    image_name=new_image_name,
-                    now=now_func(),
-                )
-                provenance_name = _save_provenance(
-                    image_storage,
-                    slug,
-                    payload,
-                )
-
-                display_name = _clean(item.get("display_name") or item.get("name"))
-                city.image_alt = city.image_alt or f"{display_name} city view"
-                city.save(update_fields=["image", "image_alt", "updated_at"])
-
-            result["imported"] += 1
-
-        except Exception as exc:
-            _delete_safely(image_storage, new_image_name)
-            _delete_safely(image_storage, provenance_name)
-            result["failed"] += 1
-            result["errors"].append(
-                {
-                    "city_id": city_id,
-                    "slug": slug,
-                    "error": str(exc),
-                }
+            candidate = _resolve_candidate(item=item, http_get=http_get)
+            response = http_get(
+                candidate["download_url"],
+                headers={"User-Agent": USER_AGENT},
+                timeout=60,
             )
+            response.raise_for_status()
+            uploaded = _normalise_downloaded_image(
+                content=response.content,
+                slug=slug,
+                candidate=candidate,
+            )
+            prepared = prepare_image(uploaded)
+            target_name = _prepared_filename(slug, prepared)
 
-    return result
+            image_storage = city.image.storage
+            city.image.save(target_name, prepared, save=False)
+            new_image_name = _clean(city.image.name)
+
+            provenance = {
+                "city_slug": slug,
+                "city_name": _clean(item.get("display_name") or item.get("name") or city.name),
+                "provider": "Wikimedia Commons",
+                "file_name": candidate["file_name"],
+                "wikipedia_page": candidate["page_title"],
+                "source_url": candidate["source_url"],
+                "license_name": candidate["license_name"],
+                "license_url": candidate["license_url"],
+                "artist": candidate["artist"],
+                "credit": candidate["credit"],
+                "visible_attribution_embedded": _needs_visible_attribution(candidate["license_name"]),
+                "search_query": candidate.get("search_query", ""),
+                "stored_image": new_image_name,
+                "recorded_at": now_func().isoformat(),
+            }
+            provenance_name = _save_provenance(image_storage, slug, provenance)
+
+            display_name = _clean(item.get("display_name") or item.get("name"))
+            city.image_alt = city.image_alt or f"{display_name} city view"
+            city.save(update_fields=["image", "image_alt", "updated_at"])
+
+        return {
+            "status": "imported",
+            "city_id": city_id,
+            "slug": slug,
+            "image": new_image_name,
+            "provenance": provenance_name,
+        }
+
+    except Exception as exc:
+        _delete_safely(image_storage, new_image_name)
+        _delete_safely(image_storage, provenance_name)
+        return {
+            "status": "failed",
+            "city_id": city_id,
+            "slug": slug,
+            "error": str(exc),
+        }

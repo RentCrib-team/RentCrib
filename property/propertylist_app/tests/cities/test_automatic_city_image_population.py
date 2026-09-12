@@ -110,7 +110,7 @@ def _jpeg_bytes():
     return handle.getvalue()
 
 
-def test_backend_automatically_populates_missing_city_images_and_preserves_existing_images():
+def test_backend_populates_missing_city_images_without_api_secret_and_queues_all_missing():
     storage = FakeStorage()
     southampton = FakeCity(
         pk=1,
@@ -120,13 +120,9 @@ def test_backend_automatically_populates_missing_city_images_and_preserves_exist
         image_name="city_images/southampton.webp",
         image_alt="Southampton city centre at night",
     )
-    london = FakeCity(
-        pk=2,
-        name="London",
-        slug="london",
-        storage=storage,
-    )
-    FakeCityModel.objects = FakeManager([southampton, london])
+    london = FakeCity(pk=2, name="London", slug="london", storage=storage)
+    manchester = FakeCity(pk=3, name="Manchester", slug="manchester", storage=storage)
+    FakeCityModel.objects = FakeManager([southampton, london, manchester])
 
     catalogue = (
         {
@@ -141,33 +137,67 @@ def test_backend_automatically_populates_missing_city_images_and_preserves_exist
             "slug": "london",
             "nation": "England",
         },
+        {
+            "name": "Manchester",
+            "display_name": "Manchester",
+            "slug": "manchester",
+            "nation": "England",
+        },
     )
 
-    image_bytes = _jpeg_bytes()
     requests_seen = []
+    image_bytes = _jpeg_bytes()
 
     def fake_get(url, **kwargs):
         requests_seen.append((url, kwargs))
-        if url == city_image_autofill.PEXELS_SEARCH_URL:
-            assert kwargs["headers"] == {"Authorization": "test-key"}
-            assert kwargs["params"]["query"] == (
-                "London England United Kingdom city skyline"
-            )
+        if url == city_image_autofill.ENWIKI_API_URL:
+            params = kwargs["params"]
+            assert kwargs["headers"] == {"User-Agent": city_image_autofill.USER_AGENT}
+            assert params["prop"] == "pageimages"
+            assert params["pilicense"] == "free"
+            assert params["titles"] == "London"
             return FakeResponse(
                 payload={
-                    "photos": [
-                        {
-                            "id": 987,
-                            "photographer": "Example Photographer",
-                            "url": "https://www.pexels.com/photo/london-view-987/",
-                            "src": {
-                                "large2x": "https://images.example/london.jpg",
-                            },
-                        }
-                    ]
+                    "query": {
+                        "pages": [
+                            {
+                                "pageid": 1,
+                                "title": "London",
+                                "pageimage": "London skyline.jpg",
+                            }
+                        ]
+                    }
                 }
             )
-        if url == "https://images.example/london.jpg":
+        if url == city_image_autofill.COMMONS_API_URL:
+            params = kwargs["params"]
+            assert params["titles"] == "File:London skyline.jpg"
+            return FakeResponse(
+                payload={
+                    "query": {
+                        "pages": [
+                            {
+                                "title": "File:London skyline.jpg",
+                                "imageinfo": [
+                                    {
+                                        "mime": "image/jpeg",
+                                        "thumburl": "https://upload.wikimedia.example/london.jpg",
+                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:London_skyline.jpg",
+                                        "extmetadata": {
+                                            "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                            "LicenseUrl": {"value": "https://creativecommons.org/licenses/by-sa/4.0/"},
+                                            "Artist": {"value": "Example Photographer"},
+                                            "Credit": {"value": "Own work"},
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        if url == "https://upload.wikimedia.example/london.jpg":
+            assert kwargs["headers"] == {"User-Agent": city_image_autofill.USER_AGENT}
             return FakeResponse(content=image_bytes)
         raise AssertionError(f"unexpected request: {url}")
 
@@ -175,6 +205,7 @@ def test_backend_automatically_populates_missing_city_images_and_preserves_exist
         uploaded.seek(0)
         with Image.open(uploaded) as image:
             assert image.size == (1600, 900)
+            assert image.getpixel((1, 899)) == (0, 0, 0)
         uploaded.seek(0)
         return SimpleUploadedFile(
             "london.webp",
@@ -182,9 +213,8 @@ def test_backend_automatically_populates_missing_city_images_and_preserves_exist
             content_type="image/webp",
         )
 
-    result = city_image_autofill.autofill_missing_city_images(
-        limit=5,
-        api_key="test-key",
+    result = city_image_autofill.autofill_city_image(
+        2,
         http_get=fake_get,
         city_model=FakeCityModel,
         catalogue=catalogue,
@@ -192,18 +222,9 @@ def test_backend_automatically_populates_missing_city_images_and_preserves_exist
         atomic_context=nullcontext,
     )
 
-    assert result == {
-        "status": "ok",
-        "attempted": 1,
-        "imported": 1,
-        "skipped": 0,
-        "failed": 0,
-        "errors": [],
-    }
-
+    assert result["status"] == "imported"
+    assert result["slug"] == "london"
     assert southampton.image.name == "city_images/southampton.webp"
-    assert southampton.image_alt == "Southampton city centre at night"
-
     assert london.image.name == "city_images/london.webp"
     assert london.image_alt == "London city view"
     assert london.saved_update_fields == ["image", "image_alt", "updated_at"]
@@ -211,23 +232,32 @@ def test_backend_automatically_populates_missing_city_images_and_preserves_exist
     provenance_name = "city_image_provenance/london.json"
     assert provenance_name in storage.files
     provenance = json.loads(storage.files[provenance_name].decode("utf-8"))
-    assert provenance["city_slug"] == "london"
-    assert provenance["provider"] == "Pexels"
-    assert provenance["provider_photo_id"] == "987"
-    assert provenance["photographer"] == "Example Photographer"
-    assert provenance["source_url"] == "https://www.pexels.com/photo/london-view-987/"
-    assert provenance["license_name"] == "Pexels License"
-    assert provenance["license_url"] == "https://www.pexels.com/license/"
-    assert provenance["rights_confirmed"] is True
+    assert provenance["provider"] == "Wikimedia Commons"
+    assert provenance["file_name"] == "London skyline.jpg"
+    assert provenance["license_name"] == "CC BY-SA 4.0"
+    assert provenance["artist"] == "Example Photographer"
+    assert provenance["visible_attribution_embedded"] is True
     assert provenance["stored_image"] == "city_images/london.webp"
 
-    assert [url for url, _ in requests_seen] == [
-        city_image_autofill.PEXELS_SEARCH_URL,
-        "https://images.example/london.jpg",
-    ]
+    queued = []
+    queue_result = city_image_tasks.enqueue_missing_city_images(
+        city_model=FakeCityModel,
+        enqueue=queued.append,
+    )
+    assert queue_result == {"queued": 1, "city_ids": [3]}
+    assert queued == [3]
 
     schedule = celery_app.conf.beat_schedule["autofill-missing-city-images"]
-    assert schedule["task"] == "propertylist_app.autofill_missing_city_images"
-    assert city_image_tasks.task_autofill_missing_city_images.name == (
-        "propertylist_app.autofill_missing_city_images"
+    assert schedule["task"] == "propertylist_app.enqueue_missing_city_images"
+    assert city_image_tasks.task_autofill_city_image.name == (
+        "propertylist_app.autofill_city_image"
     )
+    assert city_image_tasks.task_enqueue_missing_city_images.name == (
+        "propertylist_app.enqueue_missing_city_images"
+    )
+
+    assert [url for url, _ in requests_seen] == [
+        city_image_autofill.ENWIKI_API_URL,
+        city_image_autofill.COMMONS_API_URL,
+        "https://upload.wikimedia.example/london.jpg",
+    ]
