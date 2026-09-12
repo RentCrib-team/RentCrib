@@ -81,4 +81,15 @@ jobs:
 
       - name: Run full backend regression suite
         working-directory: property
-        run: pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee full-backend-pytest.log
+
+      - name: Upload full backend pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step11-full-backend-pytest-log
+          path: property/full-backend-pytest.log
+          if-no-files-found: warn
