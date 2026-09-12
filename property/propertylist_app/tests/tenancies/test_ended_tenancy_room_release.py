@@ -1,7 +1,9 @@
 from datetime import date, timedelta
 
 import pytest
+from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from propertylist_app.models import Tenancy
 from propertylist_app.tasks import task_tenancy_prompts_sweep
@@ -17,12 +19,21 @@ def test_review_window_transition_releases_ended_tenancy_room_for_reletting(
     landlord = user_factory(username="ended_room_release_landlord")
     tenant = user_factory(username="ended_room_release_tenant")
     room = room_factory(property_owner=landlord)
+    now = timezone.now()
 
     # The room is unavailable while the tenancy is still running.
     room.is_available = False
-    room.save(update_fields=["is_available"])
+    room.paid_until = date.today() + timedelta(days=28)
+    room.relisted_at = now - timedelta(days=1)
+    room.save(
+        update_fields=[
+            "is_available",
+            "paid_until",
+            "relisted_at",
+            "updated_at",
+        ]
+    )
 
-    now = timezone.now()
     tenancy = Tenancy.objects.create(
         room=room,
         landlord=landlord,
@@ -45,3 +56,16 @@ def test_review_window_transition_releases_ended_tenancy_room_for_reletting(
 
     assert tenancy.status == Tenancy.STATUS_ENDED
     assert room.is_available is True
+    assert room.paid_until < date.today()
+    assert room.relisted_at is None
+
+    client = APIClient()
+    client.force_authenticate(user=landlord)
+    response = client.post(
+        reverse("api:room-publish", args=[room.id]),
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert str(response.data["details"]["payment_required"]) == "True"
