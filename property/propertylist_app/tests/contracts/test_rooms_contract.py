@@ -136,6 +136,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "owner_name",
         "owner_username",
         "paid_until",
+        "relisted_at",
         "parking_available",
         "pets_allowed",
         "cover_image",
