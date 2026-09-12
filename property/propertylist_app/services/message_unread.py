@@ -1,4 +1,4 @@
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, Subquery
 
 
 def system_message_unread_payload(
@@ -85,41 +85,50 @@ def system_message_unread_payload(
             id__in=bin_thread_ids,
         )
 
-    # Permanent delete is per-user. A workflow/system event alone must not
-    # resurrect a deleted conversation; only a genuine incoming human message
-    # after the cutoff restores it.
-    deleted_states = (
+    # Permanent delete is per-user. Keep hidden threads excluded until a
+    # genuine incoming human message exists after that user's delete cutoff.
+    # Express the rule as correlated SQL so deleted-thread history does not add
+    # one Message.exists() query per state.
+    deleted_at_for_user = (
         MessageThreadState.objects
         .filter(
             user_id=user_id,
+            thread_id=OuterRef("pk"),
             deleted_at__isnull=False,
         )
-        .values(
-            "thread_id",
-            "deleted_at",
+        .values("deleted_at")[:1]
+    )
+
+    base_threads = base_threads.annotate(
+        _unread_deleted_at_for_user=Subquery(deleted_at_for_user),
+    )
+
+    new_incoming_after_delete = (
+        Message.objects
+        .filter(
+            thread_id=OuterRef("pk"),
+            created__gt=OuterRef("_unread_deleted_at_for_user"),
+            message_type=Message.TYPE_TEXT,
+        )
+        .exclude(sender_id=user_id)
+        .filter(
+            Q(metadata__system_event__isnull=True)
+            | Q(metadata__system_event=False)
         )
     )
 
-    for deleted_state in deleted_states:
-        has_new_incoming_message = (
-            Message.objects
-            .filter(
-                thread_id=deleted_state["thread_id"],
-                created__gt=deleted_state["deleted_at"],
-                message_type=Message.TYPE_TEXT,
-            )
-            .exclude(sender_id=user_id)
-            .filter(
-                Q(metadata__system_event__isnull=True)
-                | Q(metadata__system_event=False)
-            )
-            .exists()
+    base_threads = (
+        base_threads
+        .annotate(
+            _unread_has_new_incoming_after_delete=Exists(
+                new_incoming_after_delete
+            ),
         )
-
-        if not has_new_incoming_message:
-            base_threads = base_threads.exclude(
-                id=deleted_state["thread_id"],
-            )
+        .filter(
+            Q(_unread_deleted_at_for_user__isnull=True)
+            | Q(_unread_has_new_incoming_after_delete=True)
+        )
+    )
 
     hidden_by_delete = MessageThreadState.objects.filter(
         user_id=user_id,

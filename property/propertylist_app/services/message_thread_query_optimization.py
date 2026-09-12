@@ -3,9 +3,15 @@
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Exists, IntegerField, OuterRef, Prefetch, Q, Subquery
 from django.db.models.functions import Coalesce
+from rest_framework import status
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 
-from propertylist_app.api.views.messaging import MessageThreadListCreateView
+from propertylist_app.api.views.messaging import (
+    MessageStatsView,
+    MessageThreadListCreateView,
+    _role_scoped_threads,
+)
 from propertylist_app.models import Message, MessageThread, MessageThreadState, UserProfile
 
 
@@ -239,12 +245,133 @@ def _optimized_get_queryset(self):
     return qs.distinct()
 
 
+def _exclude_threads_still_hidden_after_delete(base_threads, user):
+    deleted_at_for_user = (
+        MessageThreadState.objects
+        .filter(
+            user=user,
+            thread_id=OuterRef("pk"),
+            deleted_at__isnull=False,
+        )
+        .values("deleted_at")[:1]
+    )
+
+    base_threads = base_threads.annotate(
+        _stats_deleted_at_for_user=Subquery(deleted_at_for_user),
+    )
+
+    new_incoming_after_delete = (
+        Message.objects
+        .filter(
+            thread_id=OuterRef("pk"),
+            created__gt=OuterRef("_stats_deleted_at_for_user"),
+            message_type=Message.TYPE_TEXT,
+        )
+        .exclude(sender=user)
+        .filter(
+            Q(metadata__system_event__isnull=True)
+            | Q(metadata__system_event=False)
+        )
+    )
+
+    return (
+        base_threads
+        .annotate(
+            _stats_has_new_incoming_after_delete=Exists(
+                new_incoming_after_delete
+            ),
+        )
+        .filter(
+            Q(_stats_deleted_at_for_user__isnull=True)
+            | Q(_stats_has_new_incoming_after_delete=True)
+        )
+    )
+
+
+def _optimized_message_stats_get(self, request):
+    user = request.user
+
+    base_threads = _role_scoped_threads(user)
+
+    bin_thread_ids = list(
+        MessageThreadState.objects
+        .filter(user=user, in_bin=True)
+        .values_list("thread_id", flat=True)
+    )
+    if bin_thread_ids:
+        base_threads = base_threads.exclude(id__in=bin_thread_ids)
+
+    base_threads = _exclude_threads_still_hidden_after_delete(
+        base_threads,
+        user,
+    )
+
+    good_fit_ids = MessageThreadState.objects.filter(
+        user=user,
+        label="good_fit",
+        in_bin=False,
+    ).values_list("thread_id", flat=True)
+
+    good_fit_threads = base_threads.filter(id__in=good_fit_ids)
+
+    total_threads = base_threads.distinct().count()
+    total_good_fit = good_fit_threads.distinct().count()
+
+    hidden_by_delete = MessageThreadState.objects.filter(
+        user=user,
+        thread_id=OuterRef("thread_id"),
+        deleted_at__isnull=False,
+        deleted_at__gte=OuterRef("created"),
+    )
+
+    total_unread = (
+        Message.objects
+        .filter(thread__in=base_threads)
+        .annotate(hidden_by_delete=Exists(hidden_by_delete))
+        .filter(hidden_by_delete=False)
+        .filter(
+            Q(metadata__system_event=True)
+            | ~Q(sender=user)
+        )
+        .exclude(reads__user=user)
+        .distinct()
+        .count()
+    )
+
+    good_fit_unread = (
+        Message.objects
+        .filter(thread__in=good_fit_threads)
+        .annotate(hidden_by_delete=Exists(hidden_by_delete))
+        .filter(hidden_by_delete=False)
+        .filter(
+            Q(metadata__system_event=True)
+            | ~Q(sender=user)
+        )
+        .exclude(reads__user=user)
+        .distinct()
+        .count()
+    )
+
+    return Response(
+        {
+            "total_threads": total_threads,
+            "total_unread": total_unread,
+            "good_fit": {
+                "threads": total_good_fit,
+                "unread": good_fit_unread,
+            },
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 def install_message_thread_query_optimization():
-    """Install the optimized message-thread queryset once at startup."""
+    """Install the optimized message-thread query paths once at startup."""
     global _INSTALLED
 
     if _INSTALLED:
         return
 
     MessageThreadListCreateView.get_queryset = _optimized_get_queryset
+    MessageStatsView.get = _optimized_message_stats_get
     _INSTALLED = True
