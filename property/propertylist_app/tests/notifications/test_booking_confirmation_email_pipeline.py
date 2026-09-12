@@ -36,9 +36,9 @@ def test_booking_confirmation_email_pipeline_works_without_manual_template_seed(
     assert template.is_active is True
 
     category = RoomCategorie.objects.create(
-        name="Booking confirmation regression",
-        key="booking-confirmation-regression",
-        slug="booking-confirmation-regression",
+        name="Booking email regression",
+        key="booking-email-regression",
+        slug="booking-email-regression",
         active=True,
     )
     room = Room.objects.create(
