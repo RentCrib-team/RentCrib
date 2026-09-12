@@ -114,6 +114,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "bathroom_type",
         "bills_included",
         "category",
+        "city",
         "created_at",
         "deleted_at",
         "description",
@@ -155,6 +156,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "owner_name",
         "owner_username",
         "paid_until",
+        "relisted_at",
         "parking_available",
         "pets_allowed",
         "cover_image",
@@ -198,6 +200,8 @@ def test_room_detail_contract_v1_shape_and_types():
     assert_is_bool(payload["is_available"], "is_available")
     assert_is_bool(payload["is_deleted"], "is_deleted")
     assert_is_bool(payload["is_shared_room"], "is_shared_room")
+    assert payload["city"] is None or isinstance(payload["city"], int)
+    assert payload["relisted_at"] is None or isinstance(payload["relisted_at"], str)
     
     
     
