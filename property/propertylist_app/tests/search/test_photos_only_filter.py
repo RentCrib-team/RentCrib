@@ -196,26 +196,27 @@ def test_public_search_main_photo_exposes_only_approved_room_images():
     assert legacy_payload["cover_image"].endswith(
         "/media/rooms/legacy-main.jpg"
     )
-    assert legacy_payload["other_images"] == []
-   
+    assert "other_images" not in legacy_payload
+    assert isinstance(legacy_payload["photo_count"], int)
     assert legacy_payload["image_status"] == "approved"
 
-    assert rooms_by_id[pending_room.id]["cover_image"] is None
-    assert rooms_by_id[pending_room.id]["other_images"] is None
-    assert rooms_by_id[pending_room.id]["image_status"] == "pending"
+    pending_payload = rooms_by_id[pending_room.id]
+    assert pending_payload["cover_image"] is None
+    assert "other_images" not in pending_payload
+    assert pending_payload["photo_count"] == 0
+    assert pending_payload["image_status"] == "pending"
 
-    assert rooms_by_id[rejected_room.id]["cover_image"] is None
-    assert rooms_by_id[rejected_room.id]["other_images"] is None
-    assert rooms_by_id[rejected_room.id]["image_status"] == "rejected"
+    rejected_payload = rooms_by_id[rejected_room.id]
+    assert rejected_payload["cover_image"] is None
+    assert "other_images" not in rejected_payload
+    assert rejected_payload["photo_count"] == 0
+    assert rejected_payload["image_status"] == "rejected"
 
-    approved_cover = rooms_by_id[approved_room.id]["cover_image"]
+    approved_payload = rooms_by_id[approved_room.id]
+    approved_cover = approved_payload["cover_image"]
 
     assert approved_cover is not None
     assert approved_cover.endswith("/media/rooms/approved-main.jpg")
-    other_images = rooms_by_id[approved_room.id]["other_images"]
-
-    assert len(other_images) == 2
-    assert other_images[0].endswith("/media/rooms/approved-second.jpg")
-    assert other_images[1].endswith("/media/rooms/approved-third.jpg")
-    
-    assert rooms_by_id[approved_room.id]["image_status"] == "approved"
+    assert "other_images" not in approved_payload
+    assert approved_payload["photo_count"] == 3
+    assert approved_payload["image_status"] == "approved"
