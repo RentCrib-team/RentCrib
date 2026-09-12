@@ -2,10 +2,10 @@ import json
 from contextlib import nullcontext
 from io import BytesIO
 
+import celery_app as runtime_celery_app
 from PIL import Image
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from property.celery_app import app as celery_app
 from propertylist_app import city_image_tasks
 from propertylist_app.services import city_image_autofill
 
@@ -247,8 +247,14 @@ def test_backend_populates_missing_city_images_without_api_secret_and_queues_all
     assert queue_result == {"queued": 1, "city_ids": [3]}
     assert queued == [3]
 
-    schedule = celery_app.conf.beat_schedule["autofill-missing-city-images"]
-    assert schedule["task"] == "propertylist_app.enqueue_missing_city_images"
+    runtime_celery_app.app.finalize()
+    runtime_schedule = runtime_celery_app.app.conf.beat_schedule[
+        "autofill-missing-city-images"
+    ]
+    assert runtime_schedule["task"] == "propertylist_app.enqueue_missing_city_images"
+    assert "propertylist_app.city_image_tasks" in tuple(
+        runtime_celery_app.app.conf.imports
+    )
     assert city_image_tasks.task_autofill_city_image.name == (
         "propertylist_app.autofill_city_image"
     )
