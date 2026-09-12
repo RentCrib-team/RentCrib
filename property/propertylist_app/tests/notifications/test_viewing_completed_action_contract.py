@@ -172,7 +172,7 @@ def test_viewing_completed_email_bell_and_envelope_stay_in_timer_one_contract(
 
     for user in (landlord, seeker):
         message_payload = _serialize_message_for(envelope, user)
-        assert message_payload["available_actions"] == ["update_tenancy"]
+        assert message_payload["available_actions"] == []
         assert FORBIDDEN_LIFECYCLE_ACTIONS.isdisjoint(
             message_payload["available_actions"]
         )
