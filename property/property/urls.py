@@ -14,6 +14,7 @@ import os
 
 from django.urls import re_path
 from django.views.static import serve
+from propertylist_app.api.views.member_profiles import MemberProfilePageView
 
 
 
@@ -74,6 +75,11 @@ urlpatterns = [
 
     # API includes (ONLY ONCE EACH)
     #path("api/", include(("propertylist_app.api.urls", "api"), namespace="api")),
+    path(
+        "api/v1/users/<int:user_id>/profile-page/",
+        MemberProfilePageView.as_view(),
+        name="member-profile-page",
+    ),
     path("api/v1/", include(("propertylist_app.api.urls", "v1"), namespace="v1")),
 
     re_path(
