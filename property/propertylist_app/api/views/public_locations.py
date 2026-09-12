@@ -4,7 +4,13 @@ from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
-from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    extend_schema,
+    extend_schema_field,
+    inline_serializer,
+)
 
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.serializers import RoomSerializer
@@ -40,17 +46,20 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_name(self, obj):
         if obj.slug in BANGOR_SLUGS:
             return "Bangor"
         return obj.name
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_image_url(self, obj):
         return city_image_url(
             obj,
             request=self.context.get("request"),
         )
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_has_image(self, obj):
         return city_has_uploaded_image(obj)
 
