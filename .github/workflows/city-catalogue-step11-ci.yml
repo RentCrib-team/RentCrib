@@ -66,6 +66,17 @@ jobs:
         working-directory: property
         run: python manage.py migrate --noinput
 
+      - name: Generate OpenAPI schema
+        working-directory: property
+        run: python manage.py spectacular --file openapi_generated.yaml
+
+      - name: Upload generated OpenAPI schema
+        uses: actions/upload-artifact@v4
+        with:
+          name: step11-openapi-generated
+          path: property/openapi_generated.yaml
+          if-no-files-found: error
+
       - name: Run city catalogue regression tests
         working-directory: property
         run: >-
@@ -77,6 +88,7 @@ jobs:
           propertylist_app/tests/home/test_canonical_city_public_api.py
           propertylist_app/tests/performance/test_canonical_city_query_guardrails.py
           propertylist_app/tests/rooms/test_canonical_city_search.py
+          propertylist_app/tests/rooms/test_canonical_city_legacy_search.py
           -q
 
       - name: Run full backend regression suite
