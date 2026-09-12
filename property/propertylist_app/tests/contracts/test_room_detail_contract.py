@@ -155,6 +155,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "owner_name",
         "owner_username",
         "paid_until",
+        "relisted_at",
         "parking_available",
         "pets_allowed",
         "cover_image",
