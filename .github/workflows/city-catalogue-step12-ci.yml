@@ -1,0 +1,111 @@
+name: Step 12 City Catalogue Staging Verification
+
+on:
+  push:
+    branches:
+      - qa/city-catalogue-step12-staging
+
+permissions:
+  contents: read
+
+jobs:
+  backend-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: rentcrib_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d rentcrib_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DJANGO_SETTINGS_MODULE: property.settings_test
+      DJANGO_DEBUG: "true"
+      DB_NAME: rentcrib_test
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      STRIPE_SECRET_KEY: sk_test_dummy
+      STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      STRIPE_WEBHOOK_SECRET: whsec_dummy
+      SITE_URL: http://testserver
+      GDPR_HASH_SALT: step12-test-salt
+      USE_S3: "false"
+      ENVIRONMENT: test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: property/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r property/requirements.txt
+
+      - name: Django system check
+        working-directory: property
+        run: python manage.py check
+
+      - name: Django model/migration drift check
+        working-directory: property
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations on clean PostgreSQL database
+        working-directory: property
+        run: python manage.py migrate --noinput
+
+      - name: Generate OpenAPI schema
+        working-directory: property
+        run: python manage.py spectacular --file openapi_generated.yaml
+
+      - name: Upload generated OpenAPI schema
+        uses: actions/upload-artifact@v4
+        with:
+          name: step12-openapi-generated
+          path: property/openapi_generated.yaml
+          if-no-files-found: error
+
+      - name: Run city catalogue regression tests
+        working-directory: property
+        run: >-
+          pytest
+          propertylist_app/tests/admin/test_admin_city_management.py
+          propertylist_app/tests/cities/test_city_image_import.py
+          propertylist_app/tests/cities/test_city_image_management.py
+          propertylist_app/tests/cities/test_uk_city_seed.py
+          propertylist_app/tests/home/test_canonical_city_public_api.py
+          propertylist_app/tests/performance/test_canonical_city_query_guardrails.py
+          propertylist_app/tests/rooms/test_canonical_city_search.py
+          propertylist_app/tests/rooms/test_canonical_city_legacy_search.py
+          -q
+
+      - name: Run full backend regression suite
+        working-directory: property
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee full-backend-pytest.log
+
+      - name: Upload full backend pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step12-full-backend-pytest-log
+          path: property/full-backend-pytest.log
+          if-no-files-found: warn
