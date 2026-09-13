@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +28,16 @@ SEARCH_NAME_OVERRIDES = {
     "newcastle-upon-tyne": "Newcastle upon Tyne",
     "st-asaph": "Saint Asaph",
     "st-davids": "Saint Davids",
+}
+
+CITY_MATCH_ALIASES = {
+    "bangor-northern-ireland": ("Bangor Northern Ireland",),
+    "bangor-wales": ("Bangor Wales",),
+    "kingston-upon-hull": ("Kingston upon Hull", "Hull"),
+    "londonderry": ("Londonderry", "Derry"),
+    "newcastle-upon-tyne": ("Newcastle upon Tyne", "Newcastle"),
+    "st-asaph": ("St Asaph", "Saint Asaph"),
+    "st-davids": ("St Davids", "Saint Davids"),
 }
 
 NIGHT_TERMS = ("night", "nighttime", "evening", "city lights", "after dark")
@@ -88,6 +99,29 @@ def _download_url(photo):
         or src.get("landscape")
         or src.get("medium")
     )
+
+
+def _match_text(value):
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", _clean(value).lower()).split())
+
+
+def _city_match_terms(item):
+    slug = _clean(item.get("slug")).lower()
+    aliases = CITY_MATCH_ALIASES.get(slug)
+    if aliases:
+        return tuple(_match_text(value) for value in aliases if _match_text(value))
+    display_name = _clean(item.get("display_name") or item.get("name"))
+    term = _match_text(display_name)
+    return (term,) if term else ()
+
+
+def _photo_matches_city(photo, *, item):
+    """Require the Pexels photo metadata itself to identify the target city."""
+    metadata = _match_text(" ".join((_clean(photo.get("alt")), _clean(photo.get("url")))))
+    if not metadata:
+        return False
+    padded = f" {metadata} "
+    return any(f" {term} " in padded for term in _city_match_terms(item))
 
 
 def _photo_relevance_score(photo, *, item, query, preferred_time=None):
@@ -193,6 +227,8 @@ def _find_photo_candidates(
             photo_id = str(photo.get("id") or "")
             if not photo_id or photo_id in excluded_photo_ids or not _download_url(photo):
                 continue
+            if not _photo_matches_city(photo, item=item):
+                continue
             score = _photo_relevance_score(
                 photo,
                 item=item,
@@ -208,7 +244,7 @@ def _find_photo_candidates(
         return sorted(candidates.values(), key=lambda candidate: candidate[:2], reverse=True)
     if last_error:
         raise RuntimeError(f"Pexels search failed: {last_error}") from last_error
-    raise RuntimeError("Pexels returned no unused usable city image")
+    raise RuntimeError("Pexels returned no unused usable city-matched image")
 
 
 def _normalise_downloaded_image(*, content, slug):
