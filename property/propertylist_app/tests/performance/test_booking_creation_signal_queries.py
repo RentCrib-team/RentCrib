@@ -65,7 +65,10 @@ def test_booking_creation_signal_keeps_synchronous_database_work_bounded(
     start = timezone.now() + timedelta(days=2)
 
     with (
-        patch("propertylist_app.signals.push_user_realtime_event") as realtime_push,
+        patch(
+            "propertylist_app.services.booking_creation_query_optimization."
+            "push_user_realtime_event"
+        ) as realtime_push,
         CaptureQueriesContext(connection) as queries,
     ):
         booking = Booking.objects.create(
