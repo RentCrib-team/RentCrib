@@ -238,3 +238,66 @@ def test_city_autofill_skips_photo_id_and_image_content_already_used_by_other_ci
     )
     assert provenance["provider_photo_id"] == "444"
     assert provenance["content_sha256"] == _prepared_hash(unique_content)
+    assert provenance["time_preference"] == "night"
+    assert "night" in provenance["search_query"]
+
+
+def test_city_autofill_rotates_day_and_night_preferences_with_fallback_queries():
+    storage = FakeStorage()
+    night_city = FakeCity(pk=1, name="London", slug="london", storage=storage)
+    day_city = FakeCity(pk=2, name="Leeds", slug="leeds", storage=storage)
+
+    assert city_image_autofill._city_time_preference(night_city) == "night"
+    assert city_image_autofill._city_time_preference(day_city) == "day"
+
+    item = {
+        "name": "London",
+        "display_name": "London",
+        "slug": "london",
+        "nation": "England",
+    }
+    queries = city_image_autofill._search_queries(item)
+    assert "London England United Kingdom city skyline" in queries
+    assert "London England United Kingdom city centre" in queries
+    assert "London England United Kingdom landmark" in queries
+    assert "London England United Kingdom city skyline at night" in queries
+    assert "London England United Kingdom city lights at night" in queries
+
+    photo = {
+        "id": 10,
+        "alt": "London skyline architecture",
+        "url": "https://www.pexels.com/photo/10/",
+        "width": 2400,
+        "height": 1350,
+        "src": {"large2x": "https://images.pexels.example/10.jpeg"},
+    }
+    day_query = "London England United Kingdom city skyline"
+    night_query = "London England United Kingdom city skyline at night"
+
+    night_pref_night_score = city_image_autofill._photo_relevance_score(
+        photo,
+        item=item,
+        query=night_query,
+        preferred_time="night",
+    )
+    night_pref_day_score = city_image_autofill._photo_relevance_score(
+        photo,
+        item=item,
+        query=day_query,
+        preferred_time="night",
+    )
+    day_pref_day_score = city_image_autofill._photo_relevance_score(
+        photo,
+        item=item,
+        query=day_query,
+        preferred_time="day",
+    )
+    day_pref_night_score = city_image_autofill._photo_relevance_score(
+        photo,
+        item=item,
+        query=night_query,
+        preferred_time="day",
+    )
+
+    assert night_pref_night_score > night_pref_day_score
+    assert day_pref_day_score > day_pref_night_score
