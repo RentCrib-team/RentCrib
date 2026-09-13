@@ -2,7 +2,12 @@ import hashlib
 import json
 from io import BytesIO
 
+import requests
+
+from propertylist_app.services.city_image_autofill import PEXELS_SEARCH_URL
 from propertylist_app.services.city_image_reconciliation import (
+    PEXELS_SEARCH_TIMEOUT,
+    _bounded_http_get,
     reconcile_duplicate_city_images,
 )
 
@@ -133,6 +138,7 @@ def test_reconciliation_replaces_only_duplicate_extras_and_biases_them_to_night(
     )
 
     calls = []
+    progress_messages = []
 
     def fake_replace(city_id, *, preferred_time, **kwargs):
         calls.append(
@@ -166,6 +172,7 @@ def test_reconciliation_replaces_only_duplicate_extras_and_biases_them_to_night(
             duplicate_by_photo_id,
         ),
         replace_image=fake_replace,
+        progress=progress_messages.append,
     )
 
     initial_hashes = {
@@ -185,6 +192,14 @@ def test_reconciliation_replaces_only_duplicate_extras_and_biases_them_to_night(
     assert result["failed"] == []
     assert result["night_count"] == 2
     assert result["day_count"] == 2
+    assert progress_messages == [
+        "Scanning 4 approved city images for duplicates",
+        "Found 2 duplicate city images to replace",
+        "[1/2] Leeds: searching Pexels (night)",
+        "[1/2] Leeds: replaced",
+        "[2/2] Sheffield: searching Pexels (night)",
+        "[2/2] Sheffield: replaced",
+    ]
     assert keeper.image.name == "city_images/birmingham.jpg"
     assert unique.image.name == "city_images/london.jpg"
     assert keeper.image_is_approved is True
@@ -250,3 +265,27 @@ def test_reconciliation_failure_does_not_unapprove_or_clear_existing_city_image(
     ]
     assert duplicate.image.name == original_name
     assert duplicate.image_is_approved is True
+
+
+def test_pexels_search_timeout_is_bounded_and_retried_once():
+    calls = []
+    response = object()
+
+    def flaky_get(url, **kwargs):
+        calls.append((url, kwargs["timeout"]))
+        if len(calls) == 1:
+            raise requests.Timeout("simulated slow Pexels response")
+        return response
+
+    result = _bounded_http_get(
+        flaky_get,
+        PEXELS_SEARCH_URL,
+        headers={"Authorization": "test-key"},
+        timeout=30,
+    )
+
+    assert result is response
+    assert calls == [
+        (PEXELS_SEARCH_URL, PEXELS_SEARCH_TIMEOUT),
+        (PEXELS_SEARCH_URL, PEXELS_SEARCH_TIMEOUT),
+    ]
