@@ -1,8 +1,11 @@
+from html import unescape
+
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.template import Context, Template
 from django.utils import timezone
+from django.utils.html import strip_tags
 
 from .models import NotificationTemplate, OutboundNotification, DeliveryAttempt
 
@@ -350,10 +353,11 @@ class NotificationService:
             )
 
             if notification.channel == NotificationTemplate.CHANNEL_EMAIL:
+                plain_body = unescape(strip_tags(body)).strip()
                 res = EmailTransport.send(
                     notification.user.email,
                     subject,
-                    body,
+                    plain_body,
                     html_message=body,
                 )
             else:

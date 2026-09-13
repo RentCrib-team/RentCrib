@@ -23,10 +23,12 @@ def get_admin_role_permissions():
             "manage_payments",
             "manage_moderation",
             "manage_operations",
+            "manage_locations",
             "manage_support",
         ],
         "ops_admin": [
             "manage_operations",
+            "manage_locations",
             "manage_listings",
             "manage_bookings",
             "manage_tenancies",

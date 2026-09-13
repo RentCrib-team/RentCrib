@@ -9,6 +9,7 @@ class PropertylistAppConfig(AppConfig):
         from . import signals  # noqa: F401
         from . import tenancy_lifecycle_signals  # noqa: F401
         from . import tenancy_extension_action_retirement  # noqa: F401
+        from . import relisting_payment_signals  # noqa: F401
         from .notification_routing import install_bell_notification_routing
         from .services.room_serializer_cache import install_room_serializer_image_cache
         from .services.homepage_query_optimization import (
@@ -23,6 +24,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.booking_list_query_optimization import (
             install_booking_list_query_optimization,
         )
+        from .services.booking_creation_query_optimization import (
+            install_booking_creation_query_optimization,
+        )
         from .services.my_rooms_query_optimization import (
             install_my_rooms_related_query_optimization,
         )
@@ -31,6 +35,9 @@ class PropertylistAppConfig(AppConfig):
         )
         from .services.message_thread_query_optimization import (
             install_message_thread_query_optimization,
+        )
+        from .services.message_creation_query_optimization import (
+            install_message_creation_query_optimization,
         )
         from .services.tenancy_review_query_optimization import (
             install_tenancy_review_query_optimization,
@@ -44,6 +51,15 @@ class PropertylistAppConfig(AppConfig):
         from .services.tenancy_extension_lock import (
             install_tenancy_extension_rejection_lock,
         )
+        from .services.search_default_rotation_optimization import (
+            install_search_default_rotation_optimization,
+        )
+        from .services.search_radius_candidate_optimization import (
+            install_search_radius_candidate_optimization,
+        )
+        from .services.search_image_payload_optimization import (
+            install_search_image_payload_optimization,
+        )
 
         install_bell_notification_routing()
         install_room_serializer_image_cache()
@@ -51,10 +67,15 @@ class PropertylistAppConfig(AppConfig):
         install_saved_rooms_related_query_optimization()
         install_availability_only_free_query_optimization()
         install_booking_list_query_optimization()
+        install_booking_creation_query_optimization()
         install_my_rooms_related_query_optimization()
         install_room_detail_query_optimization()
         install_message_thread_query_optimization()
+        install_message_creation_query_optimization()
         install_tenancy_review_query_optimization()
         install_profile_review_query_optimization()
         install_city_list_query_optimization()
         install_tenancy_extension_rejection_lock()
+        install_search_default_rotation_optimization()
+        install_search_radius_candidate_optimization()
+        install_search_image_payload_optimization()
