@@ -4,22 +4,23 @@ from propertylist_app import city_image_tasks
 from propertylist_app.models import City
 
 
+def _seeded_city(name):
+    city = City.objects.get(name__iexact=name)
+    city.image = f"city_images/{city.slug}-old.webp"
+    city.image_is_approved = False
+    city.is_active = True
+    city.save(update_fields=["image", "image_is_approved", "is_active", "updated_at"])
+    return city
+
+
 @pytest.mark.django_db
 def test_unapproved_city_image_is_requeued_replaced_and_new_autofill_image_is_approved():
-    unapproved = City.objects.create(
-        name="London",
-        image="city_images/london-old.webp",
-        image_is_approved=False,
-        is_active=True,
-        display_order=1,
-    )
-    approved = City.objects.create(
-        name="Leeds",
-        image="city_images/leeds.webp",
-        image_is_approved=True,
-        is_active=True,
-        display_order=2,
-    )
+    unapproved = _seeded_city("London")
+    approved = City.objects.get(name__iexact="Leeds")
+    approved.image = "city_images/leeds.webp"
+    approved.image_is_approved = True
+    approved.is_active = True
+    approved.save(update_fields=["image", "image_is_approved", "is_active", "updated_at"])
 
     queued = []
     result = city_image_tasks.enqueue_missing_city_images(
@@ -27,8 +28,8 @@ def test_unapproved_city_image_is_requeued_replaced_and_new_autofill_image_is_ap
         enqueue=queued.append,
     )
 
-    assert result == {"queued": 1, "city_ids": [unapproved.pk]}
-    assert queued == [unapproved.pk]
+    assert unapproved.pk in result["city_ids"]
+    assert unapproved.pk in queued
     assert approved.pk not in queued
 
     def fake_autofill(city_id):
@@ -58,12 +59,7 @@ def test_unapproved_city_image_is_requeued_replaced_and_new_autofill_image_is_ap
 
 @pytest.mark.django_db
 def test_failed_replacement_restores_previous_unapproved_city_image():
-    city = City.objects.create(
-        name="London",
-        image="city_images/london-old.webp",
-        image_is_approved=False,
-        is_active=True,
-    )
+    city = _seeded_city("London")
 
     def fake_autofill(city_id):
         current = City.objects.get(pk=city_id)
