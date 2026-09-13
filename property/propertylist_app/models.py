@@ -117,6 +117,7 @@ class City(models.Model):
     name = models.CharField(max_length=100)
     slug = models.SlugField(max_length=120, unique=True, blank=True, db_index=True)
     image = models.ImageField(upload_to="city_images/", null=True, blank=True)
+    image_is_approved = models.BooleanField(default=False)
     image_alt = models.CharField(max_length=160, blank=True, default="")
     is_active = models.BooleanField(default=True, db_index=True)
     is_featured = models.BooleanField(default=False, db_index=True)
