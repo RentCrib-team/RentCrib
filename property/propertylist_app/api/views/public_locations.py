@@ -39,6 +39,7 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "image",
+            "image_is_approved",
             "image_url",
             "has_image",
             "image_alt",
