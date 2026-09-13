@@ -23,6 +23,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.booking_list_query_optimization import (
             install_booking_list_query_optimization,
         )
+        from .services.booking_creation_query_optimization import (
+            install_booking_creation_query_optimization,
+        )
         from .services.my_rooms_query_optimization import (
             install_my_rooms_related_query_optimization,
         )
@@ -60,6 +63,7 @@ class PropertylistAppConfig(AppConfig):
         install_saved_rooms_related_query_optimization()
         install_availability_only_free_query_optimization()
         install_booking_list_query_optimization()
+        install_booking_creation_query_optimization()
         install_my_rooms_related_query_optimization()
         install_room_detail_query_optimization()
         install_message_thread_query_optimization()
