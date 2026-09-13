@@ -110,7 +110,7 @@ def _jpeg_bytes():
     return handle.getvalue()
 
 
-def test_backend_populates_missing_city_images_without_api_secret_and_queues_all_missing():
+def test_backend_populates_missing_city_images_from_pexels_without_attribution_strip():
     storage = FakeStorage()
     southampton = FakeCity(
         pk=1,
@@ -147,57 +147,32 @@ def test_backend_populates_missing_city_images_without_api_secret_and_queues_all
 
     requests_seen = []
     image_bytes = _jpeg_bytes()
+    pexels_image_url = "https://images.pexels.example/london.jpeg"
 
     def fake_get(url, **kwargs):
         requests_seen.append((url, kwargs))
-        if url == city_image_autofill.ENWIKI_API_URL:
-            params = kwargs["params"]
-            assert kwargs["headers"] == {"User-Agent": city_image_autofill.USER_AGENT}
-            assert params["prop"] == "pageimages"
-            assert params["pilicense"] == "free"
-            assert params["titles"] == "London"
+        if url == city_image_autofill.PEXELS_SEARCH_URL:
+            assert kwargs["headers"] == {"Authorization": "test-pexels-key"}
+            assert kwargs["params"] == {
+                "query": "London England United Kingdom city skyline",
+                "orientation": "landscape",
+                "size": "large",
+                "per_page": 5,
+                "page": 1,
+            }
             return FakeResponse(
                 payload={
-                    "query": {
-                        "pages": [
-                            {
-                                "pageid": 1,
-                                "title": "London",
-                                "pageimage": "London skyline.jpg",
-                            }
-                        ]
-                    }
+                    "photos": [
+                        {
+                            "id": 12345,
+                            "photographer": "Example Photographer",
+                            "url": "https://www.pexels.com/photo/12345/",
+                            "src": {"large2x": pexels_image_url},
+                        }
+                    ]
                 }
             )
-        if url == city_image_autofill.COMMONS_API_URL:
-            params = kwargs["params"]
-            assert params["titles"] == "File:London skyline.jpg"
-            return FakeResponse(
-                payload={
-                    "query": {
-                        "pages": [
-                            {
-                                "title": "File:London skyline.jpg",
-                                "imageinfo": [
-                                    {
-                                        "mime": "image/jpeg",
-                                        "thumburl": "https://upload.wikimedia.example/london.jpg",
-                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:London_skyline.jpg",
-                                        "extmetadata": {
-                                            "LicenseShortName": {"value": "CC BY-SA 4.0"},
-                                            "LicenseUrl": {"value": "https://creativecommons.org/licenses/by-sa/4.0/"},
-                                            "Artist": {"value": "Example Photographer"},
-                                            "Credit": {"value": "Own work"},
-                                        },
-                                    }
-                                ],
-                            }
-                        ]
-                    }
-                }
-            )
-        if url == "https://upload.wikimedia.example/london.jpg":
-            assert kwargs["headers"] == {"User-Agent": city_image_autofill.USER_AGENT}
+        if url == pexels_image_url:
             return FakeResponse(content=image_bytes)
         raise AssertionError(f"unexpected request: {url}")
 
@@ -205,7 +180,10 @@ def test_backend_populates_missing_city_images_without_api_secret_and_queues_all
         uploaded.seek(0)
         with Image.open(uploaded) as image:
             assert image.size == (1600, 900)
-            assert image.getpixel((1, 899)) == (0, 0, 0)
+            # Pexels images must not receive the Wikimedia attribution bar.
+            assert image.getpixel((1, 899))[0] > 240
+            assert image.getpixel((1, 899))[1] > 240
+            assert image.getpixel((1, 899))[2] > 240
         uploaded.seek(0)
         return SimpleUploadedFile(
             "london.webp",
@@ -215,6 +193,7 @@ def test_backend_populates_missing_city_images_without_api_secret_and_queues_all
 
     result = city_image_autofill.autofill_city_image(
         2,
+        api_key="test-pexels-key",
         http_get=fake_get,
         city_model=FakeCityModel,
         catalogue=catalogue,
@@ -232,11 +211,10 @@ def test_backend_populates_missing_city_images_without_api_secret_and_queues_all
     provenance_name = "city_image_provenance/london.json"
     assert provenance_name in storage.files
     provenance = json.loads(storage.files[provenance_name].decode("utf-8"))
-    assert provenance["provider"] == "Wikimedia Commons"
-    assert provenance["file_name"] == "London skyline.jpg"
-    assert provenance["license_name"] == "CC BY-SA 4.0"
-    assert provenance["artist"] == "Example Photographer"
-    assert provenance["visible_attribution_embedded"] is True
+    assert provenance["provider"] == "Pexels"
+    assert provenance["provider_photo_id"] == "12345"
+    assert provenance["license_name"] == "Pexels License"
+    assert provenance["photographer"] == "Example Photographer"
     assert provenance["stored_image"] == "city_images/london.webp"
 
     queued = []
@@ -263,7 +241,6 @@ def test_backend_populates_missing_city_images_without_api_secret_and_queues_all
     )
 
     assert [url for url, _ in requests_seen] == [
-        city_image_autofill.ENWIKI_API_URL,
-        city_image_autofill.COMMONS_API_URL,
-        "https://upload.wikimedia.example/london.jpg",
+        city_image_autofill.PEXELS_SEARCH_URL,
+        pexels_image_url,
     ]
