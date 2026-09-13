@@ -51,7 +51,14 @@ def _booking_thread(*, landlord, seeker, room):
     try:
         with transaction.atomic():
             thread = MessageThread.objects.create(room=room, landlord=landlord, seeker=seeker)
-            thread.participants.add(landlord, seeker)
+            through = MessageThread.participants.through
+            through.objects.bulk_create(
+                [
+                    through(messagethread_id=thread.id, user_id=landlord.id),
+                    through(messagethread_id=thread.id, user_id=seeker.id),
+                ],
+                ignore_conflicts=True,
+            )
             return thread
     except IntegrityError:
         return MessageThread.objects.get(room=room, landlord=landlord, seeker=seeker)
@@ -154,32 +161,30 @@ def _optimized_booking_created_queue_emails(sender, instance: Booking, created, 
                 {"message_id": system_message.id, "thread_id": thread.id, "sender_id": system_message.sender_id},
             )
 
-        owner_profile, _ = UserProfile.objects.get_or_create(user=owner)
-        if getattr(owner_profile, "notify_confirmations", True):
-            owner_notification, owner_notification_created = Notification.objects.get_or_create(
+        owner_profile = UserProfile.objects.filter(user=owner).only("notify_confirmations").first()
+        notify_confirmations = True if owner_profile is None else owner_profile.notify_confirmations
+        if notify_confirmations:
+            owner_notification = Notification.objects.create(
                 user=owner,
                 type="booking_created",
                 target_type="message",
                 target_id=system_message.id,
-                defaults={
-                    "thread": thread,
-                    "message": system_message,
-                    "audience": Notification.Audience.LANDLORD,
-                    "title": "New viewing booked",
-                    "body": f"A viewing has been booked for {room.title}.",
+                thread=thread,
+                message=system_message,
+                audience=Notification.Audience.LANDLORD,
+                title="New viewing booked",
+                body=f"A viewing has been booked for {room.title}.",
+            )
+            push_user_realtime_event(
+                owner.id,
+                "new_notification",
+                {
+                    "kind": "booking_created",
+                    "notification_id": owner_notification.id,
+                    "message_id": system_message.id,
+                    "thread_id": thread.id,
                 },
             )
-            if owner_notification_created:
-                push_user_realtime_event(
-                    owner.id,
-                    "new_notification",
-                    {
-                        "kind": "booking_created",
-                        "notification_id": owner_notification.id,
-                        "message_id": system_message.id,
-                        "thread_id": thread.id,
-                    },
-                )
 
     booking_deep_link = f"/app/bookings/{instance.id}"
     booking_full_url = build_absolute_url(f"/viewings/{instance.id}", force_login=True)
