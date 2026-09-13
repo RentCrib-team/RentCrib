@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from contextlib import nullcontext
@@ -139,9 +140,10 @@ def _photo_relevance_score(photo, *, item, query):
     return score
 
 
-def _find_photo(*, item, api_key, http_get):
+def _find_photo_candidates(*, item, api_key, http_get, excluded_photo_ids=None):
     last_error = None
-    best = None
+    excluded_photo_ids = {str(value) for value in (excluded_photo_ids or ()) if value}
+    candidates = {}
 
     for query in _search_queries(item):
         try:
@@ -166,20 +168,20 @@ def _find_photo(*, item, api_key, http_get):
             continue
 
         for index, photo in enumerate(photos):
-            if not _download_url(photo):
+            photo_id = str(photo.get("id") or "")
+            if not photo_id or photo_id in excluded_photo_ids or not _download_url(photo):
                 continue
             score = _photo_relevance_score(photo, item=item, query=query)
             candidate = (score, -index, photo, query)
-            if best is None or candidate[:2] > best[:2]:
-                best = candidate
+            current = candidates.get(photo_id)
+            if current is None or candidate[:2] > current[:2]:
+                candidates[photo_id] = candidate
 
-    if best is not None:
-        score, _, photo, query = best
-        return photo, query, score
-
+    if candidates:
+        return sorted(candidates.values(), key=lambda candidate: candidate[:2], reverse=True)
     if last_error:
         raise RuntimeError(f"Pexels search failed: {last_error}") from last_error
-    raise RuntimeError("Pexels returned no usable city image")
+    raise RuntimeError("Pexels returned no unused usable city image")
 
 
 def _normalise_downloaded_image(*, content, slug):
@@ -220,6 +222,29 @@ def _prepared_filename(slug, prepared):
     return f"{slug}{suffix or '.jpg'}"
 
 
+def _file_sha256(file_obj):
+    file_obj.seek(0)
+    digest = hashlib.sha256()
+    while True:
+        chunk = file_obj.read(1024 * 1024)
+        if not chunk:
+            break
+        digest.update(chunk)
+    file_obj.seek(0)
+    return digest.hexdigest()
+
+
+def _stored_file_sha256(storage, name):
+    with storage.open(name, "rb") as handle:
+        digest = hashlib.sha256()
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _save_provenance(storage, slug, payload):
     name = f"{PROVENANCE_PREFIX}/{slug}.json"
     if storage.exists(name):
@@ -230,6 +255,44 @@ def _save_provenance(storage, slug, payload):
             json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
         ),
     )
+
+
+def _used_assignments(storage, catalogue, *, exclude_slug):
+    used_photo_ids = set()
+    used_hashes = set()
+
+    for item in catalogue:
+        other_slug = _clean(item.get("slug")).lower()
+        if not other_slug or other_slug == exclude_slug:
+            continue
+        provenance_name = f"{PROVENANCE_PREFIX}/{other_slug}.json"
+        if not storage.exists(provenance_name):
+            continue
+        try:
+            with storage.open(provenance_name, "rb") as handle:
+                provenance = json.loads(handle.read().decode("utf-8"))
+        except Exception:
+            continue
+
+        photo_id = _clean(provenance.get("provider_photo_id"))
+        if photo_id:
+            used_photo_ids.add(photo_id)
+
+        content_sha256 = _clean(provenance.get("content_sha256"))
+        if not content_sha256:
+            stored_image = _clean(provenance.get("stored_image"))
+            if stored_image and storage.exists(stored_image):
+                try:
+                    content_sha256 = _stored_file_sha256(storage, stored_image)
+                except Exception:
+                    content_sha256 = ""
+                if content_sha256:
+                    provenance["content_sha256"] = content_sha256
+                    _save_provenance(storage, other_slug, provenance)
+        if content_sha256:
+            used_hashes.add(content_sha256)
+
+    return used_photo_ids, used_hashes
 
 
 def _delete_safely(storage, name):
@@ -252,7 +315,7 @@ def autofill_city_image(
     atomic_context=None,
     now_func=None,
 ):
-    """Populate one missing canonical city image from Pexels."""
+    """Populate one missing canonical city image from Pexels without reusing an image."""
 
     resolved_key = _api_key(api_key)
     if not resolved_key:
@@ -282,6 +345,9 @@ def autofill_city_image(
     try:
         context = atomic_context() if callable(atomic_context) else nullcontext()
         with context:
+            lock_qs = city_model.objects.select_for_update().filter(is_active=True)
+            list(lock_qs.order_by("pk").values_list("pk", flat=True))
+
             city = city_model.objects.select_for_update().get(pk=city_id)
             slug = _clean(city.slug).lower()
             if city.image:
@@ -293,23 +359,54 @@ def autofill_city_image(
             if item is None:
                 raise RuntimeError("City is missing from the official UK catalogue")
 
-            photo, query, relevance_score = _find_photo(
+            image_storage = city.image.storage
+            used_photo_ids, used_hashes = _used_assignments(
+                image_storage,
+                catalogue,
+                exclude_slug=slug,
+            )
+            candidates = _find_photo_candidates(
                 item=item,
                 api_key=resolved_key,
                 http_get=http_get,
+                excluded_photo_ids=used_photo_ids,
             )
-            download_url = _download_url(photo)
-            response = http_get(download_url, timeout=60)
-            response.raise_for_status()
 
-            uploaded = _normalise_downloaded_image(
-                content=response.content,
-                slug=slug,
-            )
-            prepared = prepare_image(uploaded)
+            last_candidate_error = None
+            selected = None
+            prepared = None
+            content_sha256 = ""
+
+            for relevance_score, _, photo, query in candidates:
+                try:
+                    download_url = _download_url(photo)
+                    response = http_get(download_url, timeout=60)
+                    response.raise_for_status()
+                    uploaded = _normalise_downloaded_image(
+                        content=response.content,
+                        slug=slug,
+                    )
+                    candidate_prepared = prepare_image(uploaded)
+                    candidate_hash = _file_sha256(candidate_prepared)
+                    if candidate_hash in used_hashes:
+                        continue
+                    selected = (photo, query, relevance_score)
+                    prepared = candidate_prepared
+                    content_sha256 = candidate_hash
+                    break
+                except Exception as exc:
+                    last_candidate_error = exc
+                    continue
+
+            if selected is None or prepared is None:
+                if last_candidate_error:
+                    raise RuntimeError(
+                        f"Pexels returned no unique usable city image: {last_candidate_error}"
+                    ) from last_candidate_error
+                raise RuntimeError("Pexels returned no unique usable city image")
+
+            photo, query, relevance_score = selected
             target_name = _prepared_filename(slug, prepared)
-
-            image_storage = city.image.storage
             city.image.save(target_name, prepared, save=False)
             new_image_name = _clean(city.image.name)
 
@@ -319,6 +416,7 @@ def autofill_city_image(
                 "city_name": _clean(item.get("display_name") or item.get("name") or city.name),
                 "provider": "Pexels",
                 "provider_photo_id": str(photo.get("id") or ""),
+                "content_sha256": content_sha256,
                 "photographer": photographer,
                 "source_url": _clean(photo.get("url")) or "https://www.pexels.com/",
                 "license_name": "Pexels License",
