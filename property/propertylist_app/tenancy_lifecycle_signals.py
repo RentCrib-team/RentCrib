@@ -1,10 +1,34 @@
 from datetime import timedelta
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
 from propertylist_app.models import Tenancy
+
+
+_TENANCY_END_TRANSITION_FLAG = "_tenancy_just_ended"
+
+
+@receiver(pre_save, sender=Tenancy)
+def remember_tenancy_end_transition(sender, instance, update_fields=None, **kwargs):
+    """Record only a real transition from a non-ended tenancy into ended."""
+    setattr(instance, _TENANCY_END_TRANSITION_FLAG, False)
+
+    if not instance.pk or instance.status != Tenancy.STATUS_ENDED:
+        return
+
+    if update_fields is not None and "status" not in update_fields:
+        return
+
+    previous_status = (
+        Tenancy.objects.filter(pk=instance.pk)
+        .values_list("status", flat=True)
+        .first()
+    )
+
+    if previous_status != Tenancy.STATUS_ENDED:
+        setattr(instance, _TENANCY_END_TRANSITION_FLAG, True)
 
 
 @receiver(post_save, sender=Tenancy)
@@ -15,10 +39,7 @@ def release_room_when_tenancy_ends(
     update_fields,
     **kwargs,
 ):
-    if created or instance.status != Tenancy.STATUS_ENDED:
-        return
-
-    if update_fields is not None and "status" not in update_fields:
+    if created or not getattr(instance, _TENANCY_END_TRANSITION_FLAG, False):
         return
 
     room = instance.room
