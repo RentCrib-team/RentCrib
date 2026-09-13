@@ -29,6 +29,8 @@ SEARCH_NAME_OVERRIDES = {
     "st-davids": "Saint Davids",
 }
 
+NIGHT_TERMS = ("night", "nighttime", "evening", "city lights", "after dark")
+
 
 def _clean(value):
     return str(value or "").strip()
@@ -59,6 +61,11 @@ def _catalogue_by_slug(catalogue):
     }
 
 
+def _city_time_preference(city):
+    """Alternate cities between night-leaning and day-leaning imagery."""
+    return "night" if int(city.pk) % 2 else "day"
+
+
 def _search_queries(item):
     slug = _clean(item.get("slug")).lower()
     display_name = _clean(item.get("display_name") or item.get("name"))
@@ -68,6 +75,8 @@ def _search_queries(item):
         f"{search_name} {nation} United Kingdom city skyline".strip(),
         f"{search_name} {nation} United Kingdom city centre".strip(),
         f"{search_name} {nation} United Kingdom landmark".strip(),
+        f"{search_name} {nation} United Kingdom city skyline at night".strip(),
+        f"{search_name} {nation} United Kingdom city lights at night".strip(),
     ]
 
 
@@ -81,7 +90,7 @@ def _download_url(photo):
     )
 
 
-def _photo_relevance_score(photo, *, item, query):
+def _photo_relevance_score(photo, *, item, query, preferred_time=None):
     slug = _clean(item.get("slug")).lower()
     display_name = _clean(item.get("display_name") or item.get("name"))
     nation = _clean(item.get("nation"))
@@ -130,6 +139,12 @@ def _photo_relevance_score(photo, *, item, query):
         if token in haystack:
             score -= penalty
 
+    is_night = any(term in haystack for term in NIGHT_TERMS)
+    if preferred_time == "night" and is_night:
+        score += 7
+    elif preferred_time == "day" and not is_night:
+        score += 5
+
     width = photo.get("width") or 0
     height = photo.get("height") or 0
     if width and height and width >= height:
@@ -140,7 +155,14 @@ def _photo_relevance_score(photo, *, item, query):
     return score
 
 
-def _find_photo_candidates(*, item, api_key, http_get, excluded_photo_ids=None):
+def _find_photo_candidates(
+    *,
+    item,
+    api_key,
+    http_get,
+    excluded_photo_ids=None,
+    preferred_time=None,
+):
     last_error = None
     excluded_photo_ids = {str(value) for value in (excluded_photo_ids or ()) if value}
     candidates = {}
@@ -171,7 +193,12 @@ def _find_photo_candidates(*, item, api_key, http_get, excluded_photo_ids=None):
             photo_id = str(photo.get("id") or "")
             if not photo_id or photo_id in excluded_photo_ids or not _download_url(photo):
                 continue
-            score = _photo_relevance_score(photo, item=item, query=query)
+            score = _photo_relevance_score(
+                photo,
+                item=item,
+                query=query,
+                preferred_time=preferred_time,
+            )
             candidate = (score, -index, photo, query)
             current = candidates.get(photo_id)
             if current is None or candidate[:2] > current[:2]:
@@ -359,6 +386,7 @@ def autofill_city_image(
             if item is None:
                 raise RuntimeError("City is missing from the official UK catalogue")
 
+            preferred_time = _city_time_preference(city)
             image_storage = city.image.storage
             used_photo_ids, used_hashes = _used_assignments(
                 image_storage,
@@ -370,6 +398,7 @@ def autofill_city_image(
                 api_key=resolved_key,
                 http_get=http_get,
                 excluded_photo_ids=used_photo_ids,
+                preferred_time=preferred_time,
             )
 
             last_candidate_error = None
@@ -425,6 +454,7 @@ def autofill_city_image(
                 "rights_confirmed": True,
                 "search_query": query,
                 "relevance_score": relevance_score,
+                "time_preference": preferred_time,
                 "stored_image": new_image_name,
                 "recorded_at": now_func().isoformat(),
             }
