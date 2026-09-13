@@ -19,7 +19,7 @@ User = get_user_model()
 
 def _make_room(owner, *, title):
     category = RoomCategorie.objects.create(
-        name=f"Category {title}",
+        name=f"Pay QA {owner.id}",
         active=True,
     )
     room = Room.objects.create(
