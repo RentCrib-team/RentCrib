@@ -20,7 +20,11 @@ def _missing_city_ids(city_model=None):
     city_model = city_model or apps.get_model("propertylist_app", "City")
     return list(
         city_model.objects.filter(is_active=True)
-        .filter(Q(image="") | Q(image__isnull=True))
+        .filter(
+            Q(image="")
+            | Q(image__isnull=True)
+            | Q(image_is_approved=False)
+        )
         .order_by("display_order", "name")
         .values_list("pk", flat=True)
     )
@@ -36,6 +40,35 @@ def enqueue_missing_city_images(*, city_model=None, enqueue=None):
     return {"queued": len(ids), "city_ids": ids}
 
 
+def _autofill_and_approve_city_image(city_id, *, city_model=None, autofill=None):
+    city_model = city_model or apps.get_model("propertylist_app", "City")
+    autofill = autofill or autofill_city_image
+
+    city = city_model.objects.get(pk=city_id)
+    previous_image_name = getattr(city.image, "name", "") or ""
+    previous_approved = bool(getattr(city, "image_is_approved", False))
+
+    if previous_image_name and not previous_approved:
+        city.image = None
+        city.save(update_fields=["image", "updated_at"])
+
+    result = autofill(city_id)
+
+    city.refresh_from_db()
+    if result.get("status") == "imported" and city.image:
+        if not city.image_is_approved:
+            city.image_is_approved = True
+            city.save(update_fields=["image_is_approved", "updated_at"])
+        return result
+
+    if previous_image_name and not city.image:
+        city.image = previous_image_name
+        city.image_is_approved = previous_approved
+        city.save(update_fields=["image", "image_is_approved", "updated_at"])
+
+    return result
+
+
 @shared_task(
     name="propertylist_app.autofill_city_image",
     soft_time_limit=50,
@@ -46,7 +79,7 @@ def task_autofill_city_image(city_id):
     if not cache.add(lock_key, "1", timeout=CITY_LOCK_SECONDS):
         return {"status": "locked", "city_id": city_id}
     try:
-        result = autofill_city_image(city_id)
+        result = _autofill_and_approve_city_image(city_id)
         if result.get("status") == "failed":
             logger.warning("City image autofill failed: %s", result)
         else:
