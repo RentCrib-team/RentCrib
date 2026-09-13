@@ -14,7 +14,10 @@ app.autodiscover_tasks([
 ])
 
 # Register compatibility bridge task names.
-app.conf.imports = tuple(app.conf.get("imports", ())) + ("notifications.tasks",)
+app.conf.imports = tuple(app.conf.get("imports", ())) + (
+    "notifications.tasks",
+    "propertylist_app.city_image_tasks",
+)
 
 app.conf.beat_schedule = {
     # Notifications
@@ -77,5 +80,14 @@ app.conf.beat_schedule = {
     
 }
 
+
+@app.on_after_finalize.connect
+def install_city_image_autofill_schedule(sender, **kwargs):
+    sender.add_periodic_task(
+        crontab(minute="*/10"),
+        sender.signature("propertylist_app.enqueue_missing_city_images"),
+        name="autofill-missing-city-images",
+        expires=9 * 60,
+    )
 
 

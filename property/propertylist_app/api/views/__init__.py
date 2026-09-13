@@ -147,9 +147,6 @@ from .payments import stripe
 
 
 from .public import (
-    HomePageView,
-    CityListView,
-    SearchRoomsView,
     NearbyRoomsView,
     FindAddressView,
     EmailOTPVerifyView,
@@ -158,6 +155,11 @@ from .public import (
     PhoneOTPVerifyView,
     HealthCheckView,
 )
+
+# Canonical city discovery endpoints. City cards and city filtering use the
+# normalized City/Room.city relationship rather than Room.location text.
+from .public_locations import HomePageView, CityListView
+from .public_search import SearchRoomsView
 
 
 from .notifications import (
