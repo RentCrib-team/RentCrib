@@ -1,3 +1,4 @@
+import hashlib
 import json
 from io import BytesIO
 
@@ -134,7 +135,14 @@ def test_reconciliation_replaces_only_duplicate_extras_and_biases_them_to_night(
     calls = []
 
     def fake_replace(city_id, *, preferred_time, **kwargs):
-        calls.append((city_id, preferred_time))
+        calls.append(
+            (
+                city_id,
+                preferred_time,
+                set(kwargs["used_photo_ids"]),
+                set(kwargs["used_hashes"]),
+            )
+        )
         query = (
             "replacement city skyline at night"
             if preferred_time == "night"
@@ -143,6 +151,8 @@ def test_reconciliation_replaces_only_duplicate_extras_and_biases_them_to_night(
         return {
             "status": "imported",
             "city_id": city_id,
+            "provider_photo_id": f"new-{city_id}",
+            "content_sha256": f"newhash-{city_id}",
             "search_query": query,
         }
 
@@ -158,9 +168,19 @@ def test_reconciliation_replaces_only_duplicate_extras_and_biases_them_to_night(
         replace_image=fake_replace,
     )
 
+    initial_hashes = {
+        hashlib.sha256(b"same-image-content").hexdigest(),
+        hashlib.sha256(b"unique-london-content").hexdigest(),
+        hashlib.sha256(b"different-file-but-same-pexels-photo").hexdigest(),
+    }
+
     assert result["status"] == "ok"
     assert result["duplicate_city_ids"] == [2, 4]
-    assert calls == [(2, "night"), (4, "night")]
+    assert [(call[0], call[1]) for call in calls] == [(2, "night"), (4, "night")]
+    assert calls[0][2] == {"111", "222", "333"}
+    assert calls[0][3] == initial_hashes
+    assert calls[1][2] == {"111", "222", "333", "new-2"}
+    assert calls[1][3] == initial_hashes | {"newhash-2"}
     assert [item["city_id"] for item in result["replaced"]] == [2, 4]
     assert result["failed"] == []
     assert result["night_count"] == 2
