@@ -136,6 +136,8 @@ def _replace_existing_city_image(
     prepare_image=None,
     atomic_context=None,
     now_func=None,
+    used_photo_ids=None,
+    used_hashes=None,
 ):
     """Replace one existing city image without clearing its approved DB image first."""
 
@@ -193,16 +195,21 @@ def _replace_existing_city_image(
                 with image_storage.open(provenance_name, "rb") as handle:
                     old_provenance = handle.read()
 
-            used_photo_ids, used_hashes = _used_assignments(
-                image_storage,
-                catalogue,
-                exclude_slug=slug,
-            )
+            if used_photo_ids is None or used_hashes is None:
+                candidate_photo_ids, candidate_hashes = _used_assignments(
+                    image_storage,
+                    catalogue,
+                    exclude_slug=slug,
+                )
+            else:
+                candidate_photo_ids = set(used_photo_ids)
+                candidate_hashes = set(used_hashes)
+
             candidates = _find_photo_candidates(
                 item=item,
                 api_key=resolved_key,
                 http_get=http_get,
-                excluded_photo_ids=used_photo_ids,
+                excluded_photo_ids=candidate_photo_ids,
                 preferred_time=preferred_time,
             )
 
@@ -221,7 +228,7 @@ def _replace_existing_city_image(
                     )
                     candidate_prepared = prepare_image(uploaded)
                     candidate_hash = _file_sha256(candidate_prepared)
-                    if candidate_hash in used_hashes:
+                    if candidate_hash in candidate_hashes:
                         continue
                     selected = (photo, query, relevance_score)
                     prepared = candidate_prepared
@@ -282,6 +289,8 @@ def _replace_existing_city_image(
             "slug": slug,
             "image": new_image_name,
             "provenance": provenance_name,
+            "provider_photo_id": provenance["provider_photo_id"],
+            "content_sha256": content_sha256,
             "search_query": query,
             "time_preference": preferred_time,
         }
@@ -340,6 +349,15 @@ def reconcile_duplicate_city_images(
         if record["city"].pk not in duplicate_set and not record["is_night"]
     )
 
+    used_photo_ids = {
+        record["photo_id"] for record in records if record["photo_id"]
+    }
+    used_hashes = {
+        record["content_sha256"]
+        for record in records
+        if record["content_sha256"]
+    }
+
     replace_image = replace_image or _replace_existing_city_image
     replaced = []
     failed = []
@@ -352,6 +370,8 @@ def reconcile_duplicate_city_images(
             preferred_time=preferred_time,
             city_model=city_model,
             catalogue=catalogue,
+            used_photo_ids=used_photo_ids,
+            used_hashes=used_hashes,
         )
         if result.get("status") == "imported":
             replaced.append(
@@ -361,6 +381,12 @@ def reconcile_duplicate_city_images(
                     "time_preference": preferred_time,
                 }
             )
+            provider_photo_id = _clean(result.get("provider_photo_id"))
+            content_sha256 = _clean(result.get("content_sha256"))
+            if provider_photo_id:
+                used_photo_ids.add(provider_photo_id)
+            if content_sha256:
+                used_hashes.add(content_sha256)
             if _query_is_night(result.get("search_query")):
                 night_count += 1
             else:
