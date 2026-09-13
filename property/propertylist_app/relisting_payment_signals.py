@@ -30,18 +30,17 @@ def remember_paid_relist_transition(sender, instance: Room, update_fields=None, 
     today = timezone.localdate()
     previous_paid_until = previous["paid_until"]
 
-    was_unpaid = (
-        previous_paid_until is None
-        or previous_paid_until < today
-    )
-    is_now_paid = (
+    paid_period_extended = (
         instance.paid_until is not None
         and instance.paid_until >= today
+        and (
+            previous_paid_until is None
+            or instance.paid_until > previous_paid_until
+        )
     )
 
     if not (
-        was_unpaid
-        and is_now_paid
+        paid_period_extended
         and instance.status == Room.Lifecycle.ACTIVE
     ):
         return
@@ -50,22 +49,38 @@ def remember_paid_relist_transition(sender, instance: Room, update_fields=None, 
         room_id=instance.pk,
         status=Tenancy.STATUS_ENDED,
     ).exists()
+    has_live_tenancy = Tenancy.objects.filter(
+        room_id=instance.pk,
+        status__in=[
+            Tenancy.STATUS_CONFIRMED,
+            Tenancy.STATUS_ACTIVE,
+        ],
+    ).exists()
 
-    if has_ended_tenancy:
+    if has_ended_tenancy and not has_live_tenancy:
         setattr(instance, _RELIST_PAYMENT_FLAG, True)
 
 
 @receiver(post_save, sender=Room)
 def stamp_paid_relist_transition(sender, instance: Room, **kwargs):
-    """Stamp the new listing cycle after successful payment reactivates the room."""
+    """Stamp and release the new listing cycle after successful relist payment."""
     if not getattr(instance, _RELIST_PAYMENT_FLAG, False):
         return
 
     relisted_at = timezone.now()
+    updates = {
+        "relisted_at": relisted_at,
+    }
+
+    if not instance.is_available:
+        updates["is_available"] = True
+
     updated = Room.objects.filter(
         pk=instance.pk,
         relisted_at__isnull=True,
-    ).update(relisted_at=relisted_at)
+    ).update(**updates)
 
     if updated:
         instance.relisted_at = relisted_at
+        if "is_available" in updates:
+            instance.is_available = True
