@@ -57,15 +57,20 @@ def remember_paid_relist_transition(sender, instance: Room, update_fields=None, 
 
 @receiver(post_save, sender=Room)
 def stamp_paid_relist_transition(sender, instance: Room, **kwargs):
-    """Stamp the new listing cycle after successful payment reactivates the room."""
+    """Stamp and release the new listing cycle after successful relist payment."""
     if not getattr(instance, _RELIST_PAYMENT_FLAG, False):
         return
 
     relisted_at = timezone.now()
+    updates = {
+        "relisted_at": relisted_at,
+        "is_available": True,
+    }
     updated = Room.objects.filter(
         pk=instance.pk,
         relisted_at__isnull=True,
-    ).update(relisted_at=relisted_at)
+    ).update(**updates)
 
     if updated:
         instance.relisted_at = relisted_at
+        instance.is_available = True
