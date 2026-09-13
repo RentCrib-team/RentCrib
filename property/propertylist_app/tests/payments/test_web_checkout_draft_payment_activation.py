@@ -14,6 +14,12 @@ from propertylist_app.models import Payment, Room, RoomImage
 pytestmark = pytest.mark.django_db
 
 
+def _results(payload):
+    if isinstance(payload, list):
+        return payload
+    return payload.get("results") or payload.get("data") or []
+
+
 def test_web_checkout_payment_moves_draft_listing_to_active_and_search_visible(
     monkeypatch,
     user_factory,
@@ -108,8 +114,7 @@ def test_web_checkout_payment_moves_draft_listing_to_active_and_search_visible(
     )
     assert active_response.status_code == 200, active_response.data
 
-    active_payload = active_response.data
-    active_results = active_payload.get("results") or active_payload.get("data") or []
+    active_results = _results(active_response.data)
     assert any(item["id"] == room.id for item in active_results)
 
     draft_response = owner_client.get(
@@ -118,8 +123,7 @@ def test_web_checkout_payment_moves_draft_listing_to_active_and_search_visible(
     )
     assert draft_response.status_code == 200, draft_response.data
 
-    draft_payload = draft_response.data
-    draft_results = draft_payload.get("results") or draft_payload.get("data") or []
+    draft_results = _results(draft_response.data)
     assert all(item["id"] != room.id for item in draft_results)
 
     search_response = anonymous.get(
@@ -128,6 +132,5 @@ def test_web_checkout_payment_moves_draft_listing_to_active_and_search_visible(
     )
     assert search_response.status_code == 200, search_response.data
 
-    search_payload = search_response.data
-    search_results = search_payload.get("results") or search_payload.get("data") or []
+    search_results = _results(search_response.data)
     assert any(item["id"] == room.id for item in search_results)
