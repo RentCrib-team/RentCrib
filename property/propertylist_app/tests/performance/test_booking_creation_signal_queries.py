@@ -34,19 +34,23 @@ def test_booking_creation_signal_keeps_synchronous_database_work_bounded(django_
         property_type="flat",
     )
 
-    NotificationTemplate.objects.create(
+    NotificationTemplate.objects.update_or_create(
         key="booking.new",
-        channel=NotificationTemplate.CHANNEL_EMAIL,
-        is_active=True,
-        subject="New booking",
-        body="A viewing was booked.",
+        defaults={
+            "channel": NotificationTemplate.CHANNEL_EMAIL,
+            "is_active": True,
+            "subject": "New booking",
+            "body": "A viewing was booked.",
+        },
     )
-    NotificationTemplate.objects.create(
+    NotificationTemplate.objects.update_or_create(
         key="booking.confirmation",
-        channel=NotificationTemplate.CHANNEL_EMAIL,
-        is_active=True,
-        subject="Booking confirmed",
-        body="Your viewing is confirmed.",
+        defaults={
+            "channel": NotificationTemplate.CHANNEL_EMAIL,
+            "is_active": True,
+            "subject": "Booking confirmed",
+            "body": "Your viewing is confirmed.",
+        },
     )
 
     start = timezone.now() + timedelta(days=2)
