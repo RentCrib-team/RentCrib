@@ -60,6 +60,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.search_image_payload_optimization import (
             install_search_image_payload_optimization,
         )
+        from .services.paid_hidden_room_reactivation import (
+            install_paid_hidden_room_reactivation,
+        )
 
         install_bell_notification_routing()
         install_room_serializer_image_cache()
@@ -79,3 +82,4 @@ class PropertylistAppConfig(AppConfig):
         install_search_default_rotation_optimization()
         install_search_radius_candidate_optimization()
         install_search_image_payload_optimization()
+        install_paid_hidden_room_reactivation()
