@@ -10,6 +10,7 @@ from django.utils import timezone
 from propertylist_app.services.city_image_autofill import (
     NIGHT_TERMS,
     PEXELS_LICENSE_URL,
+    PEXELS_SEARCH_URL,
     PROVENANCE_PREFIX,
     _api_key,
     _catalogue_by_slug,
@@ -25,6 +26,11 @@ from propertylist_app.services.city_image_autofill import (
 )
 
 
+PEXELS_SEARCH_TIMEOUT = (3.05, 5)
+PEXELS_DOWNLOAD_TIMEOUT = (3.05, 20)
+PEXELS_REQUEST_ATTEMPTS = 2
+
+
 def _runtime_dependencies():
     from propertylist_app.data.uk_cities import OFFICIAL_UK_CITIES
     from propertylist_app.services.city_images import prepare_city_image
@@ -36,6 +42,28 @@ def _runtime_dependencies():
 def _query_is_night(query):
     value = _clean(query).lower()
     return any(term in value for term in NIGHT_TERMS)
+
+
+def _bounded_http_get(http_get, url, **kwargs):
+    """Bound slow Pexels calls and retry transient request failures once."""
+
+    timeout = (
+        PEXELS_SEARCH_TIMEOUT
+        if url == PEXELS_SEARCH_URL
+        else PEXELS_DOWNLOAD_TIMEOUT
+    )
+    last_error = None
+    for _ in range(PEXELS_REQUEST_ATTEMPTS):
+        try:
+            return http_get(url, **{**kwargs, "timeout": timeout})
+        except requests.RequestException as exc:
+            last_error = exc
+    raise last_error
+
+
+def _emit_progress(progress, message):
+    if progress is not None:
+        progress(message)
 
 
 def _read_provenance(storage, slug):
@@ -156,7 +184,11 @@ def _replace_existing_city_image(
         catalogue = catalogue or runtime_catalogue
         prepare_image = prepare_image or runtime_prepare_image
 
-    http_get = http_get or requests.get
+    raw_http_get = http_get or requests.get
+
+    def bounded_http_get(url, **kwargs):
+        return _bounded_http_get(raw_http_get, url, **kwargs)
+
     atomic_context = atomic_context or transaction.atomic
     now_func = now_func or timezone.now
     catalogue_index = _catalogue_by_slug(catalogue)
@@ -208,7 +240,7 @@ def _replace_existing_city_image(
             candidates = _find_photo_candidates(
                 item=item,
                 api_key=resolved_key,
-                http_get=http_get,
+                http_get=bounded_http_get,
                 excluded_photo_ids=candidate_photo_ids,
                 preferred_time=preferred_time,
             )
@@ -220,7 +252,7 @@ def _replace_existing_city_image(
 
             for relevance_score, _, photo, query in candidates:
                 try:
-                    response = http_get(_download_url(photo), timeout=60)
+                    response = bounded_http_get(_download_url(photo), timeout=60)
                     response.raise_for_status()
                     uploaded = _normalise_downloaded_image(
                         content=response.content,
@@ -316,6 +348,7 @@ def reconcile_duplicate_city_images(
     city_model=None,
     catalogue=None,
     replace_image=None,
+    progress=None,
 ):
     """Relist duplicate approved city images only, preferring the underrepresented time of day."""
 
@@ -334,9 +367,11 @@ def reconcile_duplicate_city_images(
     else:
         cities = list(cities)
 
+    _emit_progress(progress, f"Scanning {len(cities)} approved city images for duplicates")
     records = _city_image_records(cities)
     duplicate_ids = _duplicate_city_ids(records)
     duplicate_set = set(duplicate_ids)
+    _emit_progress(progress, f"Found {len(duplicate_ids)} duplicate city images to replace")
 
     night_count = sum(
         1
@@ -363,8 +398,14 @@ def reconcile_duplicate_city_images(
     failed = []
 
     city_by_id = {city.pk: city for city in cities}
-    for city_id in duplicate_ids:
+    total_duplicates = len(duplicate_ids)
+    for position, city_id in enumerate(duplicate_ids, start=1):
         preferred_time = "night" if night_count <= day_count else "day"
+        city_name = getattr(city_by_id.get(city_id), "name", "")
+        _emit_progress(
+            progress,
+            f"[{position}/{total_duplicates}] {city_name}: searching Pexels ({preferred_time})",
+        )
         result = replace_image(
             city_id,
             preferred_time=preferred_time,
@@ -377,7 +418,7 @@ def reconcile_duplicate_city_images(
             replaced.append(
                 {
                     "city_id": city_id,
-                    "city": getattr(city_by_id.get(city_id), "name", ""),
+                    "city": city_name,
                     "time_preference": preferred_time,
                 }
             )
@@ -391,13 +432,19 @@ def reconcile_duplicate_city_images(
                 night_count += 1
             else:
                 day_count += 1
+            _emit_progress(progress, f"[{position}/{total_duplicates}] {city_name}: replaced")
         else:
+            error = result.get("error") or result.get("status")
             failed.append(
                 {
                     "city_id": city_id,
-                    "city": getattr(city_by_id.get(city_id), "name", ""),
-                    "error": result.get("error") or result.get("status"),
+                    "city": city_name,
+                    "error": error,
                 }
+            )
+            _emit_progress(
+                progress,
+                f"[{position}/{total_duplicates}] {city_name}: failed - {error}",
             )
 
     return {
