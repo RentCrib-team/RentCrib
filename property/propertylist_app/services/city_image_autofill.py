@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageOps
 from django.apps import apps
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -77,13 +77,9 @@ def _meta_value(extmetadata, key):
     return _strip_markup(raw)
 
 
-def _license_is_usable(license_name):
+def _license_permits_clean_card(license_name):
     normalised = re.sub(r"\s+", " ", _clean(license_name)).upper()
-    return (
-        normalised.startswith("CC BY")
-        or normalised.startswith("CC0")
-        or "PUBLIC DOMAIN" in normalised
-    )
+    return normalised.startswith("CC0") or "PUBLIC DOMAIN" in normalised
 
 
 def _request_json(http_get, url, params):
@@ -157,7 +153,7 @@ def _imageinfo_candidate(*, api_url, file_name, page_title, http_get):
             continue
         ext = info.get("extmetadata") or {}
         license_name = _meta_value(ext, "LicenseShortName") or _meta_value(ext, "UsageTerms")
-        if not _license_is_usable(license_name):
+        if not _license_permits_clean_card(license_name):
             continue
         artist = _meta_value(ext, "Artist") or "Wikimedia Commons contributor"
         credit = _meta_value(ext, "Credit") or artist
@@ -214,7 +210,7 @@ def _commons_search_candidates(*, item, http_get):
                 continue
             ext = info.get("extmetadata") or {}
             license_name = _meta_value(ext, "LicenseShortName") or _meta_value(ext, "UsageTerms")
-            if not _license_is_usable(license_name):
+            if not _license_permits_clean_card(license_name):
                 continue
             title = _clean(page.get("title"))
             file_name = title[5:] if title.lower().startswith("file:") else title
@@ -268,11 +264,6 @@ def _resolve_candidate(*, item, http_get):
     raise RuntimeError(f"No usable free Wikimedia city image found{detail}")
 
 
-def _needs_visible_attribution(license_name):
-    normalised = _clean(license_name).upper()
-    return normalised.startswith("CC BY")
-
-
 def _normalise_downloaded_image(*, content, slug, candidate):
     try:
         with Image.open(BytesIO(content)) as source:
@@ -288,21 +279,6 @@ def _normalise_downloaded_image(*, content, slug, candidate):
                 method=Image.Resampling.LANCZOS,
                 centering=(0.5, 0.5),
             )
-
-        if _needs_visible_attribution(candidate.get("license_name")):
-            label = (
-                f"Photo: {_clean(candidate.get('artist'))[:70]} · "
-                f"{_clean(candidate.get('license_name'))} · Wikimedia Commons"
-            )
-            draw = ImageDraw.Draw(image)
-            try:
-                font = ImageFont.truetype("DejaVuSans.ttf", 18)
-            except Exception:
-                font = ImageFont.load_default()
-            left, top, right, bottom = draw.textbbox((0, 0), label, font=font)
-            strip_height = max(34, (bottom - top) + 16)
-            draw.rectangle((0, 900 - strip_height, 1600, 900), fill=(0, 0, 0))
-            draw.text((12, 900 - strip_height + 8), label, fill=(255, 255, 255), font=font)
 
         handle = BytesIO()
         image.save(handle, "JPEG", quality=88, optimize=True, progressive=True)
@@ -351,6 +327,7 @@ def autofill_city_image(
     prepare_image=None,
     atomic_context=None,
     now_func=None,
+    replace=False,
 ):
     """Populate one canonical city image without any external API secret."""
 
@@ -368,6 +345,8 @@ def autofill_city_image(
     image_storage = None
     new_image_name = ""
     provenance_name = ""
+    old_image_storage = None
+    old_image_name = ""
     slug = ""
 
     try:
@@ -375,7 +354,7 @@ def autofill_city_image(
         with context:
             city = city_model.objects.select_for_update().get(pk=city_id)
             slug = _clean(city.slug).lower()
-            if city.image:
+            if city.image and not replace:
                 return {"status": "existing", "city_id": city_id, "slug": slug}
             if not getattr(city, "is_active", True):
                 return {"status": "inactive", "city_id": city_id, "slug": slug}
@@ -383,6 +362,9 @@ def autofill_city_image(
             item = catalogue_index.get(slug)
             if item is None:
                 raise RuntimeError("City is missing from the official UK catalogue")
+
+            old_image_storage = city.image.storage
+            old_image_name = _clean(city.image.name)
 
             candidate = _resolve_candidate(item=item, http_get=http_get)
             response = http_get(
@@ -414,7 +396,7 @@ def autofill_city_image(
                 "license_url": candidate["license_url"],
                 "artist": candidate["artist"],
                 "credit": candidate["credit"],
-                "visible_attribution_embedded": _needs_visible_attribution(candidate["license_name"]),
+                "visible_attribution_embedded": False,
                 "search_query": candidate.get("search_query", ""),
                 "stored_image": new_image_name,
                 "recorded_at": now_func().isoformat(),
@@ -424,6 +406,9 @@ def autofill_city_image(
             display_name = _clean(item.get("display_name") or item.get("name"))
             city.image_alt = city.image_alt or f"{display_name} city view"
             city.save(update_fields=["image", "image_alt", "updated_at"])
+
+        if old_image_name and old_image_name != new_image_name:
+            _delete_safely(old_image_storage, old_image_name)
 
         return {
             "status": "imported",
