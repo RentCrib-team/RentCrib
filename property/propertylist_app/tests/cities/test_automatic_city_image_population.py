@@ -147,40 +147,58 @@ def test_backend_populates_missing_city_images_from_pexels_without_attribution_s
 
     requests_seen = []
     image_bytes = _jpeg_bytes()
-    pexels_image_url = "https://images.pexels.example/london.jpeg"
+    irrelevant_url = "https://images.pexels.example/generic.jpeg"
+    relevant_url = "https://images.pexels.example/london.jpeg"
 
     def fake_get(url, **kwargs):
         requests_seen.append((url, kwargs))
         if url == city_image_autofill.PEXELS_SEARCH_URL:
+            params = kwargs["params"]
             assert kwargs["headers"] == {"Authorization": "test-pexels-key"}
-            assert kwargs["params"] == {
-                "query": "London England United Kingdom city skyline",
-                "orientation": "landscape",
-                "size": "large",
-                "per_page": 5,
-                "page": 1,
+            assert params["orientation"] == "landscape"
+            assert params["size"] == "large"
+            assert params["per_page"] == 15
+            assert params["page"] == 1
+            query = params["query"]
+            assert query in {
+                "London England United Kingdom city skyline",
+                "London England United Kingdom city centre",
+                "London England United Kingdom landmark",
             }
             return FakeResponse(
                 payload={
                     "photos": [
                         {
+                            "id": 999,
+                            "photographer": "Generic Photographer",
+                            "url": "https://www.pexels.com/photo/999/",
+                            "alt": "Portrait of a person outdoors",
+                            "width": 1800,
+                            "height": 1200,
+                            "src": {"large2x": irrelevant_url},
+                        },
+                        {
                             "id": 12345,
                             "photographer": "Example Photographer",
-                            "url": "https://www.pexels.com/photo/12345/",
-                            "src": {"large2x": pexels_image_url},
-                        }
+                            "url": "https://www.pexels.com/photo/london-city-skyline-12345/",
+                            "alt": "London city skyline and architecture",
+                            "width": 2400,
+                            "height": 1350,
+                            "src": {"large2x": relevant_url},
+                        },
                     ]
                 }
             )
-        if url == pexels_image_url:
+        if url == relevant_url:
             return FakeResponse(content=image_bytes)
+        if url == irrelevant_url:
+            raise AssertionError("irrelevant first Pexels result must not be downloaded")
         raise AssertionError(f"unexpected request: {url}")
 
     def fake_prepare_image(uploaded):
         uploaded.seek(0)
         with Image.open(uploaded) as image:
             assert image.size == (1600, 900)
-            # Pexels images must not receive the Wikimedia attribution bar.
             assert image.getpixel((1, 899))[0] > 240
             assert image.getpixel((1, 899))[1] > 240
             assert image.getpixel((1, 899))[2] > 240
@@ -215,6 +233,7 @@ def test_backend_populates_missing_city_images_from_pexels_without_attribution_s
     assert provenance["provider_photo_id"] == "12345"
     assert provenance["license_name"] == "Pexels License"
     assert provenance["photographer"] == "Example Photographer"
+    assert provenance["relevance_score"] > 0
     assert provenance["stored_image"] == "city_images/london.webp"
 
     queued = []
@@ -240,7 +259,16 @@ def test_backend_populates_missing_city_images_from_pexels_without_attribution_s
         "propertylist_app.enqueue_missing_city_images"
     )
 
-    assert [url for url, _ in requests_seen] == [
-        city_image_autofill.PEXELS_SEARCH_URL,
-        pexels_image_url,
+    search_requests = [
+        kwargs["params"]["query"]
+        for url, kwargs in requests_seen
+        if url == city_image_autofill.PEXELS_SEARCH_URL
+    ]
+    assert search_requests == [
+        "London England United Kingdom city skyline",
+        "London England United Kingdom city centre",
+        "London England United Kingdom landmark",
+    ]
+    assert [url for url, _ in requests_seen if url != city_image_autofill.PEXELS_SEARCH_URL] == [
+        relevant_url,
     ]
