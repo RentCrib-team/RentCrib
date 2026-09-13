@@ -60,14 +60,14 @@ def prepare_city_image(uploaded_file):
 
 
 def city_has_uploaded_image(city):
-    return bool(getattr(city, "image", None))
+    return bool(getattr(city, "image", None) and getattr(city, "image_is_approved", False))
 
 
 def city_image_url(city, *, request=None):
     """Return a usable city-card image URL, falling back to RentCrib static art."""
 
     image = getattr(city, "image", None)
-    if image:
+    if image and getattr(city, "image_is_approved", False):
         try:
             url = image.url
         except (AttributeError, ValueError):
