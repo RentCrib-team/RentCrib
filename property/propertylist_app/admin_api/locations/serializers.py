@@ -24,6 +24,7 @@ class AdminCitySerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "image",
+            "image_is_approved",
             "image_url",
             "has_image",
             "image_alt",
@@ -45,6 +46,7 @@ class AdminCitySerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "slug": {"required": False, "allow_blank": True},
             "image": {"required": False, "allow_null": True},
+            "image_is_approved": {"required": False},
             "image_alt": {"required": False, "allow_blank": True},
             "is_active": {"required": False},
             "is_featured": {"required": False},
