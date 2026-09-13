@@ -66,7 +66,7 @@ def _search_queries(item):
     return [
         f"{search_name} {nation} United Kingdom city skyline".strip(),
         f"{search_name} {nation} United Kingdom city centre".strip(),
-        f"{search_name} {nation} United Kingdom".strip(),
+        f"{search_name} {nation} United Kingdom landmark".strip(),
     ]
 
 
@@ -80,8 +80,69 @@ def _download_url(photo):
     )
 
 
+def _photo_relevance_score(photo, *, item, query):
+    slug = _clean(item.get("slug")).lower()
+    display_name = _clean(item.get("display_name") or item.get("name"))
+    nation = _clean(item.get("nation"))
+    search_name = SEARCH_NAME_OVERRIDES.get(slug, display_name)
+
+    haystack = " ".join(
+        _clean(value).lower()
+        for value in (
+            photo.get("alt"),
+            photo.get("url"),
+            photo.get("photographer"),
+            query,
+        )
+        if _clean(value)
+    )
+
+    score = 0
+    for token, weight in (
+        (display_name.lower(), 8),
+        (search_name.lower(), 8),
+        (nation.lower(), 2),
+        ("city", 2),
+        ("skyline", 4),
+        ("city centre", 4),
+        ("city center", 4),
+        ("landmark", 3),
+        ("architecture", 2),
+        ("building", 1),
+        ("street", 1),
+    ):
+        if token and token in haystack:
+            score += weight
+
+    for token, penalty in (
+        ("portrait", 6),
+        ("person", 6),
+        ("people", 5),
+        ("food", 5),
+        ("animal", 5),
+        ("beach", 3),
+        ("mountain", 3),
+        ("forest", 3),
+        ("flower", 3),
+        ("car interior", 4),
+    ):
+        if token in haystack:
+            score -= penalty
+
+    width = photo.get("width") or 0
+    height = photo.get("height") or 0
+    if width and height and width >= height:
+        score += 2
+    if width and height and width >= 1200 and height >= 675:
+        score += 2
+
+    return score
+
+
 def _find_photo(*, item, api_key, http_get):
     last_error = None
+    best = None
+
     for query in _search_queries(item):
         try:
             response = http_get(
@@ -91,7 +152,7 @@ def _find_photo(*, item, api_key, http_get):
                     "query": query,
                     "orientation": "landscape",
                     "size": "large",
-                    "per_page": 5,
+                    "per_page": 15,
                     "page": 1,
                 },
                 timeout=30,
@@ -104,9 +165,17 @@ def _find_photo(*, item, api_key, http_get):
             last_error = exc
             continue
 
-        for photo in photos:
-            if _download_url(photo):
-                return photo, query
+        for index, photo in enumerate(photos):
+            if not _download_url(photo):
+                continue
+            score = _photo_relevance_score(photo, item=item, query=query)
+            candidate = (score, -index, photo, query)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+
+    if best is not None:
+        score, _, photo, query = best
+        return photo, query, score
 
     if last_error:
         raise RuntimeError(f"Pexels search failed: {last_error}") from last_error
@@ -224,7 +293,7 @@ def autofill_city_image(
             if item is None:
                 raise RuntimeError("City is missing from the official UK catalogue")
 
-            photo, query = _find_photo(
+            photo, query, relevance_score = _find_photo(
                 item=item,
                 api_key=resolved_key,
                 http_get=http_get,
@@ -257,6 +326,7 @@ def autofill_city_image(
                 "credit": f"Photo by {photographer} on Pexels",
                 "rights_confirmed": True,
                 "search_query": query,
+                "relevance_score": relevance_score,
                 "stored_image": new_image_name,
                 "recorded_at": now_func().isoformat(),
             }
