@@ -1,0 +1,54 @@
+name: Temporary staging QA review window message promotion
+
+on:
+  push:
+    branches:
+      - tmp-staging-qa-review-window-message-promotion
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace exactly one stale review message
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('property/propertylist_app/api/serializers.py')
+          old = b'raise serializers.ValidationError("You can only review after the tenancy ends (plus 7 days).")'
+          new = b'raise serializers.ValidationError("Review window is not open yet.")'
+
+          data = path.read_bytes()
+          count = data.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one stale message, found {count}')
+
+          path.write_bytes(data.replace(old, new, 1))
+
+      - name: Verify exact serializer diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only)"
+          test "$changed" = "property/propertylist_app/api/serializers.py"
+          numstat="$(git diff --numstat -- property/propertylist_app/api/serializers.py)"
+          test "$numstat" = $'1\t1\tproperty/propertylist_app/api/serializers.py'
+          git diff -- property/propertylist_app/api/serializers.py
+
+      - name: Commit exact serializer fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add property/propertylist_app/api/serializers.py
+          git commit -m "Apply exact QA review window message fix"
+          git push origin HEAD:tmp-staging-qa-review-window-message-promotion
