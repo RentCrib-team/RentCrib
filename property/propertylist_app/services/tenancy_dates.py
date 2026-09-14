@@ -39,7 +39,7 @@ def compute_review_window(move_in_date, duration_months):
     # Keep the private/double-blind review window open for 10 minutes.
     review_deadline_at = review_open_at + timedelta(minutes=10)
 
-    # Keep the production still-living timing for now.
-    still_living_check_at = end_midnight - timedelta(days=7)
+    # QA: send the still-living reminder 10 minutes before tenancy ends.
+    still_living_check_at = end_midnight - timedelta(minutes=10)
 
     return review_open_at, review_deadline_at, still_living_check_at
