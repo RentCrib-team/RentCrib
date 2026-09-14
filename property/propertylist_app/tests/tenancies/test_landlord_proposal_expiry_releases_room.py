@@ -1,22 +1,55 @@
 from datetime import date, timedelta
 
 import pytest
+from django.apps import apps
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.models import Booking, Tenancy
-from propertylist_app.tasks import task_tenancy_prompts_sweep
+from propertylist_app.tasks import (
+    task_send_tenancy_notification,
+    task_tenancy_prompts_sweep,
+)
 
 pytestmark = pytest.mark.django_db
 
 
-def test_unanswered_landlord_proposal_expires_and_releases_room_after_qa_window(
+def test_unanswered_landlord_proposal_expires_releases_room_and_notifies_both(
     user_factory,
     room_factory,
+    monkeypatch,
 ):
+    Notification = apps.get_model("propertylist_app", "Notification")
+
     landlord = user_factory(username="proposal_expiry_landlord")
     tenant = user_factory(username="proposal_expiry_tenant")
     room = room_factory(property_owner=landlord)
+
+    NotificationTemplate.objects.update_or_create(
+        key="tenancy.cancelled",
+        channel=NotificationTemplate.CHANNEL_EMAIL,
+        defaults={
+            "subject": "Tenancy proposal expired",
+            "body": "{{ room_title }} {{ cta_url }}",
+            "is_active": True,
+        },
+    )
+
+    # Execute the notification task synchronously so this regression proves
+    # the persisted envelope/bell/email effects as well as state cleanup.
+    monkeypatch.setattr(
+        task_send_tenancy_notification,
+        "delay",
+        lambda tenancy_id, event: task_send_tenancy_notification(
+            tenancy_id,
+            event,
+        ),
+    )
+    monkeypatch.setattr(
+        "propertylist_app.tasks.push_user_realtime_event",
+        lambda *args, **kwargs: None,
+    )
 
     now = timezone.now()
     Booking.objects.create(
@@ -64,3 +97,27 @@ def test_unanswered_landlord_proposal_expires_and_releases_room_after_qa_window(
 
     assert tenancy.status == Tenancy.STATUS_CANCELLED
     assert room.is_available is True
+
+    # One shared structured tenancy event is the envelope/inbox surface.
+    messages = tenancy.room.message_threads.filter(
+        messages__metadata__tenancy_id=tenancy.id,
+        messages__metadata__event_type="cancelled",
+    ).distinct()
+    assert messages.exists()
+
+    bells = Notification.objects.filter(
+        type="tenancy_cancelled",
+        target_type="tenancy",
+        target_id=tenancy.id,
+    )
+    assert bells.count() == 2
+    assert bells.filter(user=landlord).count() == 1
+    assert bells.filter(user=tenant).count() == 1
+
+    emails = OutboundNotification.objects.filter(
+        template_key="tenancy.cancelled",
+        context__tenancy_id=tenancy.id,
+    )
+    assert emails.count() == 2
+    assert emails.filter(user=landlord).count() == 1
+    assert emails.filter(user=tenant).count() == 1
