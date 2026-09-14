@@ -65,15 +65,15 @@ def test_repeating_same_reschedule_does_not_queue_duplicate_email(
     )
     assert second.status_code == 200, second.data
 
-    booking.refresh_from_db()
-
     queued = OutboundNotification.objects.filter(
         user=landlord,
         template_key="booking.updated",
         channel=NotificationTemplate.CHANNEL_EMAIL,
         context__booking_id=booking.id,
-        context__new_start=booking.start.isoformat(),
-        context__new_end=booking.end.isoformat(),
     )
 
     assert queued.count() == 1
+
+    email = queued.get()
+    assert email.context["new_start"] == first.data["data"]["start"]
+    assert email.context["new_end"] == first.data["data"]["end"]
