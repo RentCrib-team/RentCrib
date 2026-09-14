@@ -1438,8 +1438,13 @@ def task_tenancy_prompts_sweep() -> int:
             role=Review.ROLE_LANDLORD_TO_TENANT,
         ).exists()
 
-        # Both parties have already reviewed.
+        # Both parties have already reviewed. Reveal immediately;
+        # the existing reveal sweep below can activate them in this run.
         if tenant_done and landlord_done:
+            Review.objects.filter(
+                tenancy=t,
+                active=False,
+            ).update(reveal_at=now)
             continue
 
         # Add one review-available message to the existing tenancy thread.
