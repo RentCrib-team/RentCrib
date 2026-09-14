@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from notifications.models import NotificationTemplate, OutboundNotification
-from propertylist_app.models import Booking
+from propertylist_app.models import Booking, UserProfile
 
 pytestmark = pytest.mark.django_db
 
@@ -17,6 +17,10 @@ def test_repeating_same_reschedule_does_not_queue_duplicate_email(
     landlord = user_factory(username="reschedule_email_landlord")
     seeker = user_factory(username="reschedule_email_seeker")
     room = room_factory(property_owner=landlord)
+
+    landlord_profile, _ = UserProfile.objects.get_or_create(user=landlord)
+    landlord_profile.notify_confirmations = True
+    landlord_profile.save(update_fields=["notify_confirmations"])
 
     now = timezone.now()
     booking = Booking.objects.create(
