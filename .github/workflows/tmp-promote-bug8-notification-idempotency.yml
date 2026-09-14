@@ -1,0 +1,35 @@
+name: Temporary BUG 8 staging promotion
+on: push
+permissions:
+  contents: write
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp-staging-bug8-notification-idempotency
+      - name: Apply exact BUG 8 changes
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('property/propertylist_app/tasks.py')
+          data = p.read_text()
+          old1 = '''        if extra_context:\n            email_context.update(extra_context)\n\n        _queue_email(\n            user=user,\n            template_key=template_key,\n            context=email_context,\n        )\n'''
+          new1 = '''        if extra_context:\n            email_context.update(extra_context)\n\n        # A tenancy event has one stable message id. Reusing that identity\n        # makes email enqueue retry-safe while still allowing a missing email\n        # to be repaired on a later task execution.\n        if OutboundNotification.objects.filter(\n            user=user,\n            channel=NotificationTemplate.CHANNEL_EMAIL,\n            template_key=template_key,\n            context__message_id=message.id,\n        ).exists():\n            return\n\n        _queue_email(\n            user=user,\n            template_key=template_key,\n            context=email_context,\n        )\n'''
+          old2 = '''            notification = Notification.objects.create(\n                user=user,\n                type="tenancy_confirmed",\n                target_type="tenancy",\n                target_id=tenancy.id,\n                thread=confirmation_thread,\n                message=tenancy_message,\n                title="Tenancy confirmed",\n                body=f"Tenancy confirmed for: {room_title}.",\n                audience=audience,\n            )\n\n            push_user_realtime_event(\n'''
+          new2 = '''            notification, notification_created = Notification.objects.get_or_create(\n                user=user,\n                type="tenancy_confirmed",\n                target_type="tenancy",\n                target_id=tenancy.id,\n                defaults={\n                    "thread": confirmation_thread,\n                    "message": tenancy_message,\n                    "title": "Tenancy confirmed",\n                    "body": f"Tenancy confirmed for: {room_title}.",\n                    "audience": audience,\n                },\n            )\n\n            # A retry may need to repair a missing email, but must not replay\n            # bell/message/unread realtime delivery for an existing bell.\n            if not notification_created:\n                _maybe_queue(\n                    user,\n                    "tenancy.confirmed",\n                    {\n                        "cta_url": build_absolute_url(\n                            f"/tenancies/{tenancy.id}"\n                        ),\n                    },\n                )\n                continue\n\n            push_user_realtime_event(\n'''
+          assert data.count(old1) == 1, data.count(old1)
+          assert data.count(old2) == 1, data.count(old2)
+          data = data.replace(old1, new1, 1).replace(old2, new2, 1)
+          p.write_text(data)
+      - name: Guard exact scope
+        shell: bash
+        run: |
+          changed="$(git diff --name-only)"
+          test "$changed" = "property/propertylist_app/tasks.py"
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Apply BUG 8 tenancy notification idempotency fix
+          file_pattern: property/propertylist_app/tasks.py
