@@ -51,7 +51,12 @@ def release_room_when_tenancy_ends(
 
     today = timezone.localdate()
 
-    if room.paid_until is not None and room.paid_until >= today:
+    # Ending a tenancy is the hard boundary for the advert entitlement. A
+    # legacy/QA room can have paid_until=None; leaving that value untouched is
+    # unsafe because older public-room queries treated NULL as publishable.
+    # Normalise both NULL and still-live entitlement to an already-expired date
+    # so the same room is reusable but must be paid for before it can go live.
+    if room.paid_until is None or room.paid_until >= today:
         room.paid_until = today - timedelta(days=1)
         room_update_fields.append("paid_until")
 
