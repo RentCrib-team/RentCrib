@@ -15,12 +15,11 @@ from propertylist_app.services.realtime import push_user_realtime_event
 
 
 PRODUCTION_WARNING_DAYS = 7
-QA_AD_LIFETIME_MINUTES = 20
-QA_WARNING_MINUTES_BEFORE_EXPIRY = 5
+QA_WARNING_AFTER_MINUTES = 15
 
 
 def _qa_mode() -> bool:
-    """Enable accelerated expiry only on QA/staging, never production by accident."""
+    """Enable accelerated warning timing on QA/staging, never production by accident."""
     explicit = os.getenv("LISTING_EXPIRY_QA_MODE", "").strip().lower()
     if explicit:
         return explicit in {"1", "true", "yes", "on"}
@@ -164,14 +163,11 @@ def listing_expiry_warning_sweep() -> int:
     rooms = _active_paid_rooms_with_cycle_start().filter(paid_until__gte=today)
 
     if qa_mode:
-        warning_age = timedelta(
-            minutes=QA_AD_LIFETIME_MINUTES - QA_WARNING_MINUTES_BEFORE_EXPIRY
-        )
-        expiry_age = timedelta(minutes=QA_AD_LIFETIME_MINUTES)
         rooms = rooms.filter(
             paid_cycle_started_at__isnull=False,
-            paid_cycle_started_at__lte=now - warning_age,
-            paid_cycle_started_at__gt=now - expiry_age,
+            paid_cycle_started_at__lte=(
+                now - timedelta(minutes=QA_WARNING_AFTER_MINUTES)
+            ),
         )
     else:
         rooms = rooms.filter(
@@ -186,10 +182,11 @@ def listing_expiry_warning_sweep() -> int:
 
         cycle_key = _cycle_key(room)
         if qa_mode:
-            room_paid_until = "in about 5 minutes (QA test)"
+            room_paid_until = str(room.paid_until)
             body = (
-                f"Your listing '{room.title}' will expire in about 5 minutes "
-                "during the QA test. Renew it to keep it visible."
+                f"QA reminder: your listing '{room.title}' has been active for "
+                f"at least {QA_WARNING_AFTER_MINUTES} minutes. Its paid listing "
+                f"period still expires on {room.paid_until}."
             )
         else:
             room_paid_until = str(room.paid_until)
@@ -218,32 +215,15 @@ def listing_expiry_warning_sweep() -> int:
 
 @shared_task(name="propertylist_app.listing_expiry_sweep")
 def listing_expiry_sweep() -> int:
-    """Expire adverts without converting them into manual/unpublished listings."""
-    now = timezone.now()
+    """Expire adverts only when their real paid advertising period has ended."""
     today = timezone.localdate()
-    qa_mode = _qa_mode()
-    rooms = _active_paid_rooms_with_cycle_start()
-
-    if qa_mode:
-        rooms = rooms.filter(
-            paid_until__gte=today,
-            paid_cycle_started_at__isnull=False,
-            paid_cycle_started_at__lte=(
-                now - timedelta(minutes=QA_AD_LIFETIME_MINUTES)
-            ),
-        )
-    else:
-        rooms = rooms.filter(paid_until__lt=today)
+    rooms = _active_paid_rooms_with_cycle_start().filter(paid_until__lt=today)
 
     expired = 0
     for room in rooms:
         cycle_start = getattr(room, "paid_cycle_started_at", None)
         cycle_key = _cycle_key(room)
         original_paid_until = room.paid_until
-
-        if qa_mode:
-            room.paid_until = today - timedelta(days=1)
-            room.save(update_fields=["paid_until", "updated_at"])
 
         owner = room.property_owner
         if _notifications_allowed(owner):
@@ -258,15 +238,12 @@ def listing_expiry_sweep() -> int:
                 ),
                 cycle_start=cycle_start,
             )
-            room.paid_until = original_paid_until
             _queue_email(
                 room=room,
                 template_key="listing.expired",
                 cycle_key=cycle_key,
                 room_paid_until=str(original_paid_until or ""),
             )
-            if qa_mode:
-                room.paid_until = today - timedelta(days=1)
 
         expired += 1
 
