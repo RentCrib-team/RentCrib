@@ -10,13 +10,15 @@ from propertylist_app.models import Booking, Tenancy
 pytestmark = pytest.mark.django_db
 
 
+@pytest.mark.parametrize("original_proposer", ["landlord", "tenant"])
 def test_one_time_edit_that_finalises_tenancy_queues_updated_and_confirmed_events(
     user_factory,
     room_factory,
     monkeypatch,
+    original_proposer,
 ):
-    landlord = user_factory(username="edit_notify_landlord")
-    tenant = user_factory(username="edit_notify_tenant")
+    landlord = user_factory(username=f"edit_notify_landlord_{original_proposer}")
+    tenant = user_factory(username=f"edit_notify_tenant_{original_proposer}")
     room = room_factory(property_owner=landlord)
 
     now = timezone.now()
@@ -35,11 +37,20 @@ def test_one_time_edit_that_finalises_tenancy_queues_updated_and_confirmed_event
     tenant_client = APIClient()
     tenant_client.force_authenticate(user=tenant)
 
-    proposal = landlord_client.post(
+    if original_proposer == "landlord":
+        proposer_client = landlord_client
+        reviewer_client = tenant_client
+        counterparty_user_id = tenant.id
+    else:
+        proposer_client = tenant_client
+        reviewer_client = landlord_client
+        counterparty_user_id = landlord.id
+
+    proposal = proposer_client.post(
         "/api/v1/tenancies/propose/",
         data={
             "room_id": room.id,
-            "counterparty_user_id": tenant.id,
+            "counterparty_user_id": counterparty_user_id,
             "move_in_date": str(date.today() + timedelta(days=7)),
             "duration_months": 6,
         },
@@ -59,7 +70,7 @@ def test_one_time_edit_that_finalises_tenancy_queues_updated_and_confirmed_event
         fake_delay,
     )
 
-    response = tenant_client.post(
+    response = reviewer_client.post(
         f"/api/v1/tenancies/{tenancy_id}/respond/",
         data={
             "action": "propose_changes",
