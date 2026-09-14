@@ -63,6 +63,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.paid_hidden_room_reactivation import (
             install_paid_hidden_room_reactivation,
         )
+        from .services.room_availability_slot_query_optimization import (
+            install_room_availability_slot_query_optimization,
+        )
 
         install_bell_notification_routing()
         install_room_serializer_image_cache()
@@ -83,3 +86,4 @@ class PropertylistAppConfig(AppConfig):
         install_search_radius_candidate_optimization()
         install_search_image_payload_optimization()
         install_paid_hidden_room_reactivation()
+        install_room_availability_slot_query_optimization()
