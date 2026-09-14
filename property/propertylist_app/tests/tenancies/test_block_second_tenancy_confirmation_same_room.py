@@ -37,7 +37,7 @@ def _tenant_claim(*, client, room, landlord, offset_days):
     return Tenancy.objects.get(id=response.data.get("data", response.data)["id"])
 
 
-def test_confirming_one_tenant_claim_prevents_second_confirmed_tenancy_for_room(
+def test_confirming_one_tenant_claim_retires_competing_claims_for_room(
     user_factory,
     room_factory,
 ):
@@ -84,9 +84,16 @@ def test_confirming_one_tenant_claim_prevents_second_confirmed_tenancy_for_room(
     assert first_confirm.status_code == 200, first_confirm.data
 
     claim_a.refresh_from_db()
+    claim_b.refresh_from_db()
     room.refresh_from_db()
+
     assert claim_a.status in {Tenancy.STATUS_CONFIRMED, Tenancy.STATUS_ACTIVE}
     assert room.is_available is False
+
+    # Once one tenancy owns the room, other still-proposed claims are stale.
+    # They must be retired immediately so no old Agree/Edit/Not-my-tenant path
+    # survives into a room that is already rented to somebody else.
+    assert claim_b.status == Tenancy.STATUS_CANCELLED
 
     second_confirm = landlord_client.post(
         f"/api/v1/tenancies/{claim_b.id}/respond/",
@@ -97,9 +104,6 @@ def test_confirming_one_tenant_claim_prevents_second_confirmed_tenancy_for_room(
         },
         format="json",
     )
-
-    # Once one tenancy owns the room, a stale competing claim from another
-    # seeker must not be able to create a second confirmed/live tenancy.
     assert second_confirm.status_code == 400, second_confirm.data
 
     live = Tenancy.objects.filter(
@@ -108,3 +112,8 @@ def test_confirming_one_tenant_claim_prevents_second_confirmed_tenancy_for_room(
     )
     assert live.count() == 1
     assert live.get().id == claim_a.id
+
+    assert not Tenancy.objects.filter(
+        room=room,
+        status=Tenancy.STATUS_PROPOSED,
+    ).exists()
