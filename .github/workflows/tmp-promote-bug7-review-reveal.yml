@@ -15,20 +15,20 @@ jobs:
         run: |
           from pathlib import Path
           p = Path('property/propertylist_app/tasks.py')
-          data = p.read_bytes()
-          old = (b'        # Both parties have already reviewed.\r\n'
-                 b'        if tenant_done and landlord_done:\r\n'
-                 b'            continue\r\n')
-          new = (b'        # Both parties have already reviewed. Reveal immediately;\r\n'
-                 b'        # the existing reveal sweep below can activate them in this run.\r\n'
-                 b'        if tenant_done and landlord_done:\r\n'
-                 b'            Review.objects.filter(\r\n'
-                 b'                tenancy=t,\r\n'
-                 b'                active=False,\r\n'
-                 b'            ).update(reveal_at=now)\r\n'
-                 b'            continue\r\n')
+          data = p.read_text()
+          old = ('        # Both parties have already reviewed.\n'
+                 '        if tenant_done and landlord_done:\n'
+                 '            continue\n')
+          new = ('        # Both parties have already reviewed. Reveal immediately;\n'
+                 '        # the existing reveal sweep below can activate them in this run.\n'
+                 '        if tenant_done and landlord_done:\n'
+                 '            Review.objects.filter(\n'
+                 '                tenancy=t,\n'
+                 '                active=False,\n'
+                 '            ).update(reveal_at=now)\n'
+                 '            continue\n')
           assert data.count(old) == 1, f'expected one target, found {data.count(old)}'
-          p.write_bytes(data.replace(old, new, 1))
+          p.write_text(data.replace(old, new, 1))
       - name: Guard exact scope
         shell: bash
         run: |
