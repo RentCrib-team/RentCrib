@@ -416,7 +416,7 @@ class ReviewCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Tenancy review schedule is not ready yet.")
 
         if now < tenancy.review_open_at:
-            raise serializers.ValidationError("You can only review after the tenancy ends (plus 7 days).")
+            raise serializers.ValidationError("Review window is not open yet.")
 
         if tenancy.review_deadline_at and now > tenancy.review_deadline_at:
             raise serializers.ValidationError("The review window has expired.")
