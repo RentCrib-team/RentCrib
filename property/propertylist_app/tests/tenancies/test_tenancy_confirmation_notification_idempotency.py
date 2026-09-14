@@ -4,6 +4,7 @@ import pytest
 from django.apps import apps
 from django.utils import timezone
 
+from notifications.models import NotificationTemplate, OutboundNotification
 from propertylist_app.tasks import task_send_tenancy_notification
 
 pytestmark = pytest.mark.django_db
@@ -21,6 +22,14 @@ def test_confirmed_notification_task_is_idempotent_on_retry(
     tenant = user_factory(username="retry_confirm_tenant")
     room = room_factory(property_owner=landlord)
 
+    NotificationTemplate.objects.create(
+        key="tenancy.confirmed",
+        channel=NotificationTemplate.CHANNEL_EMAIL,
+        subject="Tenancy confirmed",
+        body="Your tenancy is confirmed.",
+        is_active=True,
+    )
+
     now = timezone.now()
     tenancy = Tenancy.objects.create(
         room=room,
@@ -34,16 +43,10 @@ def test_confirmed_notification_task_is_idempotent_on_retry(
         tenant_confirmed_at=now,
     )
 
-    # This regression is about persisted bell notifications. External delivery
-    # side effects are irrelevant and must not make the retry assertion flaky.
+    # External realtime delivery is not the subject of this regression.
     monkeypatch.setattr(
         "propertylist_app.tasks.push_user_realtime_event",
         lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
-        "propertylist_app.tasks.queue_notification_email",
-        lambda *args, **kwargs: None,
-        raising=False,
     )
 
     first_result = task_send_tenancy_notification(
@@ -65,7 +68,18 @@ def test_confirmed_notification_task_is_idempotent_on_retry(
     )
 
     # Celery may retry the same task. Each party must still have exactly one
-    # persisted confirmation notification for this tenancy.
+    # persisted bell notification for this tenancy.
     assert notifications.count() == 2
     assert notifications.filter(user=landlord).count() == 1
     assert notifications.filter(user=tenant).count() == 1
+
+    outbound = OutboundNotification.objects.filter(
+        template_key="tenancy.confirmed",
+        channel=NotificationTemplate.CHANNEL_EMAIL,
+    )
+
+    # The same retry must also leave only one confirmation email queued for
+    # each party, not another duplicate pair.
+    assert outbound.count() == 2
+    assert outbound.filter(user=landlord).count() == 1
+    assert outbound.filter(user=tenant).count() == 1
