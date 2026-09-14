@@ -9,26 +9,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: tmp-staging-bug7-review-reveal-promotion
+          ref: tmp-staging-bug7-review-reveal-promotion-2
       - name: Apply exact BUG 7 change
         shell: python
         run: |
           from pathlib import Path
           p = Path('property/propertylist_app/tasks.py')
-          data = p.read_text()
-          old = ('        # Both parties have already reviewed.\n'
-                 '        if tenant_done and landlord_done:\n'
-                 '            continue\n')
-          new = ('        # Both parties have already reviewed. Reveal immediately;\n'
-                 '        # the existing reveal sweep below can activate them in this run.\n'
-                 '        if tenant_done and landlord_done:\n'
-                 '            Review.objects.filter(\n'
-                 '                tenancy=t,\n'
-                 '                active=False,\n'
-                 '            ).update(reveal_at=now)\n'
-                 '            continue\n')
+          data = p.read_bytes()
+          nl = b'\r\n' if b'\r\n' in data else b'\n'
+          old = nl.join([
+              b'        # Both parties have already reviewed.',
+              b'        if tenant_done and landlord_done:',
+              b'            continue',
+              b'',
+          ])
+          new = nl.join([
+              b'        # Both parties have already reviewed. Reveal immediately;',
+              b'        # the existing reveal sweep below can activate them in this run.',
+              b'        if tenant_done and landlord_done:',
+              b'            Review.objects.filter(',
+              b'                tenancy=t,',
+              b'                active=False,',
+              b'            ).update(reveal_at=now)',
+              b'            continue',
+              b'',
+          ])
           assert data.count(old) == 1, f'expected one target, found {data.count(old)}'
-          p.write_text(data.replace(old, new, 1))
+          p.write_bytes(data.replace(old, new, 1))
       - name: Guard exact scope
         shell: bash
         run: |
