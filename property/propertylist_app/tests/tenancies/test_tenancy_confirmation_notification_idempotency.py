@@ -47,12 +47,24 @@ def test_confirmed_notification_task_is_idempotent_on_retry(
         tenant_confirmed_at=now,
     )
 
+    realtime_events = []
     monkeypatch.setattr(
         "propertylist_app.tasks.push_user_realtime_event",
-        lambda *args, **kwargs: None,
+        lambda *args, **kwargs: realtime_events.append((args, kwargs)),
     )
 
     first_result = task_send_tenancy_notification(tenancy.id, "confirmed")
+    realtime_after_first_run = list(realtime_events)
+
+    # Simulate a partial first execution: the landlord bell/realtime delivery
+    # exists, but its queued email was lost before a retry.
+    landlord_email = OutboundNotification.objects.get(
+        user=landlord,
+        template_key="tenancy.confirmed",
+        channel=NotificationTemplate.CHANNEL_EMAIL,
+    )
+    landlord_email.delete()
+
     second_result = task_send_tenancy_notification(tenancy.id, "confirmed")
 
     assert first_result == 2
@@ -73,9 +85,13 @@ def test_confirmed_notification_task_is_idempotent_on_retry(
         channel=NotificationTemplate.CHANNEL_EMAIL,
     )
 
+    # Retry repairs the missing landlord email without duplicating the tenant's.
     assert outbound.count() == 2
     assert outbound.filter(user=landlord).count() == 1
     assert outbound.filter(user=tenant).count() == 1
+
+    # The retry must not replay bell/message/unread realtime events.
+    assert realtime_events == realtime_after_first_run
 
 
 def test_proposal_notification_task_does_not_duplicate_email_on_retry(
