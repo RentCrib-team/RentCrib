@@ -909,36 +909,48 @@ class BookingRescheduleView(APIView):
             )
 
             if template_exists:
-                OutboundNotification.objects.create(
+                email_context = {
+                    "user": {
+                        "first_name": recipient.first_name,
+                    },
+                    "changed_by": {
+                        "name": changed_by_name,
+                    },
+                    "room": {
+                        "title": booking.room.title,
+                    },
+                    "booking_id": booking.id,
+                    "new_start": booking.start.isoformat(),
+                    "new_end": booking.end.isoformat(),
+
+                    # Mobile app deep link.
+                    "deep_link": (
+                        f"/app/bookings/{booking.id}"
+                    ),
+
+                    # Web/Vercel email action button.
+                    "cta_url": build_absolute_url(
+                        f"/messages?thread={thread.id}",
+                        force_login=True,
+                    ),
+                }
+
+                email_exists = OutboundNotification.objects.filter(
                     user=recipient,
                     channel=NotificationTemplate.CHANNEL_EMAIL,
                     template_key="booking.updated",
-                    context={
-                        "user": {
-                            "first_name": recipient.first_name,
-                        },
-                        "changed_by": {
-                            "name": changed_by_name,
-                        },
-                        "room": {
-                            "title": booking.room.title,
-                        },
-                        "booking_id": booking.id,
-                        "new_start": booking.start.isoformat(),
-                        "new_end": booking.end.isoformat(),
+                    context__booking_id=booking.id,
+                    context__new_start=booking.start.isoformat(),
+                    context__new_end=booking.end.isoformat(),
+                ).exists()
 
-                        # Mobile app deep link.
-                        "deep_link": (
-                            f"/app/bookings/{booking.id}"
-                        ),
-
-                        # Web/Vercel email action button.
-                        "cta_url": build_absolute_url(
-                            f"/messages?thread={thread.id}",
-                            force_login=True,
-                        ),
-                    },
-                )
+                if not email_exists:
+                    OutboundNotification.objects.create(
+                        user=recipient,
+                        channel=NotificationTemplate.CHANNEL_EMAIL,
+                        template_key="booking.updated",
+                        context=email_context,
+                    )
 
         return ok_response(
             BookingSerializer(
