@@ -1341,7 +1341,6 @@ def task_tenancy_prompts_sweep() -> int:
             ],
             review_open_at__isnull=False,
             review_open_at__lte=now,
-            still_living_confirmed_at__isnull=True,
         )
     )
 
