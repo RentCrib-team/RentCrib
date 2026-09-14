@@ -51,6 +51,24 @@ def test_public_city_without_upload_uses_backend_fallback(api_client):
     assert city["image_url"].endswith(FALLBACK_SUFFIX)
 
 
+@pytest.mark.django_db
+def test_public_city_with_unapproved_upload_uses_backend_fallback(api_client):
+    City.objects.all().delete()
+    City.objects.create(
+        name="Cardiff",
+        is_active=True,
+        image=_image_upload(),
+        image_is_approved=False,
+    )
+
+    response = api_client.get(PUBLIC_CITIES_URL, {"q": "Cardiff", "limit": 100})
+
+    assert response.status_code == 200
+    city = response.data["data"][0]
+    assert city["has_image"] is False
+    assert city["image_url"].endswith(FALLBACK_SUFFIX)
+
+
 @pytest.mark.django_db(transaction=True)
 def test_ops_admin_can_upload_filter_and_clear_city_image(
     api_client,
@@ -70,6 +88,7 @@ def test_ops_admin_can_upload_filter_and_clear_city_image(
         {
             "image": _image_upload(),
             "image_alt": "Southampton waterfront skyline",
+            "image_is_approved": True,
         },
         format="multipart",
     )

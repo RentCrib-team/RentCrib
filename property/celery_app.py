@@ -13,10 +13,12 @@ app.autodiscover_tasks([
     "propertylist_app.notifications",
 ])
 
-# Register compatibility bridge task names.
+# Register compatibility bridge task names and listing lifecycle tasks that
+# live outside Celery's conventional tasks.py module.
 app.conf.imports = tuple(app.conf.get("imports", ())) + (
     "notifications.tasks",
     "propertylist_app.city_image_tasks",
+    "propertylist_app.listing_expiry_tasks",
 )
 
 app.conf.beat_schedule = {
@@ -25,26 +27,33 @@ app.conf.beat_schedule = {
         "task": "notifications.tasks.send_due_notifications",
         "schedule": crontab(minute="*"),
     },
-    "notify-listing-expiring-daily-7am": {
-        "task": "notifications.tasks.notify_listing_expiring",
-        "schedule": crontab(hour=7, minute=0),
+
+    # Listing advertising lifecycle.
+    # These sweeps choose their timing contract from the environment:
+    # - production: warn within 7 days of paid_until; expire after paid_until
+    # - staging/QA: warn at minute 15; expire at minute 20
+    # Running once per minute gives QA deterministic accelerated coverage;
+    # production sends only once per paid cycle because both channels dedupe.
+    "listing-expiry-warning-sweep-every-minute": {
+        "task": "propertylist_app.listing_expiry_warning_sweep",
+        "schedule": crontab(minute="*"),
     },
-    
+    "listing-expiry-sweep-every-minute": {
+        "task": "propertylist_app.listing_expiry_sweep",
+        "schedule": crontab(minute="*"),
+    },
+
     "notify-upcoming-bookings-every-minute": {
-    "task": "propertylist_app.services.tasks.notify_upcoming_bookings",
-    "schedule": crontab(minute="*"),
-    "args": (5,),
+        "task": "propertylist_app.services.tasks.notify_upcoming_bookings",
+        "schedule": crontab(minute="*"),
+        "args": (5,),
     },
     "notify-completed-viewings-every-minute": {
         "task": "propertylist_app.notifications.tasks.notify_completed_viewings",
         "schedule": crontab(minute="*"),
     },
 
-    # Listings & accounts
-    "expire-paid-listings-daily-03:00": {
-        "task": "propertylist_app.expire_paid_listings",
-        "schedule": crontab(hour=3, minute=0),
-    },
+    # Accounts
     "delete-scheduled-accounts-daily-03:10": {
         "task": "propertylist_app.delete_scheduled_accounts",
         "schedule": crontab(hour=3, minute=10),
@@ -76,8 +85,6 @@ app.conf.beat_schedule = {
         "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
         "schedule": 60 * 60 * 24,
     },
-    
-    
 }
 
 
@@ -89,5 +96,3 @@ def install_city_image_autofill_schedule(sender, **kwargs):
         name="autofill-missing-city-images",
         expires=9 * 60,
     )
-
-

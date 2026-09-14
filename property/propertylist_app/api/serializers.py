@@ -416,7 +416,7 @@ class ReviewCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Tenancy review schedule is not ready yet.")
 
         if now < tenancy.review_open_at:
-            raise serializers.ValidationError("You can only review after the tenancy ends (plus 7 days).")
+            raise serializers.ValidationError("Review window is not open yet.")
 
         if tenancy.review_deadline_at and now > tenancy.review_deadline_at:
             raise serializers.ValidationError("The review window has expired.")
@@ -899,17 +899,14 @@ class TenancyRespondSerializer(serializers.Serializer):
                 )
 
         if action == "cancel":
-            # "Not my tenant" is only available to the landlord
-            # when the tenant submitted the initial tenancy claim.
-            if not (
-                user.id == tenancy.landlord_id
-                and tenancy.proposed_by_id == tenancy.tenant_id
-            ):
+            # Cancel has one authoritative meaning while a proposal is open:
+            # the proposer withdraws, or the other party rejects it.
+            if tenancy.status != Tenancy.STATUS_PROPOSED:
                 raise serializers.ValidationError(
                     {
                         "action": (
-                            "Only the landlord can reject tenancy information "
-                            "submitted first by the tenant."
+                            "Only proposed tenancy information can be "
+                            "withdrawn or rejected."
                         )
                     }
                 )
@@ -946,8 +943,8 @@ class TenancyRespondSerializer(serializers.Serializer):
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
             ) + timedelta(minutes=10)
 
-            # optional deadline: end + 60 days (safe default)
-            tenancy.review_deadline_at = tenancy.review_open_at + timedelta(days=60)
+            # TEMPORARY QA RULE: keep the private review window open for 10 minutes.
+            tenancy.review_deadline_at = tenancy.review_open_at + timedelta(minutes=10)
 
             # # still living check: end - 7 days
             # tenancy.still_living_check_at = timezone.make_aware(
@@ -966,15 +963,24 @@ class TenancyRespondSerializer(serializers.Serializer):
 
 
         if action == "cancel":
-            # Landlord rejected a tenant-created tenancy claim.
-            # The room availability is deliberately not changed here:
-            # tenant-created claims never take the listing offline.
+            landlord_created_proposal = (
+                tenancy.proposed_by_id == tenancy.landlord_id
+            )
+
             tenancy.status = STATUS_CANCELLED
             tenancy.review_open_at = None
             tenancy.review_deadline_at = None
             tenancy.still_living_check_at = None
             tenancy.still_living_confirmed_at = None
             tenancy.save()
+
+            # A landlord-created proposal takes the room offline when it is
+            # created. Withdrawal or rejection must release it again.
+            if landlord_created_proposal:
+                room = tenancy.room
+                if not room.is_available:
+                    room.is_available = True
+                    room.save(update_fields=["is_available", "updated_at"])
 
             return tenancy
 
@@ -1162,33 +1168,33 @@ class TenancyDetailSerializer(serializers.ModelSerializer):
                 "reason": "This tenancy information is no longer awaiting review.",
             }
 
-        # The person who submitted the current terms must wait for
-        # the other party to review them.
+        # The proposer cannot agree with or edit their own submission, but
+        # they may withdraw it while it is still awaiting review.
         if user.id == obj.proposed_by_id:
             return {
                 "can_agree": False,
                 "can_edit": False,
-                "available_actions": [],
-                "reason": "Waiting for the other party to review the tenancy information.",
+                "available_actions": ["cancel"],
+                "reason": (
+                    "Waiting for the other party to review the tenancy "
+                    "information. You can withdraw it while it is pending."
+                ),
             }
 
         can_edit = not obj.tenant_has_edited
 
-        available_actions = ["confirm"]
+        # The reviewing party may either accept/correct the proposal or
+        # reject it. The frontend decides whether that rejection is labelled
+        # Reject or Not my tenant from the viewer/proposer roles.
+        available_actions = ["confirm", "cancel"]
 
         if can_edit:
             available_actions.append("propose_changes")
 
-        # When the tenant submitted the tenancy information first,
-        # the landlord may reject the claim if the room was not
-        # actually rented to that tenant.
         landlord_reviewing_tenant_claim = (
             user.id == obj.landlord_id
             and obj.proposed_by_id == obj.tenant_id
         )
-
-        if landlord_reviewing_tenant_claim:
-            available_actions.append("cancel")
 
         if landlord_reviewing_tenant_claim and can_edit:
             reason = (

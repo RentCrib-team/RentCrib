@@ -1,5 +1,8 @@
-from PIL import Image
+from io import BytesIO
+
+from PIL import Image, ImageOps
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.templatetags.static import static
 
 from propertylist_app.services.image import compress_listing_upload
@@ -12,6 +15,42 @@ CITY_IMAGE_MIN_HEIGHT = 360
 CITY_IMAGE_MIN_ASPECT_RATIO = 1.20
 CITY_IMAGE_MAX_ASPECT_RATIO = 2.50
 CITY_IMAGE_FALLBACK_STATIC_PATH = "propertylist_app/city-card-fallback.svg"
+EMBEDDED_ATTRIBUTION_FOOTER_HEIGHT = 34
+
+
+def remove_embedded_city_image_footer(uploaded_file):
+    """Return a clean city-card upload when it has the legacy black footer.
+
+    The legacy Wikimedia importer always painted a 34px solid-black footer at
+    the bottom of a 1600x900 image. Southampton and manually approved images
+    do not have that marker, so they are left unchanged.
+    """
+
+    uploaded_file.seek(0)
+    with Image.open(uploaded_file) as source:
+        source = ImageOps.exif_transpose(source).convert("RGB")
+        width, height = source.size
+        footer_height = max(1, round(height * EMBEDDED_ATTRIBUTION_FOOTER_HEIGHT / 900))
+        sample_y = height - 1
+        samples = [source.getpixel((round(index * (width - 1) / 24), sample_y)) for index in range(25)]
+        if any(max(pixel) > 8 for pixel in samples):
+            uploaded_file.seek(0)
+            return None
+
+        image = ImageOps.fit(
+            source.crop((0, 0, width, height - footer_height)),
+            (width, height),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
+
+    handle = BytesIO()
+    image.save(handle, "JPEG", quality=88, optimize=True, progressive=True)
+    return SimpleUploadedFile(
+        "city-card-clean.jpg",
+        handle.getvalue(),
+        content_type="image/jpeg",
+    )
 
 
 def prepare_city_image(uploaded_file):
@@ -60,14 +99,14 @@ def prepare_city_image(uploaded_file):
 
 
 def city_has_uploaded_image(city):
-    return bool(getattr(city, "image", None))
+    return bool(getattr(city, "image", None) and getattr(city, "image_is_approved", False))
 
 
 def city_image_url(city, *, request=None):
     """Return a usable city-card image URL, falling back to RentCrib static art."""
 
     image = getattr(city, "image", None)
-    if image:
+    if image and getattr(city, "image_is_approved", False):
         try:
             url = image.url
         except (AttributeError, ValueError):

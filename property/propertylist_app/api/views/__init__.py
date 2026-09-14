@@ -173,3 +173,7 @@ from .notifications import (
 from .bookings import CreateViewingBookingView
 
 from .verification import MyLandlordVerificationRequestView
+
+# Keep the public import name stable while routing checkout webhook handling
+# through the failure-safe implementation.
+from .stripe_webhook_reliable import stripe_webhook_reliable as stripe_webhook
