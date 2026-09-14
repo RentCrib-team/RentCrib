@@ -66,6 +66,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.admin_listing_moderation_audit import (
             install_admin_listing_moderation_audit,
         )
+        from .services.room_availability_slot_query_optimization import (
+            install_room_availability_slot_query_optimization,
+        )
 
         install_bell_notification_routing()
         install_room_serializer_image_cache()
@@ -87,3 +90,4 @@ class PropertylistAppConfig(AppConfig):
         install_search_image_payload_optimization()
         install_paid_hidden_room_reactivation()
         install_admin_listing_moderation_audit()
+        install_room_availability_slot_query_optimization()
