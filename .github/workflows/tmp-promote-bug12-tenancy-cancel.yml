@@ -1,0 +1,46 @@
+name: Temporary BUG 12 staging promotion
+on: push
+permissions:
+  contents: write
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp-staging-bug12-tenancy-cancel-promotion
+      - name: Apply exact BUG 12 serializer changes
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('property/propertylist_app/api/serializers.py')
+          data = p.read_bytes()
+          replacements = [
+              (
+                  b'        if action == "cancel":\r\n            # "Not my tenant" is only available to the landlord\r\n            # when the tenant submitted the initial tenancy claim.\r\n            if not (\r\n                user.id == tenancy.landlord_id\r\n                and tenancy.proposed_by_id == tenancy.tenant_id\r\n            ):\r\n                raise serializers.ValidationError(\r\n                    {\r\n                        "action": (\r\n                            "Only the landlord can reject tenancy information "\r\n                            "submitted first by the tenant."\r\n                        )\r\n                    }\r\n                )\r\n',
+                  b'        if action == "cancel":\r\n            # Cancel has one authoritative meaning while a proposal is open:\r\n            # the proposer withdraws, or the other party rejects it.\r\n            if tenancy.status != Tenancy.STATUS_PROPOSED:\r\n                raise serializers.ValidationError(\r\n                    {\r\n                        "action": (\r\n                            "Only proposed tenancy information can be "\r\n                            "withdrawn or rejected."\r\n                        )\r\n                    }\r\n                )\r\n'
+              ),
+              (
+                  b'        if action == "cancel":\r\n            # Landlord rejected a tenant-created tenancy claim.\r\n            # The room availability is deliberately not changed here:\r\n            # tenant-created claims never take the listing offline.\r\n            tenancy.status = STATUS_CANCELLED\r\n            tenancy.review_open_at = None\r\n            tenancy.review_deadline_at = None\r\n            tenancy.still_living_check_at = None\r\n            tenancy.still_living_confirmed_at = None\r\n            tenancy.save()\r\n\r\n            return tenancy\r\n',
+                  b'        if action == "cancel":\r\n            landlord_created_proposal = (\r\n                tenancy.proposed_by_id == tenancy.landlord_id\r\n            )\r\n\r\n            tenancy.status = STATUS_CANCELLED\r\n            tenancy.review_open_at = None\r\n            tenancy.review_deadline_at = None\r\n            tenancy.still_living_check_at = None\r\n            tenancy.still_living_confirmed_at = None\r\n            tenancy.save()\r\n\r\n            # A landlord-created proposal takes the room offline when it is\r\n            # created. Withdrawal or rejection must release it again.\r\n            if landlord_created_proposal:\r\n                room = tenancy.room\r\n                if not room.is_available:\r\n                    room.is_available = True\r\n                    room.save(update_fields=["is_available", "updated_at"])\r\n\r\n            return tenancy\r\n'
+              ),
+              (
+                  b'        # The person who submitted the current terms must wait for\r\n        # the other party to review them.\r\n        if user.id == obj.proposed_by_id:\r\n            return {\r\n                "can_agree": False,\r\n                "can_edit": False,\r\n                "available_actions": [],\r\n                "reason": "Waiting for the other party to review the tenancy information.",\r\n            }\r\n\r\n        can_edit = not obj.tenant_has_edited\r\n\r\n        available_actions = ["confirm"]\r\n\r\n        if can_edit:\r\n            available_actions.append("propose_changes")\r\n\r\n        # When the tenant submitted the tenancy information first,\r\n        # the landlord may reject the claim if the room was not\r\n        # actually rented to that tenant.\r\n        landlord_reviewing_tenant_claim = (\r\n            user.id == obj.landlord_id\r\n            and obj.proposed_by_id == obj.tenant_id\r\n        )\r\n\r\n        if landlord_reviewing_tenant_claim:\r\n            available_actions.append("cancel")\r\n',
+                  b'        # The proposer cannot agree with or edit their own submission, but\r\n        # they may withdraw it while it is still awaiting review.\r\n        if user.id == obj.proposed_by_id:\r\n            return {\r\n                "can_agree": False,\r\n                "can_edit": False,\r\n                "available_actions": ["cancel"],\r\n                "reason": (\r\n                    "Waiting for the other party to review the tenancy "\r\n                    "information. You can withdraw it while it is pending."\r\n                ),\r\n            }\r\n\r\n        can_edit = not obj.tenant_has_edited\r\n\r\n        # The reviewing party may either accept/correct the proposal or\r\n        # reject it. The frontend decides whether that rejection is labelled\r\n        # Reject or Not my tenant from the viewer/proposer roles.\r\n        available_actions = ["confirm", "cancel"]\r\n\r\n        if can_edit:\r\n            available_actions.append("propose_changes")\r\n\r\n        landlord_reviewing_tenant_claim = (\r\n            user.id == obj.landlord_id\r\n            and obj.proposed_by_id == obj.tenant_id\r\n        )\r\n'
+              ),
+          ]
+          for old, new in replacements:
+              count = data.count(old)
+              assert count == 1, f'expected one target, found {count}'
+              data = data.replace(old, new, 1)
+          p.write_bytes(data)
+      - name: Guard exact scope
+        shell: bash
+        run: |
+          files="$(git diff --name-only)"
+          test "$files" = "property/propertylist_app/api/serializers.py"
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Apply BUG 12 tenancy cancel contract fix
+          file_pattern: property/propertylist_app/api/serializers.py
