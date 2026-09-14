@@ -252,6 +252,17 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         if extra_context:
             email_context.update(extra_context)
 
+        # A tenancy event has one stable message id. Reusing that identity
+        # makes email enqueue retry-safe while still allowing a missing email
+        # to be repaired on a later task execution.
+        if OutboundNotification.objects.filter(
+            user=user,
+            channel=NotificationTemplate.CHANNEL_EMAIL,
+            template_key=template_key,
+            context__message_id=message.id,
+        ).exists():
+            return
+
         _queue_email(
             user=user,
             template_key=template_key,
@@ -411,17 +422,33 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
             (tenancy.tenant, Notification.Audience.SEEKER),
         ):
 
-            notification = Notification.objects.create(
+            notification, notification_created = Notification.objects.get_or_create(
                 user=user,
                 type="tenancy_confirmed",
                 target_type="tenancy",
                 target_id=tenancy.id,
-                thread=confirmation_thread,
-                message=tenancy_message,
-                title="Tenancy confirmed",
-                body=f"Tenancy confirmed for: {room_title}.",
-                audience=audience,
+                defaults={
+                    "thread": confirmation_thread,
+                    "message": tenancy_message,
+                    "title": "Tenancy confirmed",
+                    "body": f"Tenancy confirmed for: {room_title}.",
+                    "audience": audience,
+                },
             )
+
+            # A retry may need to repair a missing email, but must not replay
+            # bell/message/unread realtime delivery for an existing bell.
+            if not notification_created:
+                _maybe_queue(
+                    user,
+                    "tenancy.confirmed",
+                    {
+                        "cta_url": build_absolute_url(
+                            f"/tenancies/{tenancy.id}"
+                        ),
+                    },
+                )
+                continue
 
             push_user_realtime_event(
                 user.id,
