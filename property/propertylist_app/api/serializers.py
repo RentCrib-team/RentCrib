@@ -946,8 +946,8 @@ class TenancyRespondSerializer(serializers.Serializer):
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
             ) + timedelta(minutes=10)
 
-            # optional deadline: end + 60 days (safe default)
-            tenancy.review_deadline_at = tenancy.review_open_at + timedelta(days=60)
+            # TEMPORARY QA RULE: keep the private review window open for 10 minutes.
+            tenancy.review_deadline_at = tenancy.review_open_at + timedelta(minutes=10)
 
             # # still living check: end - 7 days
             # tenancy.still_living_check_at = timezone.make_aware(
