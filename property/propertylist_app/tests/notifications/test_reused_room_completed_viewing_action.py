@@ -11,120 +11,140 @@ from propertylist_app.services.message_threads import get_or_create_canonical_th
 pytestmark = pytest.mark.django_db
 
 
-def test_new_completed_viewing_can_start_new_cycle_after_old_tenancy_ended(
+def _completed_viewing_message(*, landlord, tenant, room):
+    now = timezone.now()
+    booking = Booking.objects.create(
+        user=tenant,
+        room=room,
+        start=now - timedelta(minutes=31),
+        end=now - timedelta(minutes=1),
+        status=Booking.STATUS_ACTIVE,
+        is_deleted=False,
+        canceled_at=None,
+    )
+
+    thread = get_or_create_canonical_thread(
+        landlord=landlord,
+        seeker=tenant,
+        room=room,
+    )
+
+    return Message.objects.create(
+        thread=thread,
+        sender=landlord,
+        body="Viewing completed",
+        message_type=Message.TYPE_TEXT,
+        metadata={
+            "system_event": True,
+            "event_type": "booking_completed",
+            "booking_id": booking.id,
+            "room_id": room.id,
+        },
+    )
+
+
+def _actions_for(message, user):
+    request = SimpleNamespace(user=user)
+    return MessageSerializer(
+        message,
+        context={"request": request},
+    ).data["available_actions"]
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        Tenancy.STATUS_ENDED,
+        Tenancy.STATUS_CANCELLED,
+    ],
+)
+def test_new_completed_viewing_can_start_new_cycle_after_terminal_tenancy(
     user_factory,
     room_factory,
+    terminal_status,
 ):
-    landlord = user_factory(username="reused_room_landlord")
-    tenant = user_factory(username="reused_room_tenant")
+    landlord = user_factory(username=f"reused_room_landlord_{terminal_status}")
+    tenant = user_factory(username=f"reused_room_tenant_{terminal_status}")
     room = room_factory(property_owner=landlord)
 
-    # Historical tenancy for this exact landlord/tenant/room relationship.
-    Tenancy.objects.create(
+    historical = Tenancy.objects.create(
         room=room,
         landlord=landlord,
         tenant=tenant,
         proposed_by=landlord,
         move_in_date=timezone.localdate() - timedelta(days=60),
         duration_months=1,
-        status=Tenancy.STATUS_ENDED,
-        landlord_confirmed_at=timezone.now() - timedelta(days=60),
-        tenant_confirmed_at=timezone.now() - timedelta(days=60),
+        status=terminal_status,
     )
 
-    # The same seeker legitimately views the relisted room again later.
-    now = timezone.now()
-    booking = Booking.objects.create(
-        user=tenant,
-        room=room,
-        start=now - timedelta(minutes=31),
-        end=now - timedelta(minutes=1),
-        status=Booking.STATUS_ACTIVE,
-        is_deleted=False,
-        canceled_at=None,
-    )
+    if terminal_status == Tenancy.STATUS_ENDED:
+        historical.landlord_confirmed_at = timezone.now() - timedelta(days=60)
+        historical.tenant_confirmed_at = timezone.now() - timedelta(days=60)
+        historical.save(
+            update_fields=[
+                "landlord_confirmed_at",
+                "tenant_confirmed_at",
+            ]
+        )
 
-    thread = get_or_create_canonical_thread(
+    message = _completed_viewing_message(
         landlord=landlord,
-        seeker=tenant,
+        tenant=tenant,
         room=room,
     )
-    message = Message.objects.create(
-        thread=thread,
-        sender=landlord,
-        body="Viewing completed",
-        message_type=Message.TYPE_TEXT,
-        metadata={
-            "system_event": True,
-            "event_type": "booking_completed",
-            "booking_id": booking.id,
-            "room_id": room.id,
-        },
-    )
 
-    def actions_for(user):
-        request = SimpleNamespace(user=user)
-        return MessageSerializer(
-            message,
-            context={"request": request},
-        ).data["available_actions"]
-
-    # An ended historical tenancy must not poison a new rental cycle.
-    assert actions_for(landlord) == ["update_tenancy"]
-    assert actions_for(tenant) == ["update_tenancy"]
+    # Terminal history belongs to an old lifecycle. It must not suppress the
+    # action for a later legitimate viewing of the same relisted room.
+    assert _actions_for(message, landlord) == ["update_tenancy"]
+    assert _actions_for(message, tenant) == ["update_tenancy"]
 
 
+@pytest.mark.parametrize(
+    "live_status",
+    [
+        Tenancy.STATUS_PROPOSED,
+        Tenancy.STATUS_CONFIRMED,
+        Tenancy.STATUS_ACTIVE,
+    ],
+)
 def test_new_completed_viewing_stays_blocked_while_live_tenancy_exists(
     user_factory,
     room_factory,
+    live_status,
 ):
-    landlord = user_factory(username="live_room_landlord")
-    tenant = user_factory(username="live_room_tenant")
+    landlord = user_factory(username=f"live_room_landlord_{live_status}")
+    tenant = user_factory(username=f"live_room_tenant_{live_status}")
     room = room_factory(property_owner=landlord)
 
-    Tenancy.objects.create(
+    now = timezone.now()
+    tenancy = Tenancy.objects.create(
         room=room,
         landlord=landlord,
         tenant=tenant,
         proposed_by=landlord,
         move_in_date=timezone.localdate() + timedelta(days=7),
         duration_months=6,
-        status=Tenancy.STATUS_PROPOSED,
+        status=live_status,
     )
 
-    now = timezone.now()
-    booking = Booking.objects.create(
-        user=tenant,
-        room=room,
-        start=now - timedelta(minutes=31),
-        end=now - timedelta(minutes=1),
-        status=Booking.STATUS_ACTIVE,
-        is_deleted=False,
-        canceled_at=None,
-    )
+    if live_status in {
+        Tenancy.STATUS_CONFIRMED,
+        Tenancy.STATUS_ACTIVE,
+    }:
+        tenancy.landlord_confirmed_at = now
+        tenancy.tenant_confirmed_at = now
+        tenancy.save(
+            update_fields=[
+                "landlord_confirmed_at",
+                "tenant_confirmed_at",
+            ]
+        )
 
-    thread = get_or_create_canonical_thread(
+    message = _completed_viewing_message(
         landlord=landlord,
-        seeker=tenant,
+        tenant=tenant,
         room=room,
     )
-    message = Message.objects.create(
-        thread=thread,
-        sender=landlord,
-        body="Viewing completed",
-        message_type=Message.TYPE_TEXT,
-        metadata={
-            "system_event": True,
-            "event_type": "booking_completed",
-            "booking_id": booking.id,
-            "room_id": room.id,
-        },
-    )
 
-    request = SimpleNamespace(user=tenant)
-    actions = MessageSerializer(
-        message,
-        context={"request": request},
-    ).data["available_actions"]
-
-    assert actions == []
+    assert _actions_for(message, landlord) == []
+    assert _actions_for(message, tenant) == []
