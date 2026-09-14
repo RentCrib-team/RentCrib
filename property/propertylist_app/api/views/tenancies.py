@@ -700,6 +700,18 @@ class TenancyRespondView(APIView):
 
         if action == "propose_changes":
             task_send_tenancy_notification.delay(tenancy.id, "updated")
+            if (
+                tenancy.landlord_confirmed_at is not None
+                and tenancy.tenant_confirmed_at is not None
+                and tenancy.status in {
+                    Tenancy.STATUS_CONFIRMED,
+                    Tenancy.STATUS_ACTIVE,
+                }
+            ):
+                task_send_tenancy_notification.delay(
+                    tenancy.id,
+                    "confirmed",
+                )
             response_message = (
                 "Tenancy information corrected successfully. "
                 "The updated details have been sent to both parties."
