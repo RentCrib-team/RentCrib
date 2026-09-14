@@ -113,17 +113,16 @@ def reconcile_curated_city_images(
     raw_http_get = http_get or requests.get
     replace_image = replace_image or _replace_existing_city_image
 
-    cities = list(
-        city_model.objects.filter(
-            is_active=True,
-            image_is_approved=True,
-            slug__in=selected_slugs,
-        )
+    all_cities = list(
+        city_model.objects.filter(is_active=True, image_is_approved=True)
         .exclude(image="")
         .exclude(image__isnull=True)
         .order_by("display_order", "name", "pk")
     )
-    records = _city_image_records(cities)
+    cities = [
+        city for city in all_cities if _clean(getattr(city, "slug", "")).lower() in selected_slugs
+    ]
+    records = _city_image_records(all_cities)
     record_by_id = {record["city"].pk: record for record in records}
     used_photo_ids = {
         record["photo_id"] for record in records if record["photo_id"]
@@ -199,7 +198,8 @@ def reconcile_curated_city_images(
             failed.append({"city_id": city.pk, "city": city.name, "error": error})
             _emit_progress(progress, f"[{position}/{total}] {city.name}: failed - {error}")
 
-    missing_requested = sorted(selected_slugs.difference({city.slug for city in cities}))
+    present_slugs = {_clean(getattr(city, "slug", "")).lower() for city in cities}
+    missing_requested = sorted(selected_slugs.difference(present_slugs))
     for slug in missing_requested:
         skipped.append({"city_id": None, "city": slug, "reason": "city not eligible or not found"})
 
