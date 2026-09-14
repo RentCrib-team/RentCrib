@@ -69,6 +69,9 @@ class PropertylistAppConfig(AppConfig):
         from .services.room_availability_slot_query_optimization import (
             install_room_availability_slot_query_optimization,
         )
+        from .services.room_geocoding_request_optimization import (
+            install_room_geocoding_request_optimization,
+        )
 
         install_bell_notification_routing()
         install_room_serializer_image_cache()
@@ -91,3 +94,4 @@ class PropertylistAppConfig(AppConfig):
         install_paid_hidden_room_reactivation()
         install_admin_listing_moderation_audit()
         install_room_availability_slot_query_optimization()
+        install_room_geocoding_request_optimization()
