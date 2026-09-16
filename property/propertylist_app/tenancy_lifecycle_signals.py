@@ -6,7 +6,6 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from propertylist_app.models import Room, Tenancy
-from propertylist_app.services.tenancy_dates import compute_review_window
 
 
 _TENANCY_END_TRANSITION_FLAG = "_tenancy_just_ended"
@@ -50,7 +49,7 @@ def normalise_still_living_schedule_on_confirmation(
     update_fields=None,
     **kwargs,
 ):
-    """Anchor Timer 2 to tenancy end when a proposal becomes confirmed/active."""
+    """QA: anchor Timer 2 to the final confirmation/update moment."""
     if not instance.pk:
         return
 
@@ -72,11 +71,19 @@ def normalise_still_living_schedule_on_confirmation(
     if previous_status != Tenancy.STATUS_PROPOSED:
         return
 
-    _, _, still_living_check_at = compute_review_window(
-        instance.move_in_date,
-        instance.duration_months,
+    # TEMPORARY QA RULE:
+    # Timer 2 is due 10 minutes after the point at which both parties have
+    # finalised the tenancy information. A one-time correction sets both
+    # confirmation timestamps to the correction time, so it follows the same
+    # rule automatically.
+    #
+    # PRODUCTION RULE:
+    # Replace this QA offset with 7 days before the actual tenancy end date.
+    finalised_at = max(
+        instance.landlord_confirmed_at,
+        instance.tenant_confirmed_at,
     )
-    instance.still_living_check_at = still_living_check_at
+    instance.still_living_check_at = finalised_at + timedelta(minutes=10)
 
 
 @receiver(post_save, sender=Tenancy)
