@@ -3,11 +3,65 @@ from datetime import timedelta
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
-from propertylist_app.models import Tenancy
+from propertylist_app.models import Room, Tenancy
 
 
 _TENANCY_END_TRANSITION_FLAG = "_tenancy_just_ended"
+_LIVE_TENANCY_STATUSES = {
+    Tenancy.STATUS_CONFIRMED,
+    Tenancy.STATUS_ACTIVE,
+}
+
+
+@receiver(pre_save, sender=Tenancy)
+def guard_single_live_tenancy_per_room(sender, instance, **kwargs):
+    """Only one confirmed/active tenancy may own a room at a time."""
+    if not instance.room_id or instance.status not in _LIVE_TENANCY_STATUSES:
+        return
+
+    # Serialize final ownership decisions on the room itself. This prevents
+    # two stale proposals for different tenants from being confirmed at the
+    # same time and both becoming live.
+    Room.objects.select_for_update().get(pk=instance.room_id)
+
+    competing_live_tenancy = (
+        Tenancy.objects
+        .filter(
+            room_id=instance.room_id,
+            status__in=_LIVE_TENANCY_STATUSES,
+        )
+        .exclude(pk=instance.pk)
+        .first()
+    )
+
+    if competing_live_tenancy is not None:
+        raise ValidationError(
+            "This room already has a confirmed or active tenancy."
+        )
+
+
+@receiver(post_save, sender=Tenancy)
+def retire_competing_proposals_after_confirmation(
+    sender,
+    instance,
+    created,
+    **kwargs,
+):
+    """Retire stale proposals as soon as one tenancy wins the room."""
+    if instance.status not in _LIVE_TENANCY_STATUSES:
+        return
+
+    (
+        Tenancy.objects
+        .filter(
+            room_id=instance.room_id,
+            status=Tenancy.STATUS_PROPOSED,
+        )
+        .exclude(pk=instance.pk)
+        .update(status=Tenancy.STATUS_CANCELLED)
+    )
 
 
 @receiver(pre_save, sender=Tenancy)
