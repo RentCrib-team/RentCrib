@@ -957,7 +957,9 @@ class TenancyRespondSerializer(serializers.Serializer):
             # the tenancy information.
             #
             # Production must revert to 7 days before the tenancy end date.
-            tenancy.still_living_check_at = now + timedelta(minutes=10)
+            tenancy.still_living_check_at = timezone.make_aware(
+                timezone.datetime.combine(end_date, timezone.datetime.min.time())
+            ) - timedelta(minutes=10)
 
 
 
