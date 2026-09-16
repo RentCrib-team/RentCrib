@@ -4636,6 +4636,7 @@ class BookingSerializer(serializers.ModelSerializer):
     room_title = serializers.CharField(source="room.title", read_only=True)
     user_id = serializers.IntegerField(source="user.id", read_only=True)
     user_name = serializers.CharField(source="user.username", read_only=True)
+    seeker_avatar = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Booking
@@ -4644,6 +4645,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "room",
             "user_id",
             "user_name",
+            "seeker_avatar",
             "slot",
             "room_title",
             "start",
@@ -4655,6 +4657,7 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "user_id",
             "user_name",
+            "seeker_avatar",
             "created_at",
             "canceled_at",
         ]
@@ -4665,6 +4668,18 @@ class BookingSerializer(serializers.ModelSerializer):
             "end": {"required": False},
         }
 
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_seeker_avatar(self, obj) -> str:
+        profile = getattr(obj.user, "profile", None)
+        avatar = getattr(profile, "avatar", None)
+        if not avatar:
+            return ""
+        try:
+            url = avatar.url
+        except (AttributeError, ValueError):
+            return ""
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
 
 class BookingCreateRequestSerializer(serializers.Serializer):
     room = serializers.IntegerField(required=False)
