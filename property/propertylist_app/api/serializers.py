@@ -4056,13 +4056,18 @@ class MessageSerializer(serializers.ModelSerializer):
             }:
                 return []
 
-            tenancy_exists = Tenancy.objects.filter(
+            live_tenancy_exists = Tenancy.objects.filter(
                 room_id=booking.room_id,
                 landlord_id=owner_id,
                 tenant_id=booking.user_id,
+                status__in=[
+                    Tenancy.STATUS_PROPOSED,
+                    Tenancy.STATUS_CONFIRMED,
+                    Tenancy.STATUS_ACTIVE,
+                ],
             ).exists()
 
-            if tenancy_exists:
+            if live_tenancy_exists:
                 return []
 
             return ["update_tenancy"]
