@@ -2141,7 +2141,18 @@ class StartThreadFromRoomView(APIView):
         description="Start or reuse a message thread from a room, and optionally send an initial message.",
     )
     def post(self, request, room_id):
-        room = get_object_or_404(Room.objects.alive(), pk=room_id)
+        room = get_object_or_404(
+            Room.objects.alive()
+            .filter(
+                status=Room.Lifecycle.ACTIVE,
+                is_available=True,
+            )
+            .filter(
+                Q(paid_until__isnull=True)
+                | Q(paid_until__gte=timezone.localdate())
+            ),
+            pk=room_id,
+        )
 
         if room.property_owner == request.user:
             return Response(

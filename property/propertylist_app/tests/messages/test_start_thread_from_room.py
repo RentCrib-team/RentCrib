@@ -1,4 +1,5 @@
 import pytest
+from datetime import date, timedelta
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -490,3 +491,41 @@ def test_thread_detail_is_scoped_to_authoritative_active_role():
     assert MessageThread.objects.filter(
         pk=legacy_thread.pk
     ).exists()
+
+@pytest.mark.parametrize(
+    "room_changes",
+    [
+        {"status": "draft"},
+        {"is_available": False},
+        {"paid_until": date.today() - timedelta(days=1)},
+    ],
+    ids=["draft", "unavailable", "expired"],
+)
+def test_start_thread_from_nonpublic_room_is_rejected(room_changes):
+    landlord = _mk_user(f"blocked-landlord-{room_changes!s}")
+    seeker = _mk_user(f"blocked-seeker-{room_changes!s}")
+    room = _mk_room(
+        landlord,
+        status="active",
+        key_suffix="-blocked",
+    )
+
+    for field, value in room_changes.items():
+        setattr(room, field, value)
+    room.save(update_fields=list(room_changes))
+
+    client = APIClient()
+    client.force_authenticate(user=seeker)
+
+    response = client.post(
+        reverse(
+            "v1:start-thread-from-room",
+            kwargs={"room_id": room.id},
+        ),
+        {"body": "Can I view this room?"},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    assert not MessageThread.objects.filter(room=room).exists()
+    assert not Message.objects.filter(thread__room=room).exists()
