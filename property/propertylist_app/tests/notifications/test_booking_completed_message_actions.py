@@ -73,3 +73,66 @@ def test_completed_viewing_update_tenancy_action_disappears_for_both_parties_aft
 
     assert actions_for(landlord) == []
     assert actions_for(tenant) == []
+
+
+@pytest.mark.parametrize(
+    "historical_status",
+    [Tenancy.STATUS_ENDED, Tenancy.STATUS_CANCELLED],
+)
+def test_historical_tenancy_does_not_hide_update_tenancy_for_new_completed_viewing(
+    user_factory,
+    room_factory,
+    historical_status,
+):
+    landlord = user_factory(username=f"history_landlord_{historical_status}")
+    tenant = user_factory(username=f"history_tenant_{historical_status}")
+    room = room_factory(property_owner=landlord)
+
+    Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        proposed_by=landlord,
+        move_in_date=timezone.localdate() - timedelta(days=180),
+        duration_months=1,
+        status=historical_status,
+    )
+
+    now = timezone.now()
+    booking = Booking.objects.create(
+        user=tenant,
+        room=room,
+        start=now - timedelta(minutes=31),
+        end=now - timedelta(minutes=1),
+        status=Booking.STATUS_ACTIVE,
+        is_deleted=False,
+        canceled_at=None,
+    )
+
+    thread = get_or_create_canonical_thread(
+        landlord=landlord,
+        seeker=tenant,
+        room=room,
+    )
+    message = Message.objects.create(
+        thread=thread,
+        sender=landlord,
+        body="Viewing completed",
+        message_type=Message.TYPE_TEXT,
+        metadata={
+            "system_event": True,
+            "event_type": "booking_completed",
+            "booking_id": booking.id,
+            "room_id": room.id,
+        },
+    )
+
+    def actions_for(user):
+        request = SimpleNamespace(user=user)
+        return MessageSerializer(
+            message,
+            context={"request": request},
+        ).data["available_actions"]
+
+    assert actions_for(landlord) == ["update_tenancy"]
+    assert actions_for(tenant) == ["update_tenancy"]

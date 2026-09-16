@@ -3,11 +3,102 @@ from datetime import timedelta
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
-from propertylist_app.models import Tenancy
+from propertylist_app.models import Room, Tenancy
+from propertylist_app.services.tenancy_dates import compute_review_window
 
 
 _TENANCY_END_TRANSITION_FLAG = "_tenancy_just_ended"
+_LIVE_TENANCY_STATUSES = {
+    Tenancy.STATUS_CONFIRMED,
+    Tenancy.STATUS_ACTIVE,
+}
+
+
+@receiver(pre_save, sender=Tenancy)
+def guard_single_live_tenancy_per_room(sender, instance, **kwargs):
+    """Only one confirmed/active tenancy may own a room at a time."""
+    if not instance.room_id or instance.status not in _LIVE_TENANCY_STATUSES:
+        return
+
+    # Serialize final ownership decisions on the room itself. This prevents
+    # two stale proposals for different tenants from being confirmed at the
+    # same time and both becoming live.
+    Room.objects.select_for_update().get(pk=instance.room_id)
+
+    competing_live_tenancy = (
+        Tenancy.objects
+        .filter(
+            room_id=instance.room_id,
+            status__in=_LIVE_TENANCY_STATUSES,
+        )
+        .exclude(pk=instance.pk)
+        .first()
+    )
+
+    if competing_live_tenancy is not None:
+        raise ValidationError(
+            "This room already has a confirmed or active tenancy."
+        )
+
+
+@receiver(pre_save, sender=Tenancy)
+def normalise_still_living_schedule_on_confirmation(
+    sender,
+    instance,
+    update_fields=None,
+    **kwargs,
+):
+    """Anchor Timer 2 to tenancy end when a proposal becomes confirmed/active."""
+    if not instance.pk:
+        return
+
+    if instance.status not in {
+        Tenancy.STATUS_CONFIRMED,
+        Tenancy.STATUS_ACTIVE,
+    }:
+        return
+
+    if not instance.landlord_confirmed_at or not instance.tenant_confirmed_at:
+        return
+
+    previous_status = (
+        Tenancy.objects.filter(pk=instance.pk)
+        .values_list("status", flat=True)
+        .first()
+    )
+
+    if previous_status != Tenancy.STATUS_PROPOSED:
+        return
+
+    _, _, still_living_check_at = compute_review_window(
+        instance.move_in_date,
+        instance.duration_months,
+    )
+    instance.still_living_check_at = still_living_check_at
+
+
+@receiver(post_save, sender=Tenancy)
+def retire_competing_proposals_after_confirmation(
+    sender,
+    instance,
+    created,
+    **kwargs,
+):
+    """Retire stale proposals as soon as one tenancy wins the room."""
+    if instance.status not in _LIVE_TENANCY_STATUSES:
+        return
+
+    (
+        Tenancy.objects
+        .filter(
+            room_id=instance.room_id,
+            status=Tenancy.STATUS_PROPOSED,
+        )
+        .exclude(pk=instance.pk)
+        .update(status=Tenancy.STATUS_CANCELLED)
+    )
 
 
 @receiver(pre_save, sender=Tenancy)
