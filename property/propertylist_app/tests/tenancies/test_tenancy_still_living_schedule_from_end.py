@@ -1,5 +1,5 @@
 import pytest
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -42,7 +42,7 @@ def _client_for(user):
     return client
 
 
-def test_confirmed_tenancy_schedules_still_living_check_from_tenancy_end():
+def test_confirmed_tenancy_schedules_still_living_check_ten_minutes_after_confirmation():
     landlord = _make_user("schedule_landlord")
     tenant = _make_user("schedule_tenant")
     room = _make_room(landlord)
@@ -75,19 +75,20 @@ def test_confirmed_tenancy_schedules_still_living_check_from_tenancy_end():
     assert response.status_code == 201, response.data
     tenancy_id = response.data.get("data", response.data)["id"]
 
+    before_confirmation = timezone.now()
     response = tenant_client.post(
         f"{API_PREFIX}/tenancies/{tenancy_id}/respond/",
         data={"action": "confirm"},
         format="json",
     )
+    after_confirmation = timezone.now()
+
     assert response.status_code == 200, response.data
 
     tenancy = Tenancy.objects.get(id=tenancy_id)
-    tenancy_end_date = move_in_date + timezone.timedelta(days=0)
-    from dateutil.relativedelta import relativedelta
-    tenancy_end_date = tenancy_end_date + relativedelta(months=1)
-    end_midnight = timezone.make_aware(datetime.combine(tenancy_end_date, time.min))
-    expected_check_at = end_midnight - timedelta(minutes=10)
 
-    assert tenancy.still_living_check_at == expected_check_at
-    assert tenancy.still_living_check_at > timezone.now() + timedelta(days=20)
+    assert (
+        before_confirmation + timedelta(minutes=10)
+        <= tenancy.still_living_check_at
+        <= after_confirmation + timedelta(minutes=10)
+    )
