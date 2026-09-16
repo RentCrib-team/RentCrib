@@ -25,23 +25,22 @@ from propertylist_app.services.message_threads import (
 
 def expire_paid_listings(today: Optional[date] = None) -> int:
     """
-    Hide rooms whose paid_until is in the past and notify the owner.
+    Process rooms whose paid_until is in the past and notify the owner.
     Returns the count of rooms affected.
     """
     today = today or timezone.localdate()
     # Lock in a transaction to avoid partial updates
     with transaction.atomic():
-        to_hide = (
+        to_expire = (
             Room.objects
             .filter(paid_until__isnull=False, paid_until__lt=today, status="active", is_deleted=False)
             .select_related("property_owner")
         )
 
         updated_count = 0
-        for room in to_hide:
-            room.status = "hidden"
-            room.save(update_fields=["status"])
-            # Create a lightweight notification
+        for room in to_expire:
+            # Natural advert expiry is represented by the expired paid_until date.
+            # Keep status active so the listing is Ads Expired, not manually hidden.
             try:
                 profile, _ = UserProfile.objects.get_or_create(user=room.property_owner)
 
@@ -52,7 +51,7 @@ def expire_paid_listings(today: Optional[date] = None) -> int:
                         type="listing_expired",
                         title="Your listing has expired",
                         body=(
-                            f"Room '{room.title}' is now hidden because "
+                            f"Room '{room.title}' is no longer publicly visible because "
                             "the payment period ended."
                         ),
                         audience=Notification.Audience.LANDLORD,
