@@ -23,8 +23,14 @@ def test_existing_ending_reminder_bell_repairs_missing_email_without_duplicate(
         is_active=True,
     )
 
-    landlord = user_factory(username="ending_recovery_landlord")
-    tenant = user_factory(username="ending_recovery_tenant")
+    landlord = user_factory(
+        username="ending_recovery_landlord",
+        role="landlord",
+    )
+    tenant = user_factory(
+        username="ending_recovery_tenant",
+        role="seeker",
+    )
     room = room_factory(property_owner=landlord)
 
     now = timezone.now()
