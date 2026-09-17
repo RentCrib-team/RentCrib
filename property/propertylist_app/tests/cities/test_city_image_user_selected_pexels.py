@@ -2,6 +2,30 @@ from propertylist_app.services import city_image_user_selected_pexels as selecte
 from propertylist_app.services.city_image_autofill import CITY_MATCH_ALIASES, PEXELS_SEARCH_URL
 
 
+EXPECTED_PUBLIC_CITY_PHOTO_IDS = {
+    "southampton": "19916599",
+    "london": "30680312",
+    "birmingham": "33175822",
+    "manchester": "34760018",
+    "liverpool": "12953548",
+    "leeds": "16666012",
+    "bristol": "24880409",
+    "sheffield": "12698033",
+    "newcastle-upon-tyne": "34175710",
+    "cambridge": "32783000",
+    "oxford": "18283322",
+    "bath": "32038429",
+    "york": "35701057",
+    "nottingham": "37228472",
+    "leicester": "30890693",
+    "coventry": "35751281",
+    "exeter": "18218243",
+    "lancaster": "36093695",
+    "brighton-hove": "9161809",
+    "wrexham": "35714326",
+}
+
+
 class FakeImage:
     def __init__(self, name):
         self.name = name
@@ -78,6 +102,12 @@ def _catalogue(*cities):
     )
 
 
+def test_public_city_vetted_photo_map_is_exactly_twenty_and_unique():
+    assert selected.USER_SELECTED_PEXELS_PHOTO_IDS == EXPECTED_PUBLIC_CITY_PHOTO_IDS
+    assert len(selected.USER_SELECTED_PEXELS_PHOTO_IDS) == 20
+    assert len(set(selected.USER_SELECTED_PEXELS_PHOTO_IDS.values())) == 20
+
+
 def test_user_selected_service_uses_exact_southampton_and_brighton_photos_and_global_uniqueness(monkeypatch):
     southampton = FakeCity(pk=1, name="Southampton", slug="southampton")
     brighton = FakeCity(pk=2, name="Brighton & Hove", slug="brighton-hove")
@@ -135,6 +165,7 @@ def test_user_selected_service_uses_exact_southampton_and_brighton_photos_and_gl
     assert "brighton-hove" not in CITY_MATCH_ALIASES
 
     result = selected.apply_user_selected_pexels_city_images(
+        slugs=["southampton", "brighton-hove"],
         city_model=FakeCityModel,
         catalogue=_catalogue(southampton, brighton, london),
         replace_image=fake_replace,
