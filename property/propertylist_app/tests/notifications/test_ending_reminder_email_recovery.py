@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from notifications.models import NotificationTemplate, OutboundNotification
@@ -79,11 +80,16 @@ def test_existing_ending_reminder_bell_repairs_missing_email_without_duplicate(
 
     remaining_notifications = list(
         Notification.objects
-        .filter(user=landlord)
+        .filter(user_id=landlord.id)
         .values("id", "type", "target_type", "target_id", "title")
     )
+    diagnostics = {
+        "landlord_exists": get_user_model().objects.filter(pk=landlord.id).exists(),
+        "tenancy_exists": Tenancy.objects.filter(pk=tenancy.id).exists(),
+        "all_landlord_notifications": remaining_notifications,
+    }
 
-    assert bell_qs.count() == 1, remaining_notifications
+    assert bell_qs.count() == 1, diagnostics
     assert email_qs.count() == 1
 
     # A later sweep must not duplicate either delivery once recovery succeeds.
