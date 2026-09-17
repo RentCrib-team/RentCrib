@@ -72,12 +72,13 @@ def test_public_room_surfaces_only_show_current_advertisable_rooms(
     )
 
     allowed_ids = {visible.id}
-    forbidden_ids = {
-        unavailable.id,
-        never_paid.id,
-        expired.id,
-        draft.id,
+    forbidden_rooms = {
+        unavailable.id: unavailable,
+        never_paid.id: never_paid,
+        expired.id: expired,
+        draft.id: draft,
     }
+    forbidden_ids = set(forbidden_rooms)
 
     client = APIClient()
 
@@ -100,3 +101,25 @@ def test_public_room_surfaces_only_show_current_advertisable_rooms(
     assert forbidden_ids.isdisjoint(featured_ids)
     assert forbidden_ids.isdisjoint(latest_ids)
     assert homepage["stats"]["total_active_rooms"] == 1
+
+    # Public users must not be able to bypass discovery rules by opening an
+    # old room-detail URL directly.
+    visible_detail = client.get(
+        reverse("api:room-detail", kwargs={"pk": visible.id})
+    )
+    assert visible_detail.status_code == 200, visible_detail.data
+
+    for room in forbidden_rooms.values():
+        detail = client.get(
+            reverse("api:room-detail", kwargs={"pk": room.id})
+        )
+        assert detail.status_code == 404, detail.data
+
+    # The landlord still needs private access to manage, edit, pay for, or
+    # relist their own non-public rooms.
+    client.force_authenticate(user=owner)
+    for room in forbidden_rooms.values():
+        detail = client.get(
+            reverse("api:room-detail", kwargs={"pk": room.id})
+        )
+        assert detail.status_code == 200, detail.data

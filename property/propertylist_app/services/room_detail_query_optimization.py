@@ -4,13 +4,14 @@ from django.shortcuts import get_object_or_404
 
 from propertylist_app.api.views.rooms import RoomDetailAV
 from propertylist_app.models import Room
+from propertylist_app.services.public_room_visibility import _public_rooms_queryset
 
 
 _INSTALLED = False
 
 
 def _optimized_get_room(self, request, pk):
-    """Fetch the room with serializer-related foreign keys already joined."""
+    """Fetch owner-private rooms or a genuinely public room with related data joined."""
     related = (
         "category",
         "property_owner",
@@ -32,7 +33,7 @@ def _optimized_get_room(self, request, pk):
             return owned_room
 
     return get_object_or_404(
-        Room.objects.alive().select_related(*related),
+        _public_rooms_queryset().select_related(*related),
         pk=pk,
     )
 
