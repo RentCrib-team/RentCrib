@@ -21,15 +21,36 @@ from propertylist_app.services.city_image_reconciliation import (
 
 PEXELS_PHOTO_URL = "https://api.pexels.com/v1/photos/{photo_id}"
 
-# Exact Pexels photos manually selected by the product owner from the UI.
+# Exact Pexels photos vetted for the 20 public city-directory cards.
+# Southampton and Brighton & Hove are the product owner's manual selections;
+# the remaining entries use Pexels pages whose own city/landmark metadata
+# identifies the target city.
 USER_SELECTED_PEXELS_PHOTO_IDS = {
     "southampton": "19916599",
+    "london": "30680312",
+    "birmingham": "33175822",
+    "manchester": "34760018",
+    "liverpool": "12953548",
+    "leeds": "16666012",
+    "bristol": "24880409",
+    "sheffield": "12698033",
+    "newcastle-upon-tyne": "34175710",
+    "cambridge": "32783000",
+    "oxford": "18283322",
+    "bath": "32038429",
+    "york": "35701057",
+    "nottingham": "37228472",
+    "leicester": "30890693",
+    "coventry": "35751281",
+    "exeter": "18218243",
+    "lancaster": "36093695",
     "brighton-hove": "9161809",
+    "wrexham": "35714326",
 }
 
 # Brighton is part of the official Brighton & Hove city entry, while Pexels
 # describes the selected image simply as Brighton. This alias applies only
-# while this explicit one-off replacement service is running.
+# while this explicit replacement service is running.
 USER_SELECTED_MATCH_ALIASES = {
     "brighton-hove": ("Brighton & Hove", "Brighton"),
 }
@@ -100,7 +121,7 @@ def apply_user_selected_pexels_city_images(
     api_key=None,
     progress=None,
 ):
-    """Replace only Southampton/Brighton with the exact owner-selected Pexels photos."""
+    """Replace selected public city cards with exact vetted Pexels photos."""
 
     if city_model is None or catalogue is None:
         runtime_city_model, runtime_catalogue, _ = _runtime_dependencies()
