@@ -83,12 +83,18 @@ class TenancyStillLivingConfirmView(APIView):
 
         now = timezone.now()
 
-        active_status = getattr(Tenancy, "STATUS_ACTIVE", "active")
-        if getattr(t, "status", None) != active_status:
+        allowed_statuses = {
+            getattr(Tenancy, "STATUS_CONFIRMED", "confirmed"),
+            getattr(Tenancy, "STATUS_ACTIVE", "active"),
+        }
+        if getattr(t, "status", None) not in allowed_statuses:
             return Response(
                 {
                     "ok": False,
-                    "message": "Still-living confirmation is only allowed for active tenancies.",
+                    "message": (
+                        "Still-living confirmation is only allowed for "
+                        "confirmed or active tenancies."
+                    ),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
