@@ -77,7 +77,13 @@ def test_existing_ending_reminder_bell_repairs_missing_email_without_duplicate(
 
     task_tenancy_prompts_sweep()
 
-    assert bell_qs.count() == 1
+    remaining_notifications = list(
+        Notification.objects
+        .filter(user=landlord)
+        .values("id", "type", "target_type", "target_id", "title")
+    )
+
+    assert bell_qs.count() == 1, remaining_notifications
     assert email_qs.count() == 1
 
     # A later sweep must not duplicate either delivery once recovery succeeds.
