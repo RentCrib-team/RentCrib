@@ -5,7 +5,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from propertylist_app.models import Room, Tenancy
+from propertylist_app.models import Message, Room, Tenancy
 
 
 _TENANCY_END_TRANSITION_FLAG = "_tenancy_just_ended"
@@ -124,6 +124,50 @@ def retire_competing_proposals_after_confirmation(
         .exclude(pk=instance.pk)
         .update(status=Tenancy.STATUS_CANCELLED)
     )
+
+
+@receiver(pre_save, sender=Tenancy)
+def prevent_review_close_before_ending_reminder(
+    sender,
+    instance,
+    update_fields=None,
+    **kwargs,
+):
+    """Do not let a stale review clock skip the ending-reminder stage."""
+    if not instance.pk or instance.status != Tenancy.STATUS_ENDED:
+        return
+
+    if update_fields is not None and "status" not in update_fields:
+        return
+
+    previous_status = (
+        Tenancy.objects.filter(pk=instance.pk)
+        .values_list("status", flat=True)
+        .first()
+    )
+
+    if previous_status not in _LIVE_TENANCY_STATUSES:
+        return
+
+    # This guard is intentionally limited to review-driven closure. Other
+    # explicit cancellation/end flows that do not have a due review window
+    # keep their existing behaviour.
+    if instance.review_open_at is None or instance.review_open_at > timezone.now():
+        return
+
+    ending_reminder_exists = Message.objects.filter(
+        metadata__tenancy_id=instance.pk,
+        metadata__event_type="still_living_check",
+        metadata__system_event=True,
+    ).exists()
+
+    if ending_reminder_exists:
+        return
+
+    # A legacy/backfilled review_open_at can already be in the past while
+    # Timer 2 is still pending. Keep the tenancy live so the reminder sweep can
+    # issue the ending reminder first and then establish the fresh review clock.
+    instance.status = previous_status
 
 
 @receiver(pre_save, sender=Tenancy)
