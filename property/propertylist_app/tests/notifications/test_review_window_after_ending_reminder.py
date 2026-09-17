@@ -77,17 +77,24 @@ def test_review_window_repairs_from_original_ending_reminder(
         still_living_confirmed_at=None,
     )
 
+    recovery_started_at = timezone.now()
     task_tenancy_prompts_sweep()
+    recovery_finished_at = timezone.now()
 
     tenancy.refresh_from_db()
     ending_message.refresh_from_db()
 
-    assert tenancy.review_open_at == (
-        reminder_dropped_at + timedelta(minutes=10)
+    # The reminder is already overdue. The review notification must open
+    # a fresh window now, rather than create a deadline in the past.
+    assert (
+        recovery_started_at
+        <= tenancy.review_open_at
+        <= recovery_finished_at
     )
     assert tenancy.review_deadline_at == (
         tenancy.review_open_at + timedelta(minutes=10)
     )
+    assert tenancy.review_deadline_at > recovery_finished_at
     assert tenancy.status == Tenancy.STATUS_ENDED
     assert ending_message.metadata["available_actions"] == []
 
