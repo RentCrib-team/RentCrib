@@ -181,14 +181,81 @@ def test_user_selected_service_uses_exact_southampton_and_brighton_photos_and_gl
         "city_id": 1,
         "photo_id": "19916599",
         "preferred_time": "night",
-        "used_photo_ids": {"old-southampton", "old-brighton", "used-london"},
-        "used_hashes": {"hash-s", "hash-b", "hash-l"},
+        "used_photo_ids": {"old-brighton", "used-london"},
+        "used_hashes": {"hash-b", "hash-l"},
     }
-    assert calls[1]["city_id"] == 2
-    assert calls[1]["photo_id"] == "9161809"
-    assert "19916599" in calls[1]["used_photo_ids"]
-    assert "new-1" in calls[1]["used_hashes"]
+    assert calls[1] == {
+        "city_id": 2,
+        "photo_id": "9161809",
+        "preferred_time": "day",
+        "used_photo_ids": {"19916599", "used-london"},
+        "used_hashes": {"new-1", "hash-l"},
+    }
     assert "brighton-hove" not in CITY_MATCH_ALIASES
+
+
+def test_user_selected_service_allows_reapplying_the_same_selected_photo_to_its_own_city(monkeypatch):
+    southampton = FakeCity(pk=1, name="Southampton", slug="southampton")
+    london = FakeCity(pk=2, name="London", slug="london")
+    FakeCityModel.objects = FakeManager([southampton, london])
+
+    monkeypatch.setattr(
+        selected,
+        "_city_image_records",
+        lambda cities: [
+            {"city": southampton, "photo_id": "19916599", "content_sha256": "hash-s", "is_night": True},
+            {"city": london, "photo_id": "used-london", "content_sha256": "hash-l", "is_night": False},
+        ],
+    )
+
+    def fake_get(url, **kwargs):
+        return FakeResponse(
+            {
+                "id": 19916599,
+                "alt": "A sleek modern office building illuminated at night in Southampton city center",
+                "url": "https://www.pexels.com/photo/carnival-house-in-southampton-in-england-19916599/",
+                "src": {"large": "https://images.pexels.com/southampton.jpg"},
+            }
+        )
+
+    calls = []
+
+    def fake_replace(city_id, **kwargs):
+        calls.append(
+            {
+                "city_id": city_id,
+                "used_photo_ids": set(kwargs["used_photo_ids"]),
+                "used_hashes": set(kwargs["used_hashes"]),
+            }
+        )
+        return {
+            "status": "imported",
+            "provider_photo_id": "19916599",
+            "content_sha256": "new-southampton-hash",
+        }
+
+    result = selected.apply_user_selected_pexels_city_images(
+        slugs=["southampton"],
+        city_model=FakeCityModel,
+        catalogue=_catalogue(southampton, london),
+        replace_image=fake_replace,
+        http_get=fake_get,
+        api_key="test-key",
+    )
+
+    assert result["status"] == "ok"
+    assert result["failed"] == []
+    assert result["skipped"] == []
+    assert result["replaced"] == [
+        {"city_id": 1, "city": "Southampton", "provider_photo_id": "19916599"}
+    ]
+    assert calls == [
+        {
+            "city_id": 1,
+            "used_photo_ids": {"used-london"},
+            "used_hashes": {"hash-l"},
+        }
+    ]
 
 
 def test_user_selected_service_rejects_wrong_live_metadata_without_replacing(monkeypatch):
