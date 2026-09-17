@@ -21,6 +21,24 @@ def guard_single_live_tenancy_per_room(sender, instance, **kwargs):
     if not instance.room_id or instance.status not in _LIVE_TENANCY_STATUSES:
         return
 
+    # The row lock is only needed when this save is acquiring live ownership
+    # of a room. Routine saves to an already-live tenancy (for example the
+    # Celery tenancy reminder/review sweep updating review timestamps) run in
+    # normal autocommit mode and must not try to use select_for_update().
+    if instance.pk:
+        previous = (
+            Tenancy.objects
+            .filter(pk=instance.pk)
+            .values("status", "room_id")
+            .first()
+        )
+        if (
+            previous is not None
+            and previous["status"] in _LIVE_TENANCY_STATUSES
+            and previous["room_id"] == instance.room_id
+        ):
+            return
+
     # Serialize final ownership decisions on the room itself. This prevents
     # two stale proposals for different tenants from being confirmed at the
     # same time and both becoming live.
