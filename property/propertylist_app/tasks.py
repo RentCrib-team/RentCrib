@@ -1308,17 +1308,24 @@ def task_tenancy_prompts_sweep() -> int:
 
         # TEMPORARY QA RULE:
         # When neither party has updated the tenancy information,
-        # open the review window 10 minutes after the ending reminder
-        # is first created. Production must revert to end date + 7 days.
+        # open the review window exactly 10 minutes after the ending
+        # reminder was first posted. Reuse the original message timestamp
+        # on later sweeps so an overwritten deadline is repaired without
+        # sliding the update window forward.
         reminder_created = bool(
             landlord_notification_created
             or tenant_notification_created
+        )
+        reminder_dropped_at = (
+            prompt_message.created
+            if prompt_message is not None
+            else (now if reminder_created else None)
         )
 
         if (
             not landlord_done
             and not tenant_done
-            and reminder_created
+            and reminder_dropped_at is not None
         ):
             # TEMPORARY QA RULE:
             # QA: Open reviews 10 minutes after the ending reminder,
@@ -1329,20 +1336,27 @@ def task_tenancy_prompts_sweep() -> int:
             #
             #     tenancy.review_open_at + timedelta(days=30)
             #
-            tenancy.review_open_at = (
-                now + timedelta(minutes=10)
-            )
-
-            tenancy.review_deadline_at = (
-                tenancy.review_open_at
+            review_open_at = (
+                reminder_dropped_at
                 + timedelta(minutes=10)
             )
-            tenancy.save(
-                update_fields=[
-                    "review_open_at",
-                    "review_deadline_at",
-                ]
+            review_deadline_at = (
+                review_open_at
+                + timedelta(minutes=10)
             )
+
+            if (
+                tenancy.review_open_at != review_open_at
+                or tenancy.review_deadline_at != review_deadline_at
+            ):
+                tenancy.review_open_at = review_open_at
+                tenancy.review_deadline_at = review_deadline_at
+                tenancy.save(
+                    update_fields=[
+                        "review_open_at",
+                        "review_deadline_at",
+                    ]
+                )
             
     
     
