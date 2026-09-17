@@ -1308,10 +1308,10 @@ def task_tenancy_prompts_sweep() -> int:
 
         # TEMPORARY QA RULE:
         # When neither party has updated the tenancy information,
-        # open the review window exactly 10 minutes after the ending
-        # reminder was first posted. Reuse the original message timestamp
-        # on later sweeps so an overwritten deadline is repaired without
-        # sliding the update window forward.
+        # the review notification becomes due 10 minutes after the
+        # ending reminder. If a delayed worker is recovering an overdue
+        # reminder, start the review window when this sweep emits the
+        # notification so users still receive the full 10 minutes.
         reminder_created = bool(
             landlord_notification_created
             or tenant_notification_created
@@ -1327,18 +1327,19 @@ def task_tenancy_prompts_sweep() -> int:
             and not tenant_done
             and reminder_dropped_at is not None
         ):
-            # TEMPORARY QA RULE:
-            # QA: Open reviews 10 minutes after the ending reminder,
-            # then keep the private/double-blind review window open for 10 minutes.
-            #
-            # PRODUCTION RULE:
-            # review_deadline_at must be:
-            #
-            #     tenancy.review_open_at + timedelta(days=30)
-            #
-            review_open_at = (
+            scheduled_review_open_at = (
                 reminder_dropped_at
                 + timedelta(minutes=10)
+            )
+
+            # The minutely sweep can run after the exact due time. Use
+            # the actual notification sweep as the start of an overdue
+            # review window instead of creating an already-shortened or
+            # already-expired window.
+            review_open_at = (
+                now
+                if scheduled_review_open_at <= now
+                else scheduled_review_open_at
             )
             review_deadline_at = (
                 review_open_at
