@@ -939,8 +939,29 @@ def task_tenancy_prompts_sweep() -> int:
             else "no-duration"
         )
 
+        latest_accepted_extension = (
+            tenancy.extensions
+            .filter(
+                status="accepted",
+                responded_at__isnull=False,
+            )
+            .order_by(
+                "-responded_at",
+                "-id",
+            )
+            .only("id")
+            .first()
+        )
+
+        cycle_token = (
+            f"renewal-{latest_accepted_extension.id}"
+            if latest_accepted_extension is not None
+            else "initial"
+        )
+
         event_key = (
             f"tenancy:{tenancy.id}:"
+            f"{cycle_token}:"
             f"{cycle_start}:"
             f"{cycle_duration}:"
             f"{event_type}"
