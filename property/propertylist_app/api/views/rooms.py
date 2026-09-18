@@ -233,7 +233,6 @@ def _optimised_room_read_queryset(queryset, request):
             queryset=RoomImage.objects.filter(
                 status__in=["approved", "pending", "rejected"],
             ).order_by("id"),
-            to_attr="prefetched_room_images",
         )
     )
 
