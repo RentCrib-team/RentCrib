@@ -95,7 +95,7 @@ def test_homepage_popular_cities_are_first_twelve_population_ranked_public_citie
         slug="southampton",
         is_active=True,
         is_featured=True,
-        display_order=-1,
+        display_order=0,
     )
 
     response = api_client.get(HOME_URL)
