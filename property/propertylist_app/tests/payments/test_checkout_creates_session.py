@@ -1,3 +1,4 @@
+from decimal import Decimal
 import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -70,7 +71,7 @@ def test_checkout_creates_session_for_owner_room(monkeypatch):
     # Assert DB side-effects
     p = Payment.objects.get(room=room)
     assert p.user == owner
-    assert p.amount == 7.99
+    assert p.amount == Decimal("7.99")
     assert p.currency == "GBP"
     assert p.status == "created"
     assert p.stripe_checkout_session_id == "cs_test_456"
