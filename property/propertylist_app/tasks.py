@@ -939,19 +939,67 @@ def task_tenancy_prompts_sweep() -> int:
             else "no-duration"
         )
 
-        event_key = (
+        legacy_event_key = (
             f"tenancy:{tenancy.id}:"
             f"{cycle_start}:"
             f"{cycle_duration}:"
             f"{event_type}"
         )
 
-        existing_message = (
-            Message.objects
-            .select_related("thread")
-            .filter(metadata__event_key=event_key)
+        # A renewal is a new reminder/review cycle even when its accepted
+        # dates and duration are identical to the previous cycle. Use the
+        # accepted extension row as the stable cycle identity so same-terms
+        # renewals cannot reuse an older ending-reminder message.
+        latest_accepted_extension = (
+            tenancy.extensions
+            .filter(
+                status="accepted",
+                responded_at__isnull=False,
+            )
+            .order_by(
+                "-responded_at",
+                "-id",
+            )
             .first()
         )
+
+        if latest_accepted_extension is None:
+            event_key = legacy_event_key
+            existing_message = (
+                Message.objects
+                .select_related("thread")
+                .filter(metadata__event_key=event_key)
+                .first()
+            )
+        else:
+            event_key = (
+                f"{legacy_event_key}:"
+                f"renewal:{latest_accepted_extension.id}"
+            )
+
+            existing_message = (
+                Message.objects
+                .select_related("thread")
+                .filter(metadata__event_key=event_key)
+                .first()
+            )
+
+            if existing_message is None:
+                # Backward compatibility for a legitimate renewal prompt
+                # created before renewal IDs were added to event keys. It is
+                # current-cycle only if it was created after this extension
+                # was accepted; an older same-terms prompt must not match.
+                existing_message = (
+                    Message.objects
+                    .select_related("thread")
+                    .filter(
+                        metadata__event_key=legacy_event_key,
+                        created__gte=(
+                            latest_accepted_extension.responded_at
+                        ),
+                    )
+                    .first()
+                )
 
         if existing_message:
             return existing_message.thread, existing_message
