@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 
 #Django
+from django.db import transaction
 from django.db.models import (
     Case,
     CharField,
@@ -47,7 +48,7 @@ from drf_spectacular.types import OpenApiTypes
 
 #Project
 from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
-from propertylist_app.services.image import compress_listing_upload, should_auto_approve_upload
+from propertylist_app.services.image import compress_listing_upload
 from propertylist_app.services.listing_entitlements import consume_complimentary_listing_benefit
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.utils.cache import bump_buster
@@ -1007,98 +1008,45 @@ class RoomPhotoUploadView(APIView):
 
         
 
-        # Run automated moderation and persist the complete outcome.
-        try:
-            import logging
+        # Automated AI moderation must not hold this upload request open.
+        # The image is already safely stored as pending; after commit, queue a
+        # worker task to perform Google Vision/Gemini moderation.
+        image_id = image.id
 
-            from django.utils import timezone
-
-            file_obj.seek(0)
-
-            moderation_result = should_auto_approve_upload(
-                file_obj
-            )
-
-            # Backward compatibility for tests or temporary monkeypatches
-            # that still return True or False.
-            if isinstance(moderation_result, bool):
-                moderation_result = {
-                    "approved": moderation_result,
-                    "reason": (
-                        RoomImage.MODERATION_AUTO_APPROVED
-                        if moderation_result
-                        else RoomImage.MODERATION_MANUAL_REVIEW
-                    ),
-                    "notes": (
-                        "Automatically approved."
-                        if moderation_result
-                        else "Held for manual moderation review."
-                    ),
-                }
-
-            approved = bool(
-                moderation_result.get("approved")
-            )
-
-            image.status = (
-                RoomImage.STATUS_APPROVED
-                if approved
-                else RoomImage.STATUS_PENDING
-            )
-
-            image.moderation_reason = (
-                moderation_result.get("reason")
-                or (
-                    RoomImage.MODERATION_AUTO_APPROVED
-                    if approved
-                    else RoomImage.MODERATION_MANUAL_REVIEW
+        def _enqueue_moderation():
+            try:
+                from propertylist_app.image_moderation_tasks import (
+                    moderate_room_image,
                 )
-            )
 
-            image.moderation_notes = (
-                moderation_result.get("notes")
-                or "Moderation completed without additional notes."
-            )
+                moderate_room_image.apply_async(
+                    args=[image_id],
+                    retry=False,
+                )
+            except Exception:
+                import logging
 
-            image.moderation_checked_at = timezone.now()
+                logging.getLogger(__name__).exception(
+                    "Room image moderation enqueue failed for RoomImage id=%s",
+                    image_id,
+                )
 
-            image.save(
-                update_fields=[
-                    "status",
-                    "moderation_reason",
-                    "moderation_notes",
-                    "moderation_checked_at",
-                ]
-            )
+                RoomImage.objects.filter(
+                    pk=image_id,
+                    status=RoomImage.STATUS_PENDING,
+                    moderation_reason=RoomImage.MODERATION_AWAITING_CHECK,
+                ).update(
+                    moderation_reason=(
+                        RoomImage.MODERATION_SERVICE_UNAVAILABLE
+                    ),
+                    moderation_notes=(
+                        "Automated moderation could not be queued. "
+                        "The image remains pending for manual review."
+                    ),
+                    moderation_checked_at=timezone.now(),
+                )
 
-        except Exception as exc:
-            import logging
-
-            from django.utils import timezone
-
-            logging.getLogger(__name__).exception(
-                "Automated moderation failed for RoomImage id=%s",
-                image.id,
-            )
-
-            image.status = RoomImage.STATUS_PENDING
-            image.moderation_reason = (
-                RoomImage.MODERATION_SERVICE_UNAVAILABLE
-            )
-            image.moderation_notes = (
-                "Unexpected moderation workflow failure. "
-                f"{exc.__class__.__name__}: {exc}"
-            )[:2000]
-            image.moderation_checked_at = timezone.now()
-
-            image.save(
-                update_fields=[
-                    "status",
-                    "moderation_reason",
-                    "moderation_notes",
-                    "moderation_checked_at",
-                ]
-            )
+        transaction.on_commit(_enqueue_moderation)
         # Response (serializer safe context)
         return ok_response(
             RoomImageSerializer(

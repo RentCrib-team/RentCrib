@@ -59,8 +59,13 @@ def test_e2e_landlord_tenant_full_lifecycle(monkeypatch, user_factory, room_fact
 
         import propertylist_app.api.views as api_views
         import propertylist_app.api.views.rooms as room_views
+        from propertylist_app.services import image as image_service
 
-        monkeypatch.setattr(room_views, "should_auto_approve_upload", lambda _f: True)
+        monkeypatch.setattr(
+            image_service,
+            "should_auto_approve_upload",
+            lambda _f: True,
+        )
 
         if hasattr(room_views, "validate_listing_photos"):
             monkeypatch.setattr(room_views, "validate_listing_photos", lambda files, max_mb=5: None)
