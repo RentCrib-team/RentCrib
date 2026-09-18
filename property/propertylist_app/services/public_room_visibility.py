@@ -25,14 +25,26 @@ def install_public_room_visibility_contract():
     from propertylist_app.api.pagination import StandardLimitOffsetPagination
     from propertylist_app.api.serializers import RoomSerializer
     from propertylist_app.api.views.common import ok_response, _wrap_response_success
-    from propertylist_app.api.views.rooms import RoomAV, RoomListAlt, RoomListGV
+    from propertylist_app.api.views.rooms import (
+        RoomAV,
+        RoomListAlt,
+        RoomListGV,
+        _optimised_room_read_queryset,
+    )
     from propertylist_app.api.views import public_locations
 
     if getattr(RoomAV, "_public_visibility_contract_installed", False):
         return
 
     def room_list_get(self, request, *args, **kwargs):
-        qs = _public_rooms_queryset().order_by("-id")
+        cached = self._get_cached_response(request)
+        if cached is not None:
+            return cached
+
+        qs = _optimised_room_read_queryset(
+            _public_rooms_queryset().order_by("-id"),
+            request,
+        )
         paginator = StandardLimitOffsetPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
         serializer = RoomSerializer(
@@ -40,9 +52,10 @@ def install_public_room_visibility_contract():
             many=True,
             context={"request": request},
         )
-        return _wrap_response_success(
+        response = _wrap_response_success(
             paginator.get_paginated_response(serializer.data)
         )
+        return self._store_cached_response(request, response)
 
     def room_list_gv_queryset(self):
         return _public_rooms_queryset()

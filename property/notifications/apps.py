@@ -1,9 +1,14 @@
 # notifications/apps.py
 from __future__ import annotations
 
+import logging
+
 from django.apps import AppConfig
 from django.conf import settings
 from django.db.models.signals import post_migrate
+
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_notification_periodic_tasks(**kwargs) -> None:
@@ -118,12 +123,65 @@ def ensure_notification_periodic_tasks(**kwargs) -> None:
     )
 
 
+def enqueue_immediate_outbound_email(sender, instance, created, **kwargs) -> None:
+    """
+    Queue newly-created email notifications for immediate Celery delivery.
+
+    Future-scheduled notifications are left for the existing periodic sweep.
+    Tests opt out by default so existing unit tests can create notification
+    rows without unexpectedly invoking Celery.
+    """
+    if not created or getattr(settings, "TESTING", False):
+        return
+
+    from django.db import transaction
+    from django.utils import timezone
+
+    from notifications.models import NotificationTemplate, OutboundNotification
+
+    if instance.channel != NotificationTemplate.CHANNEL_EMAIL:
+        return
+
+    if instance.status != OutboundNotification.STATUS_QUEUED:
+        return
+
+    if instance.scheduled_for and instance.scheduled_for > timezone.now():
+        return
+
+    notification_id = instance.pk
+
+    def _dispatch() -> None:
+        from notifications.tasks import deliver_outbound_notification
+
+        try:
+            deliver_outbound_notification.delay(notification_id)
+        except Exception:
+            # The periodic sweep remains the recovery path if the broker is
+            # temporarily unavailable. Never break the business request after
+            # its database transaction has already committed.
+            logger.exception(
+                "Immediate email enqueue failed; periodic fallback will retry",
+                extra={"notification_id": notification_id},
+            )
+
+    transaction.on_commit(_dispatch)
+
+
 class NotificationsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "notifications"
 
     def ready(self) -> None:
+        from django.db.models.signals import post_save
+
+        from notifications.models import OutboundNotification
+
         post_migrate.connect(
             ensure_notification_periodic_tasks,
             sender=self,
+        )
+        post_save.connect(
+            enqueue_immediate_outbound_email,
+            sender=OutboundNotification,
+            dispatch_uid="notifications.immediate_outbound_email",
         )

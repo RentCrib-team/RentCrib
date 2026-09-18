@@ -758,10 +758,20 @@ class TenancyProposalSerializer(serializers.Serializer):
             )
 
         # A tenant-created claim that expired or was rejected must not
-        # be repeatedly resubmitted by the tenant.
+        # be repeatedly resubmitted from the same completed viewing.
+        # Historical cancelled claims must not poison a later genuine viewing
+        # for the same room. booking_id/source_booking is the strongest cycle
+        # boundary available, including for legacy rooms with relisted_at=None.
+        #
+        # Older rows may have source_booking=NULL. If such a claim was created
+        # after the current viewing started, conservatively treat it as the same
+        # viewing cycle and keep the anti-resubmission block. A genuinely older
+        # legacy claim predating the fresh viewing does not block the new claim.
         #
         # The landlord may, however, create fresh tenancy information
         # for the same tenant if the tenancy is genuine.
+        source_booking = validated_data.get("source_booking")
+
         expired_or_rejected_tenant_claim = next(
             (
                 existing
@@ -769,6 +779,14 @@ class TenancyProposalSerializer(serializers.Serializer):
                 if (
                     existing.status == Tenancy.STATUS_CANCELLED
                     and existing.proposed_by_id == tenant.id
+                    and (
+                        source_booking is None
+                        or existing.source_booking_id == source_booking.id
+                        or (
+                            existing.source_booking_id is None
+                            and existing.created_at >= source_booking.start
+                        )
+                    )
                 )
             ),
             None,
@@ -938,7 +956,7 @@ class TenancyRespondSerializer(serializers.Serializer):
             #     timezone.datetime.combine(end_date, timezone.datetime.min.time())
             # ) + timedelta(days=7)
 
-            # Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
+            # Temporary frontend testing rule: review opens 10 minutes after tenancy ends.
             tenancy.review_open_at = timezone.make_aware(
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
             ) + timedelta(minutes=10)
@@ -2372,7 +2390,17 @@ class RoomSerializer(serializers.ModelSerializer):
         """
         Return all uploaded images so the serializer can calculate one
         overall public image-verification status.
+
+        Room read endpoints may prefetch roomimage_set to avoid
+        one image query per room. Fall back to the related manager for views
+        that do not use the optimised queryset.
         """
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "roomimage_set"
+        )
+        if prefetched is not None:
+            return list(prefetched)
+
         return list(
             obj.roomimage_set.filter(
                 status__in=["approved", "pending", "rejected"]

@@ -5,7 +5,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from propertylist_app.models import Room, Tenancy
+from propertylist_app.models import Message, Room, Tenancy
 
 
 _TENANCY_END_TRANSITION_FLAG = "_tenancy_just_ended"
@@ -20,6 +20,24 @@ def guard_single_live_tenancy_per_room(sender, instance, **kwargs):
     """Only one confirmed/active tenancy may own a room at a time."""
     if not instance.room_id or instance.status not in _LIVE_TENANCY_STATUSES:
         return
+
+    # The row lock is only needed when this save is acquiring live ownership
+    # of a room. Routine saves to an already-live tenancy (for example the
+    # Celery tenancy reminder/review sweep updating review timestamps) run in
+    # normal autocommit mode and must not try to use select_for_update().
+    if instance.pk:
+        previous = (
+            Tenancy.objects
+            .filter(pk=instance.pk)
+            .values("status", "room_id")
+            .first()
+        )
+        if (
+            previous is not None
+            and previous["status"] in _LIVE_TENANCY_STATUSES
+            and previous["room_id"] == instance.room_id
+        ):
+            return
 
     # Serialize final ownership decisions on the room itself. This prevents
     # two stale proposals for different tenants from being confirmed at the
@@ -106,6 +124,54 @@ def retire_competing_proposals_after_confirmation(
         .exclude(pk=instance.pk)
         .update(status=Tenancy.STATUS_CANCELLED)
     )
+
+
+@receiver(pre_save, sender=Tenancy)
+def prevent_review_close_before_ending_reminder(
+    sender,
+    instance,
+    update_fields=None,
+    **kwargs,
+):
+    """Do not let a stale review clock skip the ending-reminder stage."""
+    if not instance.pk or instance.status != Tenancy.STATUS_ENDED:
+        return
+
+    if update_fields is not None and "status" not in update_fields:
+        return
+
+    previous_status = (
+        Tenancy.objects.filter(pk=instance.pk)
+        .values_list("status", flat=True)
+        .first()
+    )
+
+    if previous_status not in _LIVE_TENANCY_STATUSES:
+        return
+
+    # This guard only applies to an automatic review-stage close: the review
+    # clock is already due, Timer 2 was scheduled, but no ending-reminder
+    # system message exists yet for this tenancy.
+    if (
+        instance.review_open_at is None
+        or instance.review_open_at > timezone.now()
+        or instance.still_living_check_at is None
+    ):
+        return
+
+    ending_reminder_exists = Message.objects.filter(
+        metadata__tenancy_id=instance.pk,
+        metadata__event_type="still_living_check",
+        metadata__system_event=True,
+    ).exists()
+
+    if ending_reminder_exists:
+        return
+
+    # Legacy/backfilled timestamps can put review_open_at in the past before
+    # the Timer-2 reminder has actually been emitted. Keep the tenancy live so
+    # the reminder stage cannot be skipped.
+    instance.status = previous_status
 
 
 @receiver(pre_save, sender=Tenancy)

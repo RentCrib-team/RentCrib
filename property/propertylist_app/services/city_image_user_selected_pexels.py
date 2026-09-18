@@ -158,9 +158,11 @@ def apply_user_selected_pexels_city_images(
     ]
     records = _city_image_records(all_cities)
     record_by_id = {record["city"].pk: record for record in records}
-    used_photo_ids = {record["photo_id"] for record in records if record["photo_id"]}
-    used_hashes = {
-        record["content_sha256"] for record in records if record["content_sha256"]
+    photo_id_by_city = {
+        record["city"].pk: _clean(record.get("photo_id")) for record in records
+    }
+    content_hash_by_city = {
+        record["city"].pk: _clean(record.get("content_sha256")) for record in records
     }
 
     replaced = []
@@ -193,6 +195,16 @@ def apply_user_selected_pexels_city_images(
 
                 record = record_by_id.get(city.pk) or {}
                 preferred_time = "night" if record.get("is_night") else "day"
+                used_photo_ids = {
+                    value
+                    for city_id, value in photo_id_by_city.items()
+                    if city_id != city.pk and value
+                }
+                used_hashes = {
+                    value
+                    for city_id, value in content_hash_by_city.items()
+                    if city_id != city.pk and value
+                }
                 result = replace_image(
                     city.pk,
                     preferred_time=preferred_time,
@@ -209,10 +221,8 @@ def apply_user_selected_pexels_city_images(
         if result.get("status") == "imported":
             provider_photo_id = _clean(result.get("provider_photo_id"))
             content_sha256 = _clean(result.get("content_sha256"))
-            if provider_photo_id:
-                used_photo_ids.add(provider_photo_id)
-            if content_sha256:
-                used_hashes.add(content_sha256)
+            photo_id_by_city[city.pk] = provider_photo_id
+            content_hash_by_city[city.pk] = content_sha256
             replaced.append(
                 {
                     "city_id": city.pk,

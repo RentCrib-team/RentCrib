@@ -939,10 +939,33 @@ def task_tenancy_prompts_sweep() -> int:
             else "no-duration"
         )
 
+        latest_accepted_extension = (
+            tenancy.extensions
+            .filter(
+                status="accepted",
+                responded_at__isnull=False,
+            )
+            .order_by(
+                "-responded_at",
+                "-id",
+            )
+            .only("id")
+            .first()
+        )
+
+        cycle_key = (
+            f"{cycle_start}:{cycle_duration}"
+        )
+
+        if latest_accepted_extension is not None:
+            cycle_key = (
+                f"{cycle_key}:"
+                f"renewal-{latest_accepted_extension.id}"
+            )
+
         event_key = (
             f"tenancy:{tenancy.id}:"
-            f"{cycle_start}:"
-            f"{cycle_duration}:"
+            f"{cycle_key}:"
             f"{event_type}"
         )
 
@@ -1239,7 +1262,33 @@ def task_tenancy_prompts_sweep() -> int:
                 .exists()
             )
 
+            email_exists = (
+                OutboundNotification.objects
+                .filter(
+                    user=user,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key=template_key,
+                    created_at__gte=cycle_started_at,
+                    context__tenancy_id=tenancy.id,
+                )
+                .exists()
+            )
+
+            def _ensure_reminder_email():
+                if email_exists:
+                    return
+
+                _maybe_queue_reminder(
+                    user,
+                    template_key,
+                    deep_link=deep_link,
+                    cta_path=cta_path,
+                    room_title=tenancy.room.title,
+                    tenancy_id=tenancy.id,
+                )
+
             if reminder_exists:
+                _ensure_reminder_email()
                 return 0
 
             notification = Notification.objects.create(
@@ -1278,14 +1327,7 @@ def task_tenancy_prompts_sweep() -> int:
                     },
                 )
 
-            _maybe_queue_reminder(
-                user,
-                template_key,
-                deep_link=deep_link,
-                cta_path=cta_path,
-                room_title=tenancy.room.title,
-                tenancy_id=tenancy.id,
-            )
+            _ensure_reminder_email()
 
             return 1
 
