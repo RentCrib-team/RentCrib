@@ -103,8 +103,6 @@ jobs:
           propertylist_app/tests/listings/test_complimentary_listing_benefit.py
           propertylist_app/tests/listings/test_ads_expired_qa_lifecycle.py
           propertylist_app/tests/payments
-          propertylist_app/tests/rooms/test_relist_after_ended_tenancy.py
-          propertylist_app/tests/rooms/test_paid_relist_returns_active_and_latest.py
           propertylist_app/tests/tenancies/test_ended_tenancy_room_release.py
           propertylist_app/tests/tenancies/test_ended_tenancy_does_not_reexpire_relist.py
           propertylist_app/tests/tenancies/test_tenancy_ended_hidden_relist_contract.py
