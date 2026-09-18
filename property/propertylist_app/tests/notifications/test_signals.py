@@ -58,7 +58,7 @@ def test_new_message_signal_emits_realtime_message_and_notification():
     )
 
     with patch(
-        "propertylist_app.signals.push_user_realtime_event"
+        "propertylist_app.services.message_creation_query_optimization.push_user_realtime_event"
     ) as realtime:
         msg = Message.objects.create(
             thread=thread,
@@ -126,7 +126,7 @@ def test_new_message_realtime_delivery_ignores_notification_preference():
     profile.save(update_fields=["notify_messages"])
 
     with patch(
-        "propertylist_app.signals.push_user_realtime_event"
+        "propertylist_app.services.message_creation_query_optimization.push_user_realtime_event"
     ) as realtime:
         msg = Message.objects.create(
             thread=thread,
@@ -534,7 +534,7 @@ def test_new_message_realtime_is_partitioned_by_active_role():
     profile.save(update_fields=["role"])
 
     with patch(
-        "propertylist_app.signals.push_user_realtime_event"
+        "propertylist_app.services.message_creation_query_optimization.push_user_realtime_event"
     ) as realtime:
         hidden_message = Message.objects.create(
             thread=thread,
@@ -573,7 +573,7 @@ def test_new_message_realtime_is_partitioned_by_active_role():
     profile.save(update_fields=["role"])
 
     with patch(
-        "propertylist_app.signals.push_user_realtime_event"
+        "propertylist_app.services.message_creation_query_optimization.push_user_realtime_event"
     ) as realtime:
         visible_message = Message.objects.create(
             thread=thread,

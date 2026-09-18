@@ -10,7 +10,7 @@ from propertylist_app.models import (
     MessageThreadState,
     UserProfile,
 )
-from propertylist_app.services.realtime import push_user_realtime_event
+from propertylist_app.services.realtime import deliver_user_realtime_event
 
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -82,7 +82,7 @@ def test_system_message_pushes_authoritative_envelope_count_for_seeker_even_when
         "propertylist_app.services.realtime.get_channel_layer",
         return_value=layer,
     ):
-        push_user_realtime_event(
+        deliver_user_realtime_event(
             seeker.id,
             "new_message",
             {
@@ -137,7 +137,7 @@ def test_system_message_after_permanent_delete_does_not_resurrect_envelope_count
         "propertylist_app.services.realtime.get_channel_layer",
         return_value=layer,
     ):
-        push_user_realtime_event(
+        deliver_user_realtime_event(
             seeker.id,
             "new_message",
             {
@@ -182,7 +182,7 @@ def test_human_new_message_is_not_given_a_duplicate_service_level_unread_event()
         "propertylist_app.services.realtime.get_channel_layer",
         return_value=layer,
     ):
-        push_user_realtime_event(
+        deliver_user_realtime_event(
             seeker.id,
             "new_message",
             {
