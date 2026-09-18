@@ -2372,7 +2372,15 @@ class RoomSerializer(serializers.ModelSerializer):
         """
         Return all uploaded images so the serializer can calculate one
         overall public image-verification status.
+
+        Room read endpoints may attach prefetched_room_images to avoid
+        one image query per room. Fall back to the related manager for views
+        that do not use the optimised queryset.
         """
+        prefetched = getattr(obj, "prefetched_room_images", None)
+        if prefetched is not None:
+            return list(prefetched)
+
         return list(
             obj.roomimage_set.filter(
                 status__in=["approved", "pending", "rejected"]
