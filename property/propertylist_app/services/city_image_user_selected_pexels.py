@@ -55,6 +55,74 @@ USER_SELECTED_PEXELS_PHOTO_IDS = {
     "glasgow": "10569132",
     "leeds": "16666012",
     "edinburgh": "28851814",
+    "liverpool": "13435761",
+    "sheffield": "12698033",
+    "manchester": "6585361",
+    "bristol": "17574496",
+    "cardiff": "37499335",
+    "belfast": "15955120",
+    "nottingham": "26289338",
+    "newcastle-upon-tyne": "2893285",
+    "brighton-hove": "17938478",
+    "kingston-upon-hull": "5321464",
+    "plymouth": "10834188",
+}om contextlib import contextmanager
+
+import requests
+
+from propertylist_app.services.city_image_autofill import (
+    CITY_MATCH_ALIASES,
+    PEXELS_SEARCH_URL,
+    _api_key,
+    _catalogue_by_slug,
+    _clean,
+    _download_url,
+    _match_text,
+    _photo_matches_city,
+)
+from propertylist_app.services.city_image_reconciliation import (
+    _bounded_http_get,
+    _city_image_records,
+    _emit_progress,
+    _replace_existing_city_image,
+    _runtime_dependencies,
+)
+
+
+PEXELS_PHOTO_URL = "https://api.pexels.com/v1/photos/{photo_id}"
+
+PUBLIC_CITYSCAPE_SLUGS = (
+    "london",
+    "birmingham",
+    "glasgow",
+    "leeds",
+    "edinburgh",
+    "liverpool",
+    "sheffield",
+    "manchester",
+    "bristol",
+    "leicester",
+    "cardiff",
+    "belfast",
+    "coventry",
+    "bradford",
+    "nottingham",
+    "newcastle-upon-tyne",
+    "brighton-hove",
+    "derby",
+    "kingston-upon-hull",
+    "plymouth",
+)
+
+# Pexels photos whose own metadata describes a broad cityscape/skyline rather
+# than a single isolated building. Cities without a pinned photo are resolved
+# at runtime through the same strict broad-cityscape gate below.
+USER_SELECTED_PEXELS_PHOTO_IDS = {
+    "london": "16435133",
+    "birmingham": "9450535",
+    "glasgow": "10569132",
+    "leeds": "16666012",
+    "edinburgh": "28851814",
     "liverpool": "13436004",
     "sheffield": "12698033",
     "manchester": "6585361",
@@ -82,12 +150,8 @@ BROAD_CITYSCAPE_TERMS = (
     "skyline",
     "panoramic",
     "panorama",
-    "city center",
-    "city centre",
-    "downtown",
     "urban landscape",
     "city overview",
-    "city view",
     "rooftops",
     "street scene",
 )
