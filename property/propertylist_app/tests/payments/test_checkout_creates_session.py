@@ -43,6 +43,7 @@ def test_checkout_creates_session_for_owner_room(monkeypatch):
         assert kwargs.get("mode") == "payment"
         assert "metadata" in kwargs
         assert kwargs["line_items"][0]["price_data"]["unit_amount"] == 799
+        assert kwargs["payment_intent_data"]["metadata"] == kwargs["metadata"]
         return FakeSession()
 
     # Patch BOTH Stripe calls used in the view
