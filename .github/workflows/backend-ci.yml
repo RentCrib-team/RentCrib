@@ -53,3 +53,58 @@ jobs:
           DB_HOST: 127.0.0.1
           DB_PORT: "5432"
         run: pytest -q
+
+
+  listing-payment-regression:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: rentcrib_ci_targeted
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d rentcrib_ci_targeted"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    defaults:
+      run:
+        working-directory: property
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: property/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run listing/payment regression gate
+        env:
+          DJANGO_SETTINGS_MODULE: property.settings_test
+          DJANGO_DEBUG: "true"
+          DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,testserver"
+          DB_NAME: rentcrib_ci_targeted
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5433"
+        run: >-
+          pytest -q
+          propertylist_app/tests/listings/test_complimentary_listing_benefit.py
+          propertylist_app/tests/listings/test_ads_expired_qa_lifecycle.py
+          propertylist_app/tests/payments
+          propertylist_app/tests/rooms/test_relist_after_ended_tenancy.py
+          propertylist_app/tests/rooms/test_paid_relist_returns_active_and_latest.py
+          propertylist_app/tests/tenancies/test_ended_tenancy_room_release.py
+          propertylist_app/tests/tenancies/test_ended_tenancy_does_not_reexpire_relist.py
+          propertylist_app/tests/tenancies/test_tenancy_ended_hidden_relist_contract.py
