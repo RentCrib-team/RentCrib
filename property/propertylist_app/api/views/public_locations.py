@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, When
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -24,30 +24,31 @@ from propertylist_app.services.city_images import (
 from .common import _wrap_response_success, ok_response
 
 
-# Public "See all cities" is intentionally curated. The canonical City catalogue
-# remains intact for room search/address/location behaviour.
+# Public city cards are intentionally population-ranked. The canonical City
+# catalogue remains intact for room search/address/location behaviour.
 PUBLIC_CITY_DIRECTORY_SLUGS = (
-    "southampton",
     "london",
     "birmingham",
-    "manchester",
-    "liverpool",
+    "glasgow",
     "leeds",
-    "bristol",
+    "edinburgh",
+    "liverpool",
     "sheffield",
-    "newcastle-upon-tyne",
-    "cambridge",
-    "oxford",
-    "bath",
-    "york",
-    "nottingham",
+    "manchester",
+    "bristol",
     "leicester",
+    "cardiff",
+    "belfast",
     "coventry",
-    "exeter",
-    "lancaster",
+    "bradford",
+    "nottingham",
+    "newcastle-upon-tyne",
     "brighton-hove",
-    "wrexham",
+    "derby",
+    "kingston-upon-hull",
+    "plymouth",
 )
+HOMEPAGE_POPULAR_CITY_SLUGS = PUBLIC_CITY_DIRECTORY_SLUGS[:12]
 
 
 class PublicCitySummarySerializer(serializers.ModelSerializer):
@@ -81,7 +82,10 @@ class PublicCitySummarySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_image_url(self, obj):
-        return city_image_url(obj, request=self.context.get("request"))
+        return city_image_url(
+            obj,
+            request=self.context.get("request"),
+        )
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_has_image(self, obj):
@@ -108,18 +112,30 @@ def _city_room_count_filter(today):
 def _public_cities_queryset(*, featured=None):
     today = timezone.localdate()
     qs = City.objects.filter(is_active=True)
+
     if featured is not None:
         qs = qs.filter(is_featured=featured)
-    return (
-        qs.annotate(
-            room_count=Count(
-                "rooms",
-                filter=_city_room_count_filter(today),
-                distinct=True,
-            )
+
+    return qs.annotate(
+        room_count=Count(
+            "rooms",
+            filter=_city_room_count_filter(today),
+            distinct=True,
         )
-        .order_by("display_order", "name")
     )
+
+
+def _order_cities_by_slug_sequence(qs, slugs):
+    return qs.annotate(
+        public_city_order=Case(
+            *[
+                When(slug=slug, then=position)
+                for position, slug in enumerate(slugs)
+            ],
+            default=len(slugs),
+            output_field=IntegerField(),
+        )
+    ).order_by("public_city_order", "name")
 
 
 class HomePageView(APIView):
@@ -139,23 +155,38 @@ class HomePageView(APIView):
             )
         },
         description=(
-            "Return homepage summary data. Popular city cards come from the "
-            "canonical active/featured City catalogue, not Room.location."
+            "Return homepage summary data. Popular city cards are the first 12 "
+            "population-ranked public cities, not Room.location or is_featured."
         ),
     )
     def get(self, request):
         today = timezone.localdate()
+
         base_rooms = (
             Room.objects.alive()
             .filter(status="active")
             .filter(Q(paid_until__isnull=True) | Q(paid_until__gte=today))
-            .select_related("category", "property_owner", "property_owner__profile")
+            .select_related(
+                "category",
+                "property_owner",
+                "property_owner__profile",
+            )
         )
+
         featured_rooms_qs = base_rooms.order_by(
-            "-avg_rating", "-number_rating", "-created_at"
+            "-avg_rating",
+            "-number_rating",
+            "-created_at",
         )[:6]
         latest_rooms_qs = base_rooms.order_by("-created_at")[:6]
-        popular_cities = _public_cities_queryset(featured=True)[:12]
+
+        popular_cities = _order_cities_by_slug_sequence(
+            _public_cities_queryset().filter(
+                slug__in=HOMEPAGE_POPULAR_CITY_SLUGS
+            ),
+            HOMEPAGE_POPULAR_CITY_SLUGS,
+        )[:12]
+
         payload = {
             "featured_rooms": featured_rooms_qs,
             "latest_rooms": latest_rooms_qs,
@@ -170,12 +201,16 @@ class HomePageView(APIView):
                 "android": getattr(settings, "MOBILE_APP_ANDROID_URL", ""),
             },
         }
-        serializer = PublicHomeSummarySerializer(payload, context={"request": request})
+
+        serializer = PublicHomeSummarySerializer(
+            payload,
+            context={"request": request},
+        )
         return ok_response(serializer.data, status_code=status.HTTP_200_OK)
 
 
 class CityListView(APIView):
-    """Return the curated public UK city directory."""
+    """Return the population-ranked public UK city directory."""
 
     permission_classes = [AllowAny]
     pagination_class = StandardLimitOffsetPagination
@@ -188,7 +223,7 @@ class CityListView(APIView):
                 type=str,
                 location=OpenApiParameter.QUERY,
                 required=False,
-                description="Filter curated city names by case-insensitive substring.",
+                description="Filter public city names by case-insensitive substring.",
             ),
         ],
         responses={
@@ -201,15 +236,19 @@ class CityListView(APIView):
             )
         },
         description=(
-            "List the curated public city directory with managed city-card images "
-            "and discoverable-room counts. The wider canonical city catalogue "
-            "remains available to room search/location logic."
+            "List the population-ranked public city directory with managed "
+            "city-card images and discoverable-room counts. The wider canonical "
+            "city catalogue remains available to room search/location logic."
         ),
     )
     def get(self, request):
         q = (request.query_params.get("q") or "").strip()
-        cities = _public_cities_queryset().filter(
-            slug__in=PUBLIC_CITY_DIRECTORY_SLUGS
+
+        cities = _order_cities_by_slug_sequence(
+            _public_cities_queryset().filter(
+                slug__in=PUBLIC_CITY_DIRECTORY_SLUGS
+            ),
+            PUBLIC_CITY_DIRECTORY_SLUGS,
         )
         if q:
             cities = cities.filter(name__icontains=q)
@@ -221,6 +260,7 @@ class CityListView(APIView):
             many=True,
             context={"request": request},
         )
+
         return _wrap_response_success(
             paginator.get_paginated_response(serializer.data)
         )
