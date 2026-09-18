@@ -938,7 +938,7 @@ class TenancyRespondSerializer(serializers.Serializer):
             #     timezone.datetime.combine(end_date, timezone.datetime.min.time())
             # ) + timedelta(days=7)
 
-            # Temporary frontend testing rule: review opens 30 minutes after tenancy ends.
+            # Temporary frontend testing rule: review opens 10 minutes after tenancy ends.
             tenancy.review_open_at = timezone.make_aware(
                 timezone.datetime.combine(end_date, timezone.datetime.min.time())
             ) + timedelta(minutes=10)
