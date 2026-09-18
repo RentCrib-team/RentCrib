@@ -14,6 +14,7 @@ from propertylist_app.api.views.common import ok_response
 from propertylist_app.api.views.payments import _stripe_mod, stripe_webhook as legacy_stripe_webhook
 from propertylist_app.models import Notification, Payment, Room, WebhookReceipt
 from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.listing_entitlements import grant_complimentary_listing_benefit
 from propertylist_app.services.realtime import push_user_realtime_event
 
 
@@ -240,6 +241,8 @@ def stripe_webhook_reliable(request):
                     room.paid_until = base + timedelta(days=30)
                     room.set_status(Room.Lifecycle.ACTIVE)
                     room.save(update_fields=["status", "paid_until"])
+
+                grant_complimentary_listing_benefit(payment)
     except Exception:
         logger.exception(
             "stripe_webhook_payment_success_failed event_id=%s payment_id=%s",
