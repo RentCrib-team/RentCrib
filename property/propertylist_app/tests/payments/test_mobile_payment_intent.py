@@ -80,7 +80,7 @@ def _owner_room(*, username="mobile_landlord"):
     profile.save(update_fields=["stripe_customer_id"])
 
     cat = RoomCategorie.objects.create(
-        name=f"Mobile Paid {username}",
+        name=f"MobilePaid{user.id}",
         active=True,
     )
 
