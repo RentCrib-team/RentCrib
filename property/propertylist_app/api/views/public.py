@@ -411,9 +411,9 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
                 Prefetch(
                     "roomimage_set",
                     queryset=RoomImage.objects.filter(
-                        status="approved"
+                        status__in=["approved", "pending", "rejected"]
                     ).order_by("id"),
-                    to_attr="prefetched_approved_images",
+                    to_attr="prefetched_room_images",
                 )
             )
         )
