@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, When
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -22,6 +22,33 @@ from propertylist_app.services.city_images import (
 )
 
 from .common import _wrap_response_success, ok_response
+
+
+# Public city cards are intentionally population-ranked. The canonical City
+# catalogue remains intact for room search/address/location behaviour.
+PUBLIC_CITY_DIRECTORY_SLUGS = (
+    "london",
+    "birmingham",
+    "glasgow",
+    "leeds",
+    "edinburgh",
+    "liverpool",
+    "sheffield",
+    "manchester",
+    "bristol",
+    "leicester",
+    "cardiff",
+    "belfast",
+    "coventry",
+    "bradford",
+    "nottingham",
+    "newcastle-upon-tyne",
+    "brighton-hove",
+    "derby",
+    "kingston-upon-hull",
+    "plymouth",
+)
+HOMEPAGE_POPULAR_CITY_SLUGS = PUBLIC_CITY_DIRECTORY_SLUGS[:12]
 
 
 class PublicCitySummarySerializer(serializers.ModelSerializer):
@@ -89,16 +116,26 @@ def _public_cities_queryset(*, featured=None):
     if featured is not None:
         qs = qs.filter(is_featured=featured)
 
-    return (
-        qs.annotate(
-            room_count=Count(
-                "rooms",
-                filter=_city_room_count_filter(today),
-                distinct=True,
-            )
+    return qs.annotate(
+        room_count=Count(
+            "rooms",
+            filter=_city_room_count_filter(today),
+            distinct=True,
         )
-        .order_by("display_order", "name")
     )
+
+
+def _order_cities_by_slug_sequence(qs, slugs):
+    return qs.annotate(
+        public_city_order=Case(
+            *[
+                When(slug=slug, then=position)
+                for position, slug in enumerate(slugs)
+            ],
+            default=len(slugs),
+            output_field=IntegerField(),
+        )
+    ).order_by("public_city_order", "name")
 
 
 class HomePageView(APIView):
@@ -118,8 +155,8 @@ class HomePageView(APIView):
             )
         },
         description=(
-            "Return homepage summary data. Popular city cards come from the "
-            "canonical active/featured City catalogue, not Room.location."
+            "Return homepage summary data. Popular city cards are the first 12 "
+            "population-ranked public cities, not Room.location or is_featured."
         ),
     )
     def get(self, request):
@@ -143,7 +180,12 @@ class HomePageView(APIView):
         )[:6]
         latest_rooms_qs = base_rooms.order_by("-created_at")[:6]
 
-        popular_cities = _public_cities_queryset(featured=True)[:12]
+        popular_cities = _order_cities_by_slug_sequence(
+            _public_cities_queryset().filter(
+                slug__in=HOMEPAGE_POPULAR_CITY_SLUGS
+            ),
+            HOMEPAGE_POPULAR_CITY_SLUGS,
+        )[:12]
 
         payload = {
             "featured_rooms": featured_rooms_qs,
@@ -168,7 +210,7 @@ class HomePageView(APIView):
 
 
 class CityListView(APIView):
-    """Return active canonical UK cities for the public city directory."""
+    """Return the population-ranked public UK city directory."""
 
     permission_classes = [AllowAny]
     pagination_class = StandardLimitOffsetPagination
@@ -181,7 +223,7 @@ class CityListView(APIView):
                 type=str,
                 location=OpenApiParameter.QUERY,
                 required=False,
-                description="Filter canonical city names by case-insensitive substring.",
+                description="Filter public city names by case-insensitive substring.",
             ),
         ],
         responses={
@@ -194,16 +236,20 @@ class CityListView(APIView):
             )
         },
         description=(
-            "List active canonical cities with managed city-card images and "
-            "discoverable-room counts. Property addresses and postcodes are never "
-            "returned as cities. image_url always resolves to either an uploaded "
-            "city image or the RentCrib fallback artwork."
+            "List the population-ranked public city directory with managed "
+            "city-card images and discoverable-room counts. The wider canonical "
+            "city catalogue remains available to room search/location logic."
         ),
     )
     def get(self, request):
         q = (request.query_params.get("q") or "").strip()
 
-        cities = _public_cities_queryset()
+        cities = _order_cities_by_slug_sequence(
+            _public_cities_queryset().filter(
+                slug__in=PUBLIC_CITY_DIRECTORY_SLUGS
+            ),
+            PUBLIC_CITY_DIRECTORY_SLUGS,
+        )
         if q:
             cities = cities.filter(name__icontains=q)
 
