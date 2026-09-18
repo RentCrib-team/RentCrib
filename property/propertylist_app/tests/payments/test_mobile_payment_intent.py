@@ -1,3 +1,4 @@
+from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
@@ -93,7 +94,7 @@ def test_owner_can_create_mobile_listing_payment_intent(monkeypatch):
 
     payment = Payment.objects.get(room=room, user=user)
 
-    assert payment.amount == 7.99
+    assert payment.amount == Decimal("7.99")
     assert payment.currency == "GBP"
     assert payment.stripe_payment_intent_id == "pi_mobile_test_123"
     assert payment.status == Payment.Status.REQUIRES_PAYMENT
