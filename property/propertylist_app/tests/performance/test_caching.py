@@ -278,3 +278,43 @@ def test_room_list_query_count_does_not_scale_with_room_count():
         "rooms are serialized. "
         f"one_room={len(one_room_queries)}, five_rooms={len(five_room_queries)}"
     )
+
+
+@override_settings(CACHES=TEST_CACHES, REST_FRAMEWORK=REST_FRAMEWORK_MINIMAL)
+@pytest.mark.django_db
+def test_save_toggle_invalidates_cached_is_saved_value():
+    cache.clear()
+
+    owner = User.objects.create_user(
+        username="save-cache-owner",
+        password="pass123",
+        email="save-cache-owner@example.com",
+    )
+    viewer = User.objects.create_user(
+        username="save-cache-viewer",
+        password="pass123",
+        email="save-cache-viewer@example.com",
+    )
+    category = RoomCategorie.objects.create(name="Save Cache", active=True)
+    room = _active_room(owner=owner, category=category, title="Save cache room")
+
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    list_url = reverse("v1:room-list")
+    toggle_url = reverse("v1:room-save-toggle", kwargs={"pk": room.pk})
+
+    initial = client.get(list_url)
+    assert initial.status_code == 200
+    assert initial.data["results"][0]["is_saved"] is False
+
+    cached = client.get(list_url)
+    assert cached.status_code == 200
+    assert cached.data["results"][0]["is_saved"] is False
+
+    toggled = client.post(toggle_url)
+    assert toggled.status_code == 200, toggled.data
+    assert toggled.data["data"]["saved"] is True
+
+    refreshed = client.get(list_url)
+    assert refreshed.status_code == 200
+    assert refreshed.data["results"][0]["is_saved"] is True
