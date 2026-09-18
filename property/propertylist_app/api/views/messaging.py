@@ -51,6 +51,7 @@ from propertylist_app.models import (
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.throttling import MessageUserThrottle, MessagingScopedThrottle
 from propertylist_app.services.realtime import push_user_realtime_event
+from propertylist_app.utils.cache import bump_buster
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
@@ -370,6 +371,7 @@ class RoomSaveView(APIView):
     def post(self, request, pk, *args, **kwargs):
         room = get_object_or_404(Room.objects.alive(), pk=pk)
         SavedRoom.objects.get_or_create(user=request.user, room=room)
+        bump_buster()
         return ok_response({"saved": True}, status_code=status.HTTP_201_CREATED)
 
     @extend_schema(
@@ -386,6 +388,7 @@ class RoomSaveView(APIView):
     def delete(self, request, pk, *args, **kwargs):
         room = get_object_or_404(Room.objects.alive(), pk=pk)
         SavedRoom.objects.filter(user=request.user, room=room).delete()
+        bump_buster()
         return ok_response(
             {},
             message="Saved room removed successfully.",
@@ -419,12 +422,14 @@ class RoomSaveToggleView(APIView):
 
         if saved_qs.exists():
             saved_qs.delete()
+            bump_buster()
             return ok_response(
                 {"saved": False, "saved_at": None},
                 status_code=status.HTTP_200_OK,
             )
 
         saved = SavedRoom.objects.create(user=request.user, room=room)
+        bump_buster()
         return ok_response(
             {"saved": True, "saved_at": saved.saved_at if hasattr(saved, "saved_at") else timezone.now()},
             status_code=status.HTTP_200_OK,
@@ -444,6 +449,7 @@ class RoomSaveToggleView(APIView):
         room = get_object_or_404(Room, pk=pk)
 
         SavedRoom.objects.filter(user=request.user, room=room).delete()
+        bump_buster()
 
         return ok_response(
             {},
