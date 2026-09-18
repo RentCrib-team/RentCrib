@@ -232,7 +232,7 @@ def listing_expiry_warning_sweep() -> int:
 
         cycle_key = _cycle_key(room)
         if qa_mode:
-            room_paid_until = str(room.paid_until)
+            room_paid_until = "in about 5 minutes (QA test)"
             body = (
                 f"QA reminder: your listing '{room.title}' has been active for "
                 f"at least {QA_WARNING_AFTER_MINUTES} minutes. Its current "
@@ -274,7 +274,12 @@ def listing_expiry_sweep() -> int:
     qa_mode = _qa_mode()
 
     rooms = _active_paid_rooms_with_cycle_start()
-    if not qa_mode:
+    if qa_mode:
+        # Only a currently-live entitlement can reach the accelerated
+        # 20-minute boundary. Once we normalise it to yesterday below, the
+        # next sweep must ignore that same cycle.
+        rooms = rooms.filter(paid_until__gte=today)
+    else:
         rooms = rooms.filter(paid_until__lt=today)
 
     processed = 0
