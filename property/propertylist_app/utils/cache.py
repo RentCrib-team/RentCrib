@@ -45,12 +45,17 @@ def _canonical_querydict(querydict) -> Dict[str, Any]:
 
 def make_cache_key(prefix: str, path: str, request=None, extra: Optional[Dict[str, Any]] = None) -> str:
     """
-    Build a stable cache key: prefix + path + normalized query + optional extras + buster.
-    We DO NOT include user id, because we only cache for anonymous GETs.
+    Build a stable cache key: prefix + path + normalized query + viewer + optional extras + buster.
+    Authenticated responses are isolated per user; anonymous callers share the "anon" scope.
     """
     base: Dict[str, Any] = {"path": path, "buster": get_buster()}
     if request is not None:
         base["q"] = _canonical_querydict(request.GET)
+        user = getattr(request, "user", None)
+        if user is not None and getattr(user, "is_authenticated", False):
+            base["viewer"] = f"user:{user.pk}"
+        else:
+            base["viewer"] = "anon"
         # include pagination headers that affect output (DRF LimitOffsetPagination)
         # (We already include 'limit'/'offset' via request.GET if present.)
     if extra:
