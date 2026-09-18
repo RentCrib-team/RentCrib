@@ -758,10 +758,20 @@ class TenancyProposalSerializer(serializers.Serializer):
             )
 
         # A tenant-created claim that expired or was rejected must not
-        # be repeatedly resubmitted by the tenant.
+        # be repeatedly resubmitted from the same completed viewing.
+        # Historical cancelled claims must not poison a later genuine viewing
+        # for the same room. booking_id/source_booking is the strongest cycle
+        # boundary available, including for legacy rooms with relisted_at=None.
+        #
+        # Older rows may have source_booking=NULL. If such a claim was created
+        # after the current viewing started, conservatively treat it as the same
+        # viewing cycle and keep the anti-resubmission block. A genuinely older
+        # legacy claim predating the fresh viewing does not block the new claim.
         #
         # The landlord may, however, create fresh tenancy information
         # for the same tenant if the tenancy is genuine.
+        source_booking = validated_data.get("source_booking")
+
         expired_or_rejected_tenant_claim = next(
             (
                 existing
@@ -769,6 +779,14 @@ class TenancyProposalSerializer(serializers.Serializer):
                 if (
                     existing.status == Tenancy.STATUS_CANCELLED
                     and existing.proposed_by_id == tenant.id
+                    and (
+                        source_booking is None
+                        or existing.source_booking_id == source_booking.id
+                        or (
+                            existing.source_booking_id is None
+                            and existing.created_at >= source_booking.start
+                        )
+                    )
                 )
             ),
             None,
