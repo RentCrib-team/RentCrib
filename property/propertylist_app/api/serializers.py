@@ -4921,6 +4921,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             if t == "tenancy":
                 return f"/app/tenancies/{obj.target_id}"
 
+            if t == "room":
+                return f"/app/listings/{obj.target_id}"
+
             if t == "tenancy_review":
                 return f"/app/tenancies/{obj.target_id}/reviews"
 
@@ -4980,6 +4983,11 @@ class NotificationSerializer(serializers.ModelSerializer):
         # Generic booking target.
         if target_type == "booking" and target_id:
             return f"/viewings/{target_id}"
+
+        if target_type == "room" and target_id:
+            if notification_type == "listing_complimentary_renewed":
+                return f"/my-listings?tab=active&room={target_id}"
+            return f"/my-listings/{target_id}"
 
         return self.get_deep_link(obj)
 

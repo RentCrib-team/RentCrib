@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from django.contrib.auth.models import User
-from propertylist_app.models import Room, RoomCategorie, Payment
+from propertylist_app.models import Room, RoomCategorie, Payment, RoomListingBenefit
 
 # Import the same module your view imports 'stripe' from
 import propertylist_app.api.views as views_mod
@@ -28,7 +28,7 @@ def test_success_sets_paid_until_and_status_active(monkeypatch):
     )
 
     payment = Payment.objects.create(
-        user=owner, room=room, amount=1.00, currency="GBP", status="created"
+        user=owner, room=room, amount=7.99, currency="GBP", status="created"
     )
 
     client = APIClient()
@@ -77,3 +77,7 @@ def test_success_sets_paid_until_and_status_active(monkeypatch):
     assert room.paid_until >= timezone.now().date()
     # Room should remain active (or be active if you later decide to set it here)
     assert room.status == "active"
+
+    benefit = RoomListingBenefit.objects.get(room=room)
+    assert benefit.granted_from_payment_id == payment.id
+    assert benefit.consumed_at is None

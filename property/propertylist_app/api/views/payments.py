@@ -45,6 +45,10 @@ from propertylist_app.validators import (
 )
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.services.realtime import push_user_realtime_event
+from propertylist_app.services.listing_entitlements import (
+    grant_complimentary_listing_benefit,
+    listing_fee_gbp,
+)
 from propertylist_app.api.schema_helpers import standard_response_serializer
 from propertylist_app.api.permissions import IsFinanceAdmin
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
@@ -336,6 +340,8 @@ def stripe_webhook(request):
                         room.set_status(Room.Lifecycle.ACTIVE)
                         room.save(update_fields=["status", "paid_until"])
 
+                    grant_complimentary_listing_benefit(payment)
+
                     payment_notification = Notification.objects.create(
                         user=payment.user,
                         type="confirmation",
@@ -548,6 +554,8 @@ def stripe_webhook(request):
                                 "paid_until",
                             ]
                         )
+
+                    grant_complimentary_listing_benefit(payment)
 
                     payment_notification = Notification.objects.create(
                         user=payment.user,
@@ -817,16 +825,18 @@ def webhook_in(request):
 
 class CreateListingPaymentIntentView(APIView):
     """
-    Creates a Stripe PaymentIntent for a room listing fee.
+    Creates or resumes a Stripe PaymentIntent for a room listing fee.
 
     Intended for native mobile clients using Stripe PaymentSheet.
     The listing is NOT activated here. Stripe webhook confirmation
     remains the trusted source of payment success.
+
+    Repeated requests for the same owner/room/amount reuse the same
+    in-flight Payment and PaymentIntent instead of creating another
+    charge opportunity.
     """
     permission_classes = [IsAuthenticated]
-    
-    
-    
+
     @extend_schema(
         request=None,
         responses={
@@ -845,6 +855,7 @@ class CreateListingPaymentIntentView(APIView):
                 ),
             ),
             403: OpenApiResponse(response=ErrorResponseSerializer),
+            409: OpenApiResponse(response=ErrorResponseSerializer),
             502: OpenApiResponse(response=ErrorResponseSerializer),
         },
     )
@@ -854,7 +865,6 @@ class CreateListingPaymentIntentView(APIView):
             pk=pk,
         )
 
-        # Only the property owner can pay to list this room.
         if room.property_owner != request.user:
             return error_response(
                 message="You are not allowed to pay for this listing.",
@@ -863,13 +873,31 @@ class CreateListingPaymentIntentView(APIView):
             )
 
         user = request.user
+        amount_gbp = listing_fee_gbp()
+        amount_pence = int(amount_gbp * 100)
+        publishable_key = (
+            getattr(settings, "STRIPE_PUBLISHABLE_KEY", "") or ""
+        ).strip()
 
-        # Ensure profile exists.
+        if not publishable_key:
+            return error_response(
+                message="Stripe mobile payment is not configured.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="stripe_publishable_key_missing",
+            )
+
+        today = timezone.localdate()
+        if room.paid_until is not None and room.paid_until >= today:
+            return error_response(
+                message="This listing already has an active paid period.",
+                status_code=status.HTTP_409_CONFLICT,
+                code="listing_already_paid",
+            )
+
         profile = getattr(user, "profile", None)
         if profile is None:
             profile = user.profile = UserProfile.objects.create(user=user)
 
-        # Reuse the same Stripe Customer used by Checkout / saved cards.
         if not profile.stripe_customer_id:
             try:
                 stripe_customer = _stripe_mod().Customer.create(
@@ -884,6 +912,8 @@ class CreateListingPaymentIntentView(APIView):
                 )
 
             stripe_customer_id = getattr(stripe_customer, "id", None)
+            if isinstance(stripe_customer, dict):
+                stripe_customer_id = stripe_customer.get("id")
 
             if not stripe_customer_id:
                 return error_response(
@@ -897,18 +927,123 @@ class CreateListingPaymentIntentView(APIView):
 
         customer_id = profile.stripe_customer_id
 
-        # Same listing fee as web Checkout: £1.00.
-        amount_gbp = Decimal("1.00")
-        amount_pence = int(amount_gbp * 100)
+        pending_statuses = [
+            Payment.Status.CREATED,
+            Payment.Status.REQUIRES_PAYMENT,
+            Payment.Status.REQUIRES_ACTION,
+            Payment.Status.PROCESSING,
+        ]
 
-        # Create the same internal Payment resource used by web payments.
-        payment = Payment.objects.create(
-            user=user,
-            room=room,
-            amount=amount_gbp,
-            currency="GBP",
-            status=Payment.Status.CREATED,
-        )
+        with transaction.atomic():
+            Room.all_objects.select_for_update().get(pk=room.pk)
+
+            payment = (
+                Payment.objects.filter(
+                    user=user,
+                    room=room,
+                    amount=amount_gbp,
+                    currency="GBP",
+                    status__in=pending_statuses,
+                )
+                .order_by("-created_at", "-id")
+                .first()
+            )
+
+            if payment is None:
+                payment = Payment.objects.create(
+                    user=user,
+                    room=room,
+                    amount=amount_gbp,
+                    currency="GBP",
+                    status=Payment.Status.CREATED,
+                )
+
+        payment_intent = None
+
+        if payment.stripe_payment_intent_id:
+            try:
+                payment_intent = _stripe_mod().PaymentIntent.retrieve(
+                    payment.stripe_payment_intent_id
+                )
+            except Exception:
+                logger.exception(
+                    "mobile_payment_intent_retrieve_failed payment_id=%s",
+                    payment.id,
+                )
+                return error_response(
+                    message="Unable to resume mobile payment session.",
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    code="mobile_payment_session_resume_error",
+                )
+
+            intent_status = getattr(payment_intent, "status", None)
+            if isinstance(payment_intent, dict):
+                intent_status = payment_intent.get("status")
+
+            if intent_status == "canceled":
+                payment.status = Payment.Status.CANCELED
+                payment.save(update_fields=["status", "updated_at"])
+                return error_response(
+                    message="The previous payment session was canceled. Please try again.",
+                    status_code=status.HTTP_409_CONFLICT,
+                    code="mobile_payment_session_canceled",
+                )
+
+        else:
+            try:
+                payment_intent = _stripe_mod().PaymentIntent.create(
+                    amount=amount_pence,
+                    currency="gbp",
+                    customer=customer_id,
+                    automatic_payment_methods={"enabled": True},
+                    metadata={
+                        "payment_id": str(payment.id),
+                        "room_id": str(room.id),
+                        "user_id": str(user.id),
+                    },
+                    description=f"Listing fee for: {room.title}",
+                    idempotency_key=(
+                        f"rentcrib-mobile-listing-payment-{payment.id}"
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "mobile_payment_intent_create_failed payment_id=%s",
+                    payment.id,
+                )
+                return error_response(
+                    message="Unable to create mobile payment session.",
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    code="mobile_payment_session_error",
+                )
+
+        payment_intent_id = getattr(payment_intent, "id", None)
+        client_secret = getattr(payment_intent, "client_secret", None)
+
+        if isinstance(payment_intent, dict):
+            payment_intent_id = payment_intent.get("id")
+            client_secret = payment_intent.get("client_secret")
+
+        if not payment_intent_id or not client_secret:
+            return error_response(
+                message="Stripe mobile payment response was incomplete.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="mobile_payment_session_invalid_response",
+            )
+
+        if (
+            payment.stripe_payment_intent_id != str(payment_intent_id)
+            or payment.status == Payment.Status.CREATED
+        ):
+            payment.stripe_payment_intent_id = str(payment_intent_id)
+            payment.status = Payment.Status.REQUIRES_PAYMENT
+            payment.save(
+                update_fields=[
+                    "stripe_payment_intent_id",
+                    "status",
+                    "updated_at",
+                ]
+            )
 
         try:
             customer_session = _stripe_mod().CustomerSession.create(
@@ -924,70 +1059,33 @@ class CreateListingPaymentIntentView(APIView):
                     },
                 },
             )
-
-            payment_intent = _stripe_mod().PaymentIntent.create(
-                amount=amount_pence,
-                currency="gbp",
-                customer=customer_id,
-                automatic_payment_methods={"enabled": True},
-                metadata={
-                    "payment_id": str(payment.id),
-                    "room_id": str(room.id),
-                    "user_id": str(user.id),
-                },
-                description=f"Listing fee for: {room.title}",
-            )
         except Exception:
-            payment.status = Payment.Status.CANCELED
-            payment.save(update_fields=["status"])
-
+            logger.exception(
+                "mobile_customer_session_create_failed payment_id=%s",
+                payment.id,
+            )
             return error_response(
-                message="Unable to create mobile payment session.",
+                message="Unable to create mobile customer session.",
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                code="mobile_payment_session_error",
-            )     
+                code="mobile_customer_session_error",
+            )
 
-        payment_intent_id = getattr(payment_intent, "id", None)
-        client_secret = getattr(payment_intent, "client_secret", None)
-        
         customer_session_client_secret = getattr(
             customer_session,
             "client_secret",
             None,
         )
-
-        # Support dict-based Stripe fakes in tests too.
-        if isinstance(payment_intent, dict):
-            payment_intent_id = payment_intent.get("id")
-            client_secret = payment_intent.get("client_secret")
-            
         if isinstance(customer_session, dict):
             customer_session_client_secret = customer_session.get(
                 "client_secret"
-            )    
-
-        if (
-            not payment_intent_id
-            or not client_secret
-            or not customer_session_client_secret
-        ):
-            payment.status = Payment.Status.CANCELED
-            payment.save(update_fields=["status"])
-
-            return error_response(
-                message="Stripe mobile payment response was incomplete.",
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                code="mobile_payment_session_invalid_response",
             )
 
-        payment.stripe_payment_intent_id = str(payment_intent_id)
-        payment.status = Payment.Status.REQUIRES_PAYMENT
-        payment.save(
-            update_fields=[
-                "stripe_payment_intent_id",
-                "status",
-            ]
-        )
+        if not customer_session_client_secret:
+            return error_response(
+                message="Stripe mobile customer session was incomplete.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                code="mobile_customer_session_invalid_response",
+            )
 
         return ok_response(
             {
@@ -996,16 +1094,11 @@ class CreateListingPaymentIntentView(APIView):
                 "client_secret": client_secret,
                 "customer_id": customer_id,
                 "customer_session_client_secret": customer_session_client_secret,
-                "publishable_key": getattr(
-                    settings,
-                    "STRIPE_PUBLISHABLE_KEY",
-                    "",
-                ),
+                "publishable_key": publishable_key,
             },
             message="Payment intent created successfully.",
             status_code=status.HTTP_200_OK,
         )
-
 
 
 
@@ -1068,8 +1161,8 @@ class CreateListingCheckoutSessionView(APIView):
 
         customer_id = profile.stripe_customer_id or None
 
-        # Listing fee â€“ still Â£1.00 for 4 weeks
-        amount_gbp = Decimal("1.00")
+        # Listing fee for one 30-day advertising period
+        amount_gbp = listing_fee_gbp()
         amount_pence = int(amount_gbp * 100)
 
         # Create our internal Payment record
@@ -1119,6 +1212,13 @@ class CreateListingCheckoutSessionView(APIView):
                     "payment_id": str(payment.id),
                     "room_id": str(room.id),
                     "user_id": str(user.id),
+                },
+                payment_intent_data={
+                    "metadata": {
+                        "payment_id": str(payment.id),
+                        "room_id": str(room.id),
+                        "user_id": str(user.id),
+                    },
                 },
             )
         except Exception:

@@ -1780,6 +1780,49 @@ class Payment(models.Model):
         return f"Payment {self.id} {self.amount} {self.currency} by {who} [{self.status}]"
 
 
+
+
+# ----------------------------
+# Complimentary listing benefit
+# ----------------------------
+class RoomListingBenefit(models.Model):
+    class ConsumptionReason(models.TextChoices):
+        AUTOMATIC_EXTENSION = "automatic_extension", "Automatic extension"
+        FUTURE_RELIST = "future_relist", "Future relist"
+
+    room = models.OneToOneField(
+        "Room",
+        on_delete=models.CASCADE,
+        related_name="complimentary_listing_benefit",
+    )
+    granted_from_payment = models.ForeignKey(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="granted_listing_benefits",
+    )
+    granted_at = models.DateTimeField(default=timezone.now)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    consumed_reason = models.CharField(
+        max_length=32,
+        choices=ConsumptionReason.choices,
+        blank=True,
+        default="",
+    )
+    complimentary_period_start = models.DateField(null=True, blank=True)
+    complimentary_period_end = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def is_available(self):
+        return self.consumed_at is None
+
+    def __str__(self):
+        state = "available" if self.is_available else "used"
+        return f"Complimentary listing benefit for room {self.room_id} [{state}]"
+
 # ----------------
 # GDPR / Privacy
 # ----------------
