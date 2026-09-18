@@ -1213,6 +1213,13 @@ class CreateListingCheckoutSessionView(APIView):
                     "room_id": str(room.id),
                     "user_id": str(user.id),
                 },
+                payment_intent_data={
+                    "metadata": {
+                        "payment_id": str(payment.id),
+                        "room_id": str(room.id),
+                        "user_id": str(user.id),
+                    },
+                },
             )
         except Exception:
             return error_response(
