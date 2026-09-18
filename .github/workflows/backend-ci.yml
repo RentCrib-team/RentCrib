@@ -11,6 +11,20 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: rentcrib_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d rentcrib_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     defaults:
       run:
         working-directory: property
@@ -33,4 +47,9 @@ jobs:
           DJANGO_SETTINGS_MODULE: property.settings_test
           DJANGO_DEBUG: "true"
           DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,testserver"
+          DB_NAME: rentcrib_ci
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
         run: pytest -q
