@@ -2377,7 +2377,9 @@ class RoomSerializer(serializers.ModelSerializer):
         one image query per room. Fall back to the related manager for views
         that do not use the optimised queryset.
         """
-        prefetched = getattr(obj, "prefetched_room_images", None)
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "roomimage_set"
+        )
         if prefetched is not None:
             return list(prefetched)
 
