@@ -183,13 +183,13 @@ def test_service_uses_pinned_broad_photos_and_keeps_cross_city_uniqueness(
             "width": 1600,
             "height": 900,
         },
-        "37153111": {
-            "id": 37153111,
+        "17938478": {
+            "id": 17938478,
             "alt": (
                 "Panoramic Brighton beach and city skyline with buildings "
                 "along the seafront"
             ),
-            "url": "https://www.pexels.com/photo/brighton-beach-scenic-view-with-i360-37153111/",
+            "url": "https://www.pexels.com/photo/aerial-panorama-of-brighton-waterfront-and-piers-17938478/",
             "src": {"large": "https://images.pexels.com/brighton.jpg"},
             "width": 1600,
             "height": 900,
@@ -234,7 +234,7 @@ def test_service_uses_pinned_broad_photos_and_keeps_cross_city_uniqueness(
     assert result["skipped"] == []
     assert [item["provider_photo_id"] for item in result["replaced"]] == [
         "16435133",
-        "37153111",
+        "17938478",
     ]
     assert calls[0]["used_photo_ids"] == {"old-brighton", "used-other"}
     assert calls[0]["used_hashes"] == {"hash-b", "hash-o"}
