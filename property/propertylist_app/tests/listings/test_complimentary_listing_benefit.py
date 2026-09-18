@@ -13,6 +13,7 @@ from propertylist_app.models import (
     Payment,
     Room,
     RoomListingBenefit,
+    Tenancy,
 )
 from propertylist_app.services.listing_entitlements import (
     consume_complimentary_listing_benefit,
@@ -278,3 +279,69 @@ def test_after_complimentary_period_is_used_next_expired_relist_requires_payment
 
     assert response.status_code == 400
     assert str(response.data["details"]["payment_required"]) == "True"
+
+
+def test_benefit_survives_tenancy_end_and_is_used_on_later_relist(
+    user_factory,
+    room_factory,
+):
+    owner = user_factory(username="benefit_after_tenancy_owner")
+    tenant = user_factory(username="benefit_after_tenancy_tenant")
+    room = room_factory(property_owner=owner)
+
+    # The landlord rents the room before the original paid advert expires.
+    room.status = Room.Lifecycle.ACTIVE
+    room.is_available = False
+    room.paid_until = timezone.localdate() + timedelta(days=15)
+    room.save(
+        update_fields=[
+            "status",
+            "is_available",
+            "paid_until",
+            "updated_at",
+        ]
+    )
+
+    _, benefit = _grant(owner, room)
+
+    tenancy = Tenancy.objects.create(
+        room=room,
+        landlord=owner,
+        tenant=tenant,
+        proposed_by=owner,
+        move_in_date=timezone.localdate(),
+        duration_months=1,
+        status=Tenancy.STATUS_ACTIVE,
+        landlord_confirmed_at=timezone.now(),
+        tenant_confirmed_at=timezone.now(),
+    )
+
+    tenancy.status = Tenancy.STATUS_ENDED
+    tenancy.save(update_fields=["status", "updated_at"])
+
+    room.refresh_from_db()
+    benefit.refresh_from_db()
+
+    # Ending the tenancy retires the old paid advert entitlement, but the
+    # unused complimentary period stays reserved for this same room.
+    assert room.is_available is True
+    assert room.paid_until == timezone.localdate() - timedelta(days=1)
+    assert benefit.consumed_at is None
+
+    client = APIClient()
+    client.force_authenticate(user=owner)
+    response = client.post(
+        reverse("api:room-publish", args=[room.id]),
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+
+    room.refresh_from_db()
+    benefit.refresh_from_db()
+
+    assert room.paid_until == timezone.localdate() + timedelta(days=30)
+    assert benefit.consumed_reason == (
+        RoomListingBenefit.ConsumptionReason.FUTURE_RELIST
+    )
