@@ -57,7 +57,7 @@ def test_public_city_directory_is_exact_population_ranked_twenty_without_deletin
         slug="southampton",
         is_active=True,
         is_featured=True,
-        display_order=-1,
+        display_order=999,
     )
 
     response = api_client.get(CITIES_URL, {"limit": 100})
