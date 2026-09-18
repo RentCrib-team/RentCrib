@@ -46,8 +46,9 @@ from drf_spectacular.types import OpenApiTypes
 
 
 #Project
-from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy
+from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
 from propertylist_app.services.image import compress_listing_upload, should_auto_approve_upload
+from propertylist_app.services.listing_entitlements import consume_complimentary_listing_benefit
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.utils.cache import bump_buster
 from propertylist_app.validators import (
@@ -756,34 +757,10 @@ class RoomPublishView(APIView):
         today = timezone.localdate()
 
         # ---------------------------------------------------------
-        # PAYMENT GUARD
-        # ---------------------------------------------------------
-        # Republishing is free while the room's existing paid
-        # advertising period is still valid.
-        #
-        # If the listing has never been paid for, or its paid period
-        # has expired, it must go through the normal listing-payment
-        # flow before it can become active again.
-        if (
-            room.paid_until is None
-            or room.paid_until < today
-        ):
-            raise ValidationError(
-                {
-                    "detail": (
-                        "This listing does not have an active paid "
-                        "advertising period. Payment is required "
-                        "before it can be published."
-                    ),
-                    "payment_required": True,
-                }
-            )
-
-        # ---------------------------------------------------------
         # TENANCY GUARD
         # ---------------------------------------------------------
-        # A genuinely rented room must not be made available merely
-        # because the landlord presses Publish.
+        # A genuinely rented room must never consume its reserved
+        # complimentary listing period or become publicly available.
         has_live_tenancy = room.tenancies.filter(
             status__in=[
                 Tenancy.STATUS_CONFIRMED,
@@ -801,6 +778,42 @@ class RoomPublishView(APIView):
                 }
             )
 
+        # ---------------------------------------------------------
+        # LISTING ENTITLEMENT GUARD
+        # ---------------------------------------------------------
+        # A current paid period can be republished normally. If that
+        # period has ended, consume the room's one-time complimentary
+        # 30-day benefit before requiring another payment.
+        if room.paid_until is None or room.paid_until < today:
+            activated = consume_complimentary_listing_benefit(
+                room,
+                reason=RoomListingBenefit.ConsumptionReason.FUTURE_RELIST,
+            )
+
+            if activated is None:
+                raise ValidationError(
+                    {
+                        "detail": (
+                            "This listing does not have an active paid "
+                            "advertising period. Payment is required "
+                            "before it can be published."
+                        ),
+                        "payment_required": True,
+                    }
+                )
+
+            room, _benefit = activated
+            bump_buster()
+
+            return ok_response(
+                {
+                    "id": room.id,
+                    "status": room.status,
+                    "listing_state": _listing_state_for_room(room),
+                },
+                message="Your complimentary 30-day listing is now active.",
+                status_code=status.HTTP_200_OK,
+            )
         # ---------------------------------------------------------
         # REACTIVATE LISTING
         # ---------------------------------------------------------

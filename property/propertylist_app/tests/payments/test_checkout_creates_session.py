@@ -41,6 +41,7 @@ def test_checkout_creates_session_for_owner_room(monkeypatch):
     def fake_session_create(**kwargs):
         assert kwargs.get("mode") == "payment"
         assert "metadata" in kwargs
+        assert kwargs["line_items"][0]["price_data"]["unit_amount"] == 799
         return FakeSession()
 
     # Patch BOTH Stripe calls used in the view
@@ -69,7 +70,7 @@ def test_checkout_creates_session_for_owner_room(monkeypatch):
     # Assert DB side-effects
     p = Payment.objects.get(room=room)
     assert p.user == owner
-    assert p.amount == 1.00
+    assert p.amount == 7.99
     assert p.currency == "GBP"
     assert p.status == "created"
     assert p.stripe_checkout_session_id == "cs_test_456"

@@ -9,13 +9,24 @@ from django.db.models import DateTimeField, OuterRef, Subquery
 from django.utils import timezone
 
 from notifications.models import NotificationTemplate, OutboundNotification
-from propertylist_app.models import Notification, Payment, Room, UserProfile
+from propertylist_app.models import (
+    Notification,
+    Payment,
+    Room,
+    RoomListingBenefit,
+    UserProfile,
+)
 from propertylist_app.services.deep_links import build_absolute_url
+from propertylist_app.services.listing_entitlements import (
+    consume_complimentary_listing_benefit,
+    notify_complimentary_listing_auto_renewal,
+)
 from propertylist_app.services.realtime import push_user_realtime_event
 
 
 PRODUCTION_WARNING_DAYS = 7
 QA_WARNING_AFTER_MINUTES = 15
+QA_EXPIRY_AFTER_MINUTES = 20
 
 
 def _qa_mode() -> bool:
@@ -36,7 +47,13 @@ def _qa_mode() -> bool:
 
 
 def _active_paid_rooms_with_cycle_start():
-    """Rooms eligible for advert-expiry processing, with latest paid-cycle time."""
+    """
+    Rooms eligible for advert-expiry processing.
+
+    A complimentary period is a new advertising cycle even though it has no
+    Payment row, so QA timing uses the later of payment.updated_at and the
+    benefit's consumed_at timestamp.
+    """
     latest_payment = (
         Payment.objects.filter(
             room_id=OuterRef("pk"),
@@ -44,6 +61,7 @@ def _active_paid_rooms_with_cycle_start():
         )
         .order_by("-updated_at")
     )
+    benefit = RoomListingBenefit.objects.filter(room_id=OuterRef("pk"))
 
     return (
         Room.objects.select_related("property_owner")
@@ -59,13 +77,44 @@ def _active_paid_rooms_with_cycle_start():
                 output_field=DateTimeField(),
             ),
             paid_cycle_id=Subquery(latest_payment.values("id")[:1]),
+            complimentary_cycle_started_at=Subquery(
+                benefit.values("consumed_at")[:1],
+                output_field=DateTimeField(),
+            ),
+            complimentary_cycle_id=Subquery(benefit.values("id")[:1]),
         )
     )
 
 
+def _effective_cycle_start(room: Room):
+    starts = [
+        value
+        for value in (
+            getattr(room, "paid_cycle_started_at", None),
+            getattr(room, "complimentary_cycle_started_at", None),
+        )
+        if value is not None
+    ]
+    return max(starts) if starts else None
+
+
 def _cycle_key(room: Room) -> str:
+    paid_start = getattr(room, "paid_cycle_started_at", None)
+    complimentary_start = getattr(room, "complimentary_cycle_started_at", None)
+
+    if (
+        complimentary_start is not None
+        and (
+            paid_start is None
+            or complimentary_start >= paid_start
+        )
+        and getattr(room, "complimentary_cycle_id", None)
+    ):
+        return f"benefit:{room.complimentary_cycle_id}"
+
     if getattr(room, "paid_cycle_id", None):
         return f"payment:{room.paid_cycle_id}"
+
     return f"room:{room.pk}:paid-until:{room.paid_until}"
 
 
@@ -156,26 +205,27 @@ def _create_bell_once(*, room: Room, notification_type: str, title: str, body: s
 
 @shared_task(name="propertylist_app.listing_expiry_warning_sweep")
 def listing_expiry_warning_sweep() -> int:
-    """Queue exactly one pre-expiry warning per paid advertising cycle."""
+    """Queue exactly one pre-expiry warning per advertising cycle."""
     now = timezone.now()
     today = timezone.localdate()
     qa_mode = _qa_mode()
-    rooms = _active_paid_rooms_with_cycle_start().filter(paid_until__gte=today)
 
-    if qa_mode:
-        rooms = rooms.filter(
-            paid_cycle_started_at__isnull=False,
-            paid_cycle_started_at__lte=(
-                now - timedelta(minutes=QA_WARNING_AFTER_MINUTES)
-            ),
-        )
-    else:
+    rooms = _active_paid_rooms_with_cycle_start().filter(paid_until__gte=today)
+    if not qa_mode:
         rooms = rooms.filter(
             paid_until__lte=today + timedelta(days=PRODUCTION_WARNING_DAYS)
         )
 
     queued = 0
     for room in rooms:
+        cycle_start = _effective_cycle_start(room)
+        if qa_mode:
+            if (
+                cycle_start is None
+                or cycle_start > now - timedelta(minutes=QA_WARNING_AFTER_MINUTES)
+            ):
+                continue
+
         owner = room.property_owner
         if not _notifications_allowed(owner):
             continue
@@ -185,8 +235,8 @@ def listing_expiry_warning_sweep() -> int:
             room_paid_until = str(room.paid_until)
             body = (
                 f"QA reminder: your listing '{room.title}' has been active for "
-                f"at least {QA_WARNING_AFTER_MINUTES} minutes. Its paid listing "
-                f"period still expires on {room.paid_until}."
+                f"at least {QA_WARNING_AFTER_MINUTES} minutes. Its current "
+                f"listing period still expires on {room.paid_until}."
             )
         else:
             room_paid_until = str(room.paid_until)
@@ -200,7 +250,7 @@ def listing_expiry_warning_sweep() -> int:
             notification_type="listing_expiring",
             title="Your listing is expiring soon",
             body=body,
-            cycle_start=getattr(room, "paid_cycle_started_at", None),
+            cycle_start=cycle_start,
         )
         if _queue_email(
             room=room,
@@ -215,15 +265,54 @@ def listing_expiry_warning_sweep() -> int:
 
 @shared_task(name="propertylist_app.listing_expiry_sweep")
 def listing_expiry_sweep() -> int:
-    """Expire adverts only when their real paid advertising period has ended."""
+    """
+    End an advertising cycle, consuming the room's reserved complimentary
+    30-day benefit first when the room is still actively available.
+    """
+    now = timezone.now()
     today = timezone.localdate()
-    rooms = _active_paid_rooms_with_cycle_start().filter(paid_until__lt=today)
+    qa_mode = _qa_mode()
 
-    expired = 0
+    rooms = _active_paid_rooms_with_cycle_start()
+    if not qa_mode:
+        rooms = rooms.filter(paid_until__lt=today)
+
+    processed = 0
+
     for room in rooms:
-        cycle_start = getattr(room, "paid_cycle_started_at", None)
-        cycle_key = _cycle_key(room)
+        cycle_start = _effective_cycle_start(room)
+        if qa_mode:
+            if (
+                cycle_start is None
+                or cycle_start > now - timedelta(minutes=QA_EXPIRY_AFTER_MINUTES)
+            ):
+                continue
+
         original_paid_until = room.paid_until
+
+        activated = consume_complimentary_listing_benefit(
+            room,
+            reason=RoomListingBenefit.ConsumptionReason.AUTOMATIC_EXTENSION,
+            base_date=original_paid_until,
+        )
+        if activated is not None:
+            renewed_room, benefit = activated
+            notify_complimentary_listing_auto_renewal(
+                renewed_room,
+                benefit,
+            )
+            processed += 1
+            continue
+
+        # In accelerated QA mode the real paid_until date may still be weeks
+        # away. Once the 20-minute cycle elapses, normalise to an expired date.
+        if qa_mode and room.paid_until >= today:
+            expired_date = today - timedelta(days=1)
+            Room.objects.filter(pk=room.pk).update(
+                paid_until=expired_date,
+                updated_at=now,
+            )
+            room.paid_until = expired_date
 
         owner = room.property_owner
         if _notifications_allowed(owner):
@@ -241,10 +330,10 @@ def listing_expiry_sweep() -> int:
             _queue_email(
                 room=room,
                 template_key="listing.expired",
-                cycle_key=cycle_key,
+                cycle_key=_cycle_key(room),
                 room_paid_until=str(original_paid_until or ""),
             )
 
-        expired += 1
+        processed += 1
 
-    return expired
+    return processed

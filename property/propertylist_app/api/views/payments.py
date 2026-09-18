@@ -45,6 +45,10 @@ from propertylist_app.validators import (
 )
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.services.realtime import push_user_realtime_event
+from propertylist_app.services.listing_entitlements import (
+    grant_complimentary_listing_benefit,
+    listing_fee_gbp,
+)
 from propertylist_app.api.schema_helpers import standard_response_serializer
 from propertylist_app.api.permissions import IsFinanceAdmin
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
@@ -336,6 +340,8 @@ def stripe_webhook(request):
                         room.set_status(Room.Lifecycle.ACTIVE)
                         room.save(update_fields=["status", "paid_until"])
 
+                    grant_complimentary_listing_benefit(payment)
+
                     payment_notification = Notification.objects.create(
                         user=payment.user,
                         type="confirmation",
@@ -548,6 +554,8 @@ def stripe_webhook(request):
                                 "paid_until",
                             ]
                         )
+
+                    grant_complimentary_listing_benefit(payment)
 
                     payment_notification = Notification.objects.create(
                         user=payment.user,
@@ -897,8 +905,8 @@ class CreateListingPaymentIntentView(APIView):
 
         customer_id = profile.stripe_customer_id
 
-        # Same listing fee as web Checkout: £1.00.
-        amount_gbp = Decimal("1.00")
+        # Same listing fee as web Checkout.
+        amount_gbp = listing_fee_gbp()
         amount_pence = int(amount_gbp * 100)
 
         # Create the same internal Payment resource used by web payments.
@@ -1068,8 +1076,8 @@ class CreateListingCheckoutSessionView(APIView):
 
         customer_id = profile.stripe_customer_id or None
 
-        # Listing fee â€“ still Â£1.00 for 4 weeks
-        amount_gbp = Decimal("1.00")
+        # Listing fee for one 30-day advertising period
+        amount_gbp = listing_fee_gbp()
         amount_pence = int(amount_gbp * 100)
 
         # Create our internal Payment record

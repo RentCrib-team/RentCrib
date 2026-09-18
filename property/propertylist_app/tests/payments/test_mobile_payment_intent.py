@@ -24,6 +24,7 @@ class DummyCustomerSession:
 class DummyPaymentIntentAPI:
     @staticmethod
     def create(**kwargs):
+        assert kwargs["amount"] == 799
         return DummyPaymentIntent()
 
 
@@ -92,7 +93,7 @@ def test_owner_can_create_mobile_listing_payment_intent(monkeypatch):
 
     payment = Payment.objects.get(room=room, user=user)
 
-    assert payment.amount == 1
+    assert payment.amount == 7.99
     assert payment.currency == "GBP"
     assert payment.stripe_payment_intent_id == "pi_mobile_test_123"
     assert payment.status == Payment.Status.REQUIRES_PAYMENT
