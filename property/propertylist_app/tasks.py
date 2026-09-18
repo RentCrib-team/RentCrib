@@ -950,18 +950,20 @@ def task_tenancy_prompts_sweep() -> int:
         # dates and duration are identical to the previous cycle. Use the
         # accepted extension row as the stable cycle identity so same-terms
         # renewals cannot reuse an older ending-reminder message.
-        latest_accepted_extension = (
-            tenancy.extensions
-            .filter(
-                status="accepted",
-                responded_at__isnull=False,
+        latest_accepted_extension = None
+        if event_type == "still_living_check":
+            latest_accepted_extension = (
+                tenancy.extensions
+                .filter(
+                    status="accepted",
+                    responded_at__isnull=False,
+                )
+                .order_by(
+                    "-responded_at",
+                    "-id",
+                )
+                .first()
             )
-            .order_by(
-                "-responded_at",
-                "-id",
-            )
-            .first()
-        )
 
         if latest_accepted_extension is None:
             event_key = legacy_event_key
