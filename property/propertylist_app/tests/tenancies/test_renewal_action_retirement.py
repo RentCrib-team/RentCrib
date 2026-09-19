@@ -111,3 +111,46 @@ def test_renewal_actions_retire_when_response_window_expires(
 
     assert extension.status == TenancyExtension.STATUS_CANCELED
     assert proposal_message.metadata["available_actions"] == []
+
+
+
+def test_accepted_renewal_retires_current_ending_reminder_action(
+    user_factory,
+    room_factory,
+):
+    Message = _model("Message")
+    MessageThread = _model("MessageThread")
+    TenancyExtension = _model("TenancyExtension")
+
+    landlord = user_factory(username="ending_retire_landlord")
+    tenant = user_factory(username="ending_retire_tenant")
+    room = room_factory(property_owner=landlord)
+    tenancy = _make_active_tenancy(room, landlord, tenant)
+
+    thread = MessageThread.objects.create()
+    thread.participants.set([landlord, tenant])
+    ending_reminder = Message.objects.create(
+        thread=thread,
+        sender=landlord,
+        body="Your tenancy is ending soon.",
+        metadata={
+            "system_event": True,
+            "event_type": "still_living_check",
+            "tenancy_id": tenancy.id,
+            "available_actions": ["update_tenancy"],
+        },
+    )
+
+    extension = TenancyExtension.objects.create(
+        tenancy=tenancy,
+        proposed_by=landlord,
+        proposed_start_date=date.today() + timedelta(days=1),
+        proposed_duration_months=1,
+        status=TenancyExtension.STATUS_PROPOSED,
+    )
+    extension.status = TenancyExtension.STATUS_ACCEPTED
+    extension.responded_at = timezone.now()
+    extension.save(update_fields=["status", "responded_at"])
+
+    ending_reminder.refresh_from_db()
+    assert ending_reminder.metadata["available_actions"] == []

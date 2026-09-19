@@ -28,7 +28,7 @@ from propertylist_app.models import (
     Room, RoomCategorie, Review, UserProfile, RoomImage,
     SavedRoom, MessageThread, Message, Booking,
     AvailabilitySlot, Payment, Report, Notification, EmailOTP,
-    MessageThreadState, ContactMessage,PhoneOTP,Tenancy,LandlordVerificationRequest,
+    MessageThreadState, ContactMessage,PhoneOTP,Tenancy,TenancyExtension,LandlordVerificationRequest,
     IdentityVerificationRequest,
 
 )
