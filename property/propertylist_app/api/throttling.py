@@ -83,6 +83,28 @@ class RoomCreateThrottle(SimpleRateThrottle):
         }
 
 
+class RoomPhotoUploadThrottle(SimpleRateThrottle):
+    """Rate-limit photo writes independently from general API traffic."""
+
+    scope = "photo-upload"
+
+    def get_rate(self):
+        return api_settings.DEFAULT_THROTTLE_RATES.get(self.scope)
+
+    def get_cache_key(self, request, view):
+        if request.method != "POST":
+            return None
+
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return None
+
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": str(user.pk),
+        }
+
+
 
 class  ReviewCreateThrottle(UserRateThrottle):
   scope = 'review-create'
