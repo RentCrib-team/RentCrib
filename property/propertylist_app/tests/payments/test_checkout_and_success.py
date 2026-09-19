@@ -77,6 +77,12 @@ def test_checkout_creates_session_for_owner_room(mocker, owner, room):
     assert body["data"].get("checkout_url") is not None
     assert Payment.objects.filter(room=room, user=owner).exists()
 
+    # Do not pin Checkout to cards. Omitting payment_method_types lets Stripe
+    # dynamically offer eligible methods configured for the account, including
+    # Apple Pay, Google Pay and Link on supported devices.
+    checkout_kwargs = mock_stripe.checkout.Session.create.call_args.kwargs
+    assert "payment_method_types" not in checkout_kwargs
+
 
 def test_success_sets_paid_until_and_status_active(mocker, api_client, owner, room):
     """
