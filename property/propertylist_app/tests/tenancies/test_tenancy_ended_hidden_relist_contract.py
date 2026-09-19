@@ -68,7 +68,7 @@ def test_tenancy_ended_hidden_room_payment_then_publish_restores_relist_contract
     payment = Payment.objects.create(
         user=landlord,
         room=room,
-        amount="1.00",
+        amount="7.99",
         currency="GBP",
         status=Payment.Status.CREATED,
     )
