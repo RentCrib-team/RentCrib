@@ -493,21 +493,20 @@ def test_thread_detail_is_scoped_to_authoritative_active_role():
     ).exists()
 
 @pytest.mark.parametrize(
-    "room_changes",
+    ("case_name", "room_changes"),
     [
-        {"status": "draft"},
-        {"is_available": False},
-        {"paid_until": date.today() - timedelta(days=1)},
+        ("draft", {"status": "draft"}),
+        ("unavailable", {"is_available": False}),
+        ("expired", {"paid_until": date.today() - timedelta(days=1)}),
     ],
-    ids=["draft", "unavailable", "expired"],
 )
-def test_start_thread_from_nonpublic_room_is_rejected(room_changes):
-    landlord = _mk_user(f"blocked-landlord-{room_changes!s}")
-    seeker = _mk_user(f"blocked-seeker-{room_changes!s}")
+def test_start_thread_from_nonpublic_room_is_rejected(case_name, room_changes):
+    landlord = _mk_user(f"blocked-landlord-{case_name}")
+    seeker = _mk_user(f"blocked-seeker-{case_name}")
     room = _mk_room(
         landlord,
         status="active",
-        key_suffix="-blocked",
+        key_suffix=f"-{case_name}",
     )
 
     for field, value in room_changes.items():

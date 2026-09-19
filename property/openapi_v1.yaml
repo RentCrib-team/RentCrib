@@ -6367,9 +6367,8 @@ components:
           type: boolean
         display_order:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         room_count:
           type: integer
           readOnly: true
@@ -7267,9 +7266,8 @@ components:
           format: date-time
         max_bookings:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         is_full:
           type: boolean
           readOnly: true
@@ -9035,14 +9033,12 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         number_of_bathrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         bathroom_type:
           enum:
           - private
@@ -9100,15 +9096,13 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_type:
           enum:
@@ -9221,27 +9215,23 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         room_for:
           enum:
@@ -9269,9 +9259,8 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -10159,9 +10148,8 @@ components:
           type: boolean
         display_order:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         room_count:
           type: integer
           readOnly: true
@@ -10309,9 +10297,8 @@ components:
           x-spec-enum-id: 419efe661ee3fa5f
         object_id:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         reason:
           type: string
           maxLength: 64
@@ -10481,14 +10468,12 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         number_of_bathrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         bathroom_type:
           enum:
           - private
@@ -10546,15 +10531,13 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_type:
           enum:
@@ -10667,27 +10650,23 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         room_for:
           enum:
@@ -10715,9 +10694,8 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -11459,9 +11437,8 @@ components:
           x-spec-enum-id: 419efe661ee3fa5f
         object_id:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         reason:
           type: string
           maxLength: 64
@@ -11777,14 +11754,12 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         number_of_bathrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         bathroom_type:
           enum:
           - private
@@ -11842,15 +11817,13 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_type:
           enum:
@@ -11963,27 +11936,23 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         room_for:
           enum:
@@ -12011,9 +11980,8 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
