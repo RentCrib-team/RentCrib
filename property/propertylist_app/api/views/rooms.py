@@ -61,7 +61,10 @@ from propertylist_app.validators import (
 )
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.permissions import IsAdminOrReadOnly, IsOwnerOrReadOnly
-from propertylist_app.api.throttling import RoomCreateThrottle
+from propertylist_app.api.throttling import (
+    RoomCreateThrottle,
+    RoomPhotoUploadThrottle,
+)
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import standard_response_serializer,standard_paginated_response_serializer
 from propertylist_app.api.serializers import (
@@ -861,6 +864,12 @@ class RoomPublishView(APIView):
         
 class RoomPhotoUploadView(APIView):
     parser_classes = [MultiPartParser, FormParser]
+    # Photo uploads have their own allowance. This deliberately replaces the
+    # global UserRateThrottle on this view so unrelated browsing, notification
+    # polling, and staging QA cannot consume the landlord's upload capacity.
+    # The custom throttle ignores GET, so moderation-status reads do not spend
+    # photo-upload tokens.
+    throttle_classes = [RoomPhotoUploadThrottle]
 
     def get_permissions(self):
         # Anyone can view approved photos; only authenticated owners can upload
