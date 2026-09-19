@@ -1,5 +1,6 @@
 """Query optimization for room detail retrieval."""
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from propertylist_app.api.views.rooms import RoomDetailAV
@@ -11,7 +12,7 @@ _INSTALLED = False
 
 
 def _optimized_get_room(self, request, pk):
-    """Fetch owner-private rooms or a genuinely public room with related data joined."""
+    """Fetch a room when it is public or belongs to this tenancy participant."""
     related = (
         "category",
         "property_owner",
@@ -19,18 +20,23 @@ def _optimized_get_room(self, request, pk):
     )
 
     if request.user.is_authenticated:
-        owned_room = (
+        participant_room = (
             Room.objects.filter(
                 pk=pk,
-                property_owner=request.user,
                 is_deleted=False,
             )
+            .filter(
+                Q(property_owner=request.user)
+                | Q(tenancies__landlord=request.user)
+                | Q(tenancies__tenant=request.user)
+            )
             .select_related(*related)
+            .distinct()
             .first()
         )
 
-        if owned_room is not None:
-            return owned_room
+        if participant_room is not None:
+            return participant_room
 
     return get_object_or_404(
         _public_rooms_queryset().select_related(*related),
