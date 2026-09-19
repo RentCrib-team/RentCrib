@@ -1160,7 +1160,7 @@ class RoomPhotoDeleteView(APIView):
 # My Rooms / Search / Nearby
 # --------------------
 class MyRoomsView(generics.ListAPIView):
-    serializer_class = RoomSerializer
+    serializer_class = MyListingRoomSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardLimitOffsetPagination
 
@@ -1170,7 +1170,9 @@ class MyRoomsView(generics.ListAPIView):
 
         # Owner's own listings must include unpublished/hidden rooms.
         # Only genuinely soft-deleted rooms are excluded.
-        return Room.objects.filter(
+        return Room.objects.select_related(
+            "complimentary_listing_benefit",
+        ).filter(
             property_owner=self.request.user,
             is_deleted=False,
         ).order_by("-updated_at")  
