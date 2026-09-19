@@ -19,6 +19,11 @@ from drf_spectacular.types import OpenApiTypes
 
 from drf_spectacular.utils import extend_schema_field
 from propertylist_app.models import Room, Booking, Tenancy  # ensure Booking + Tenancy imported
+from propertylist_app.review_ratings import (
+    CONTRADICTORY_PAIRS,
+    LANDLORD_TO_TENANT_FLAGS,
+    TENANT_TO_LANDLORD_FLAGS,
+)
 from propertylist_app.models import (
     Room, RoomCategorie, Review, UserProfile, RoomImage,
     SavedRoom, MessageThread, Message, Booking,
@@ -362,31 +367,13 @@ class ReviewCreateSerializer(serializers.Serializer):
         allow_empty=True,
     )
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    TENANT_TO_LANDLORD_FLAGS = {
-    "responsive",
-    "maintenance_good",
-    "accurate_listing",
-    "respectful_fair",
-    "unresponsive",
-    "maintenance_poor",
-    "misleading_listing",
-    "unfair_treatment",
-    }
+    TENANT_TO_LANDLORD_FLAGS = frozenset(
+        TENANT_TO_LANDLORD_FLAGS["positives"]
+    ) | frozenset(TENANT_TO_LANDLORD_FLAGS["negatives"])
 
-    LANDLORD_TO_TENANT_FLAGS = {
-        "clean_and_tidy",
-        "friendly",
-        "good_communication",
-        "paid_on_time",
-        "property_care_good",
-        "followed_rules",
-        "messy",
-        "rude",
-        "poor_communication",
-        "late_payment",
-        "property_care_poor",
-        "broke_rules",
-    }
+    LANDLORD_TO_TENANT_FLAGS = frozenset(
+        LANDLORD_TO_TENANT_FLAGS["positives"]
+    ) | frozenset(LANDLORD_TO_TENANT_FLAGS["negatives"])
 
 
 
@@ -458,6 +445,31 @@ class ReviewCreateSerializer(serializers.Serializer):
                             f"Invalid review flag(s) for {role}: "
                             f"{', '.join(sorted(set(invalid_flags)))}"
                         )
+                    ]
+                }
+            )
+
+        if len(flags) != len(set(flags)):
+            raise serializers.ValidationError(
+                {"review_flags": ["Each review flag may only be selected once."]}
+            )
+
+        flag_set = set(flags)
+        contradictory = [
+            (positive, negative)
+            for positive, negative in CONTRADICTORY_PAIRS
+            if positive in flag_set and negative in flag_set
+        ]
+        if contradictory:
+            pairs = ", ".join(
+                f"'{positive}' and '{negative}'"
+                for positive, negative in contradictory
+            )
+            raise serializers.ValidationError(
+                {
+                    "review_flags": [
+                        "Conflicting review options cannot be selected together: "
+                        f"{pairs}."
                     ]
                 }
             )
