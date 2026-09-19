@@ -1185,7 +1185,8 @@ def task_tenancy_prompts_sweep() -> int:
             ),
             available_action="update_tenancy",
         )
-
+        
+        
         if prompt_thread is not None:
             # Mobile app deep link.
             deep_link = f"/app/threads/{prompt_thread.id}"
