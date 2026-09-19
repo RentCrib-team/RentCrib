@@ -380,3 +380,39 @@ def test_benefit_survives_tenancy_end_and_is_used_on_later_relist(
     assert benefit.consumed_reason == (
         RoomListingBenefit.ConsumptionReason.FUTURE_RELIST
     )
+
+
+def test_my_rooms_exposes_unused_complimentary_relist_benefit(
+    user_factory,
+    room_factory,
+):
+    owner = user_factory(username="benefit_my_rooms_owner")
+    room = room_factory(property_owner=owner)
+    _, benefit = _grant(owner, room)
+
+    client = APIClient()
+    client.force_authenticate(user=owner)
+
+    response = client.get(reverse("api:rooms-mine"))
+
+    assert response.status_code == 200, response.data
+    listing = next(
+        item for item in response.data["results"] if item["id"] == room.id
+    )
+    assert listing["complimentary_relist_available"] is True
+
+    benefit.consumed_at = timezone.now()
+    benefit.consumed_reason = (
+        RoomListingBenefit.ConsumptionReason.FUTURE_RELIST
+    )
+    benefit.save(
+        update_fields=["consumed_at", "consumed_reason", "updated_at"]
+    )
+
+    response = client.get(reverse("api:rooms-mine"))
+
+    assert response.status_code == 200, response.data
+    listing = next(
+        item for item in response.data["results"] if item["id"] == room.id
+    )
+    assert listing["complimentary_relist_available"] is False

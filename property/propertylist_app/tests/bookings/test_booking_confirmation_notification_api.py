@@ -18,7 +18,11 @@ def test_booking_create_creates_confirmation_notification_when_enabled(user_fact
     profile.notify_confirmations = True
     profile.save(update_fields=["notify_confirmations"])
 
-    room = room_factory()
+    room = room_factory(
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
+    )
 
     payload = {
         "room": room.id,
@@ -45,7 +49,11 @@ def test_booking_create_does_not_create_confirmation_notification_when_disabled(
     profile.notify_confirmations = False
     profile.save(update_fields=["notify_confirmations"])
 
-    room = room_factory()
+    room = room_factory(
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
+    )
 
     payload = {
         "room": room.id,

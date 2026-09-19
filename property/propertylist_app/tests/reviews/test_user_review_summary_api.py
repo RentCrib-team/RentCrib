@@ -143,5 +143,5 @@ def test_review_summary_total_is_sum_of_landlord_and_tenant_counts():
     assert tenant_count == 1
     assert total == landlord_count + tenant_count
 
-    expected = (5 * 2 + 3 * 1) / 3
+    expected = (4.1 + 3.9 + 3.0) / 3
     assert res.data["overall_rating_average"] == pytest.approx(expected, rel=1e-6)

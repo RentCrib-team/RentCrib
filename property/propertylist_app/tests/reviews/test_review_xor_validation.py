@@ -102,3 +102,44 @@ def test_xor_rejects_notes_only(user_factory, room_factory):
 
     res = client.post(_url(), data=payload, format="json")
     assert res.status_code == 400, getattr(res, "data", None)
+
+def test_rejects_contradictory_review_flags(user_factory, room_factory):
+    Tenancy = _get_model("propertylist_app", "Tenancy")
+
+    landlord = user_factory(username="xor_landlord_4")
+    tenant = user_factory(username="xor_tenant_4")
+    room = room_factory(property_owner=landlord)
+    tenancy = _make_tenancy(room, landlord, tenant, status=Tenancy.STATUS_ENDED)
+
+    response = _auth(tenant).post(
+        _url(),
+        data={
+            "tenancy_id": tenancy.id,
+            "review_flags": ["responsive", "unresponsive"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "conflicting" in str(response.data).lower()
+
+
+def test_rejects_duplicate_review_flags(user_factory, room_factory):
+    Tenancy = _get_model("propertylist_app", "Tenancy")
+
+    landlord = user_factory(username="xor_landlord_5")
+    tenant = user_factory(username="xor_tenant_5")
+    room = room_factory(property_owner=landlord)
+    tenancy = _make_tenancy(room, landlord, tenant, status=Tenancy.STATUS_ENDED)
+
+    response = _auth(tenant).post(
+        _url(),
+        data={
+            "tenancy_id": tenancy.id,
+            "review_flags": ["responsive", "responsive"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "only be selected once" in str(response.data).lower()

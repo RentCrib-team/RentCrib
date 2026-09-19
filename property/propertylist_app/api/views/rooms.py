@@ -49,6 +49,7 @@ from drf_spectacular.types import OpenApiTypes
 #Project
 from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
 from propertylist_app.services.image import (
+    build_listing_thumbnail,
     compress_listing_upload,
     prepare_moderation_task_payload,
 )
@@ -298,7 +299,10 @@ class RoomAV(CachedAnonymousGETMixin, APIView):
 
         serializer = RoomSerializer(page, many=True, context={"request": request})
         resp = paginator.get_paginated_response(serializer.data)
-        response = _wrap_response_success(resp)
+        response = _wrap_response_success(
+            resp,
+            include_legacy=(request.query_params.get("compact") != "1"),
+        )
         return self._store_cached_response(request, response)
 
 
@@ -417,23 +421,30 @@ class RoomDetailAV(CachedAnonymousGETMixin, APIView):
     
     def _get_room(self, request, pk):
         """
-        Owners may access their own unpublished/hidden room.
+        Owners may access their own unpublished/hidden room. A landlord or
+        tenant may also access the room attached to their tenancy, including
+        after the room has become unavailable or hidden from public search.
 
         Everyone else continues to see only non-hidden, non-deleted rooms.
         Read querysets eager-load RoomSerializer relations to avoid N+1 queries.
         """
         if request.user.is_authenticated:
-            owned_qs = _optimised_room_read_queryset(
+            private_qs = _optimised_room_read_queryset(
                 Room.objects.filter(is_deleted=False),
                 request,
             )
-            owned_room = owned_qs.filter(
+            private_room = private_qs.filter(
+                Q(property_owner=request.user)
+                | Q(
+                    tenancies__in=Tenancy.objects.filter(
+                        Q(landlord=request.user) | Q(tenant=request.user),
+                    ),
+                ),
                 pk=pk,
-                property_owner=request.user,
-            ).first()
+            ).distinct().first()
 
-            if owned_room is not None:
-                return owned_room
+            if private_room is not None:
+                return private_room
 
         public_qs = _optimised_room_read_queryset(
             Room.objects.alive(),
@@ -1025,10 +1036,19 @@ class RoomPhotoUploadView(APIView):
             except Exception:
                 pass
 
+        try:
+            thumbnail = build_listing_thumbnail(file_obj)
+        except Exception:
+            # The original upload remains usable; a backfill command can
+            # generate the rendition later without failing the landlord's
+            # upload request.
+            thumbnail = None
+
         # SINGLE SOURCE OF TRUTH: create the image only once.
         image = RoomImage.objects.create(
             room=room,
             image=file_obj,
+            thumbnail=thumbnail,
             status=RoomImage.STATUS_PENDING,
             moderation_reason=(
                 RoomImage.MODERATION_AWAITING_CHECK
@@ -1160,7 +1180,7 @@ class RoomPhotoDeleteView(APIView):
 # My Rooms / Search / Nearby
 # --------------------
 class MyRoomsView(generics.ListAPIView):
-    serializer_class = RoomSerializer
+    serializer_class = MyListingRoomSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardLimitOffsetPagination
 
@@ -1170,7 +1190,9 @@ class MyRoomsView(generics.ListAPIView):
 
         # Owner's own listings must include unpublished/hidden rooms.
         # Only genuinely soft-deleted rooms are excluded.
-        return Room.objects.filter(
+        return Room.objects.select_related(
+            "complimentary_listing_benefit",
+        ).filter(
             property_owner=self.request.user,
             is_deleted=False,
         ).order_by("-updated_at")  

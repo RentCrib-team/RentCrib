@@ -22,6 +22,8 @@ MODERATION_JPEG_QUALITY = 90
 
 LISTING_UPLOAD_MAX_DIMENSION = 2048
 LISTING_UPLOAD_WEBP_QUALITY = 82
+LISTING_THUMBNAIL_MAX_DIMENSION = 640
+LISTING_THUMBNAIL_WEBP_QUALITY = 76
 
 
 def compress_listing_upload(uploaded_file):
@@ -121,6 +123,46 @@ def compress_listing_upload(uploaded_file):
             pass
 
         return uploaded_file
+
+
+def build_listing_thumbnail(uploaded_file):
+    """Return a 640px WebP card rendition without modifying the source."""
+    try:
+        uploaded_file.seek(0)
+        original_name = getattr(uploaded_file, "name", "listing-photo")
+
+        with Image.open(uploaded_file) as source:
+            image = ImageOps.exif_transpose(source)
+            image.load()
+            image.thumbnail(
+                (LISTING_THUMBNAIL_MAX_DIMENSION,) * 2,
+                Image.Resampling.LANCZOS,
+            )
+
+            if image.mode in ("RGBA", "LA"):
+                background = Image.new("RGB", image.size, "white")
+                background.paste(image, mask=image.getchannel("A"))
+                image = background
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            output = io.BytesIO()
+            image.save(
+                output,
+                format="WEBP",
+                quality=LISTING_THUMBNAIL_WEBP_QUALITY,
+                method=6,
+            )
+            stem = Path(original_name).stem or "listing-photo"
+            thumbnail = ContentFile(output.getvalue(), name=f"{stem}-card.webp")
+            thumbnail.content_type = "image/webp"
+            thumbnail.seek(0)
+            return thumbnail
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
 
 
 def _normalise_image_for_moderation(uploaded_file):

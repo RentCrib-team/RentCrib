@@ -36,16 +36,16 @@ def _image_upload(name="city.jpg", *, width=1600, height=900):
 @pytest.mark.django_db
 def test_public_city_without_upload_uses_backend_fallback(api_client):
     City.objects.all().delete()
-    City.objects.create(name="Southampton", is_active=True)
+    City.objects.create(name="London", slug="london", is_active=True)
 
     response = api_client.get(
         PUBLIC_CITIES_URL,
-        {"q": "Southampton", "limit": 100},
+        {"q": "London", "limit": 100},
     )
 
     assert response.status_code == 200
     city = response.data["data"][0]
-    assert city["name"] == "Southampton"
+    assert city["name"] == "London"
     assert city["image"] is None
     assert city["has_image"] is False
     assert city["image_url"].endswith(FALLBACK_SUFFIX)

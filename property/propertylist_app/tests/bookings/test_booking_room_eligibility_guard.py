@@ -5,7 +5,17 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from propertylist_app.models import AvailabilitySlot, Booking, Room
+from propertylist_app.models import (
+    AvailabilitySlot,
+    Booking,
+    Payment,
+    Room,
+    RoomListingBenefit,
+)
+from propertylist_app.services.listing_entitlements import (
+    consume_complimentary_listing_benefit,
+    grant_complimentary_listing_benefit,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -167,4 +177,54 @@ def test_canonical_booking_still_accepts_active_available_paid_room(
     )
 
     assert response.status_code == 201, response.data
+    assert Booking.objects.filter(room=room, user=seeker).count() == 1
+
+
+def test_legacy_booking_accepts_room_during_activated_complimentary_period(
+    user_factory,
+    room_factory,
+):
+    owner = user_factory(username="eligibility_free_period_owner")
+    seeker = user_factory(username="eligibility_free_period_seeker")
+    room = room_factory(property_owner=owner)
+    first_paid_until = timezone.localdate() - timedelta(days=1)
+    _set_room_state(
+        room,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=first_paid_until,
+    )
+
+    payment = Payment.objects.create(
+        user=owner,
+        room=room,
+        amount="7.99",
+        currency="gbp",
+        status=Payment.Status.SUCCEEDED,
+        provider="stripe",
+    )
+    benefit, created = grant_complimentary_listing_benefit(payment)
+    assert created is True
+
+    activated = consume_complimentary_listing_benefit(
+        room,
+        reason=RoomListingBenefit.ConsumptionReason.AUTOMATIC_EXTENSION,
+        base_date=first_paid_until,
+    )
+    assert activated is not None
+
+    room.refresh_from_db()
+    assert room.paid_until == first_paid_until + timedelta(days=30)
+
+    start = (timezone.now() + timedelta(days=2)).replace(microsecond=0)
+    response = _client_for(seeker).post(
+        reverse("v1:create-viewing-booking"),
+        {
+            "room_id": room.id,
+            "start": start.isoformat(),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
     assert Booking.objects.filter(room=room, user=seeker).count() == 1

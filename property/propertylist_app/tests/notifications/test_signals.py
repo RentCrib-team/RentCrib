@@ -178,7 +178,10 @@ def test_new_booking_signal_queues_owner_and_booker_emails():
     )
 
     for key in ("booking.new", "booking.confirmation"):
-        NotificationTemplate.objects.create(key=key, channel="email", subject="S", body="B", is_active=True)
+        NotificationTemplate.objects.update_or_create(
+            key=key,
+            defaults={"channel": "email", "subject": "S", "body": "B", "is_active": True},
+        )
 
     from propertylist_app.models import Booking
     with patch("notifications.services.send_mail", return_value=1):
@@ -866,4 +869,4 @@ def test_mark_read_after_delete_does_not_count_hidden_system_message_in_account_
     )
 
     assert response.status_code == 200
-    assert response.data["data"]["account_unread_total"] == 0       
+    assert response.data["data"]["account_unread_total"] == 0

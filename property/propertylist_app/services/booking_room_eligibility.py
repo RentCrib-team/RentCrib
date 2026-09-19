@@ -54,6 +54,7 @@ def install_booking_room_eligibility_guard():
         return
 
     from propertylist_app.api.views import bookings as booking_views
+    from propertylist_app.api.views import viewing_bookings as viewing_booking_views
 
     # POST /bookings/create/ is an @api_view function. Patch its generated
     # DRF view-class POST handler so authentication/parsing/decorators remain
@@ -63,13 +64,17 @@ def install_booking_room_eligibility_guard():
     original_preflight_post = preflight_view.cls.post
 
     def guarded_preflight_post(self, request, *args, **kwargs):
+        # The preflight view hashes request.body for idempotency after this
+        # guard returns control to it. Cache the raw body before request.data
+        # parses the stream, otherwise Django raises RawPostDataException.
+        request.body
         _ensure_existing_room_is_bookable(request.data.get("room"))
         return original_preflight_post(self, request, *args, **kwargs)
 
     preflight_view.cls.post = guarded_preflight_post
 
     # Legacy/mobile viewing endpoint: slot_id OR room_id.
-    original_viewing_post = booking_views.CreateViewingBookingView.post
+    original_viewing_post = viewing_booking_views.CreateViewingBookingView.post
 
     def guarded_viewing_post(self, request, *args, **kwargs):
         slot_id = request.data.get("slot_id")
@@ -77,7 +82,7 @@ def install_booking_room_eligibility_guard():
         _ensure_existing_room_is_bookable(room_id)
         return original_viewing_post(self, request, *args, **kwargs)
 
-    booking_views.CreateViewingBookingView.post = guarded_viewing_post
+    viewing_booking_views.CreateViewingBookingView.post = guarded_viewing_post
 
     # Canonical POST /bookings/: slot OR direct room booking.
     original_perform_create = booking_views.BookingListCreateView.perform_create

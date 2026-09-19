@@ -72,7 +72,7 @@ REST_FRAMEWORK = {
     },
     "EXCEPTION_HANDLER": "propertylist_app.api.exceptions.custom_exception_handler",
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
-        
+
     }
 
 REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
@@ -122,6 +122,10 @@ CELERY_BEAT_SCHEDULE = {
     "delete_scheduled_accounts_daily": {
         "task": "propertylist_app.delete_scheduled_accounts",
         "schedule": crontab(hour=3, minute=10),
+    },
+    "tenancy-prompts-sweep-every-minute": {
+        "task": "propertylist_app.tasks.task_tenancy_prompts_sweep",
+        "schedule": crontab(minute="*"),
     },
 }
 

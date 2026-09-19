@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 
 from propertylist_app.models import UserProfile
@@ -16,6 +17,7 @@ def assert_social_login_payload(body):
     assert "profile" in body["data"]
 
 
+@override_settings(GOOGLE_ALLOWED_CLIENT_IDS=["test-google-client-id"])
 def test_google_register_creates_user_and_marks_profile_verified(api_client, monkeypatch):
     from propertylist_app.api.views import auth as auth_views
 
@@ -38,6 +40,7 @@ def test_google_register_creates_user_and_marks_profile_verified(api_client, mon
     assert_social_login_payload(response.json())
 
 
+@override_settings(GOOGLE_ALLOWED_CLIENT_IDS=["test-google-client-id"])
 def test_google_register_uses_unique_username_when_local_part_collides(api_client, monkeypatch):
     from propertylist_app.api.views import auth as auth_views
 

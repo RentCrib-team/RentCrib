@@ -23,6 +23,14 @@ MIGRATE_TO = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def restore_latest_schema():
+    """Do not leave later tests running against the historical schema."""
+    yield
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
+
+
 def test_backfill_only_classifies_deterministic_room_threads():
     executor = MigrationExecutor(connection)
     executor.migrate(MIGRATE_FROM)

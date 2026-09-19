@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 
@@ -30,6 +31,7 @@ def test_google_register_rejects_invalid_token():
     assert response.data.get("data") is None
 
 
+@override_settings(GOOGLE_ALLOWED_CLIENT_IDS=["test-google-client-id"])
 def test_google_register_accepts_valid_token(monkeypatch):
     client = APIClient()
 

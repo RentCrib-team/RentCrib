@@ -19,6 +19,11 @@ from drf_spectacular.types import OpenApiTypes
 
 from drf_spectacular.utils import extend_schema_field
 from propertylist_app.models import Room, Booking, Tenancy  # ensure Booking + Tenancy imported
+from propertylist_app.review_ratings import (
+    CONTRADICTORY_PAIRS,
+    LANDLORD_TO_TENANT_FLAGS,
+    TENANT_TO_LANDLORD_FLAGS,
+)
 from propertylist_app.models import (
     Room, RoomCategorie, Review, UserProfile, RoomImage,
     SavedRoom, MessageThread, Message, Booking,
@@ -56,6 +61,7 @@ from notifications.services import send_security_code_email
 # --------------------
 
 class UserReviewListSerializer(serializers.ModelSerializer):
+    overall_rating = serializers.FloatField(read_only=True)
     reviewer_name = serializers.CharField(source="reviewer.username", read_only=True)
     reviewer_avatar = serializers.SerializerMethodField()
     reveal_at = serializers.DateTimeField(read_only=True)
@@ -99,6 +105,7 @@ class UserReviewListSerializer(serializers.ModelSerializer):
 
 
 class ReviewSerializer(serializers.ModelSerializer):
+    overall_rating = serializers.FloatField(read_only=True)
     review_mode = serializers.SerializerMethodField()
     review_location = serializers.SerializerMethodField()
     display_summary = serializers.SerializerMethodField()
@@ -362,31 +369,13 @@ class ReviewCreateSerializer(serializers.Serializer):
         allow_empty=True,
     )
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    TENANT_TO_LANDLORD_FLAGS = {
-    "responsive",
-    "maintenance_good",
-    "accurate_listing",
-    "respectful_fair",
-    "unresponsive",
-    "maintenance_poor",
-    "misleading_listing",
-    "unfair_treatment",
-    }
+    TENANT_TO_LANDLORD_FLAGS = frozenset(
+        TENANT_TO_LANDLORD_FLAGS["positives"]
+    ) | frozenset(TENANT_TO_LANDLORD_FLAGS["negatives"])
 
-    LANDLORD_TO_TENANT_FLAGS = {
-        "clean_and_tidy",
-        "friendly",
-        "good_communication",
-        "paid_on_time",
-        "property_care_good",
-        "followed_rules",
-        "messy",
-        "rude",
-        "poor_communication",
-        "late_payment",
-        "property_care_poor",
-        "broke_rules",
-    }
+    LANDLORD_TO_TENANT_FLAGS = frozenset(
+        LANDLORD_TO_TENANT_FLAGS["positives"]
+    ) | frozenset(LANDLORD_TO_TENANT_FLAGS["negatives"])
 
 
 
@@ -458,6 +447,31 @@ class ReviewCreateSerializer(serializers.Serializer):
                             f"Invalid review flag(s) for {role}: "
                             f"{', '.join(sorted(set(invalid_flags)))}"
                         )
+                    ]
+                }
+            )
+
+        if len(flags) != len(set(flags)):
+            raise serializers.ValidationError(
+                {"review_flags": ["Each review flag may only be selected once."]}
+            )
+
+        flag_set = set(flags)
+        contradictory = [
+            (positive, negative)
+            for positive, negative in CONTRADICTORY_PAIRS
+            if positive in flag_set and negative in flag_set
+        ]
+        if contradictory:
+            pairs = ", ".join(
+                f"'{positive}' and '{negative}'"
+                for positive, negative in contradictory
+            )
+            raise serializers.ValidationError(
+                {
+                    "review_flags": [
+                        "Conflicting review options cannot be selected together: "
+                        f"{pairs}."
                     ]
                 }
             )
@@ -2607,6 +2621,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
 class MyListingRoomSerializer(RoomSerializer):
     viewing_summary = serializers.SerializerMethodField()
+    complimentary_relist_available = serializers.SerializerMethodField()
 
     class Meta(RoomSerializer.Meta):
                 fields = "__all__"
@@ -2628,6 +2643,93 @@ class MyListingRoomSerializer(RoomSerializer):
             "next_viewing_at": next_booking.start if next_booking else None,
             "next_booking_id": next_booking.id if next_booking else None,
         }
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_complimentary_relist_available(self, obj):
+        benefit = getattr(obj, "complimentary_listing_benefit", None)
+        return bool(benefit and benefit.consumed_at is None)
+
+
+class RoomCardSerializer(RoomSerializer):
+    """Compact room representation for grids, carousels and map pins."""
+
+    photo_count = serializers.SerializerMethodField(read_only=True)
+
+    class Meta(RoomSerializer.Meta):
+        fields = [
+            "id",
+            "title",
+            "location",
+            "price_per_month",
+            "avg_rating",
+            "number_rating",
+            "is_available",
+            "available_from",
+            "bills_included",
+            "landlord_type",
+            "landlord_type_label",
+            "landlord_verified",
+            "owner_name",
+            "owner_avatar",
+            "property_owner",
+            "cover_image",
+            "image_status",
+            "photo_count",
+            "latitude",
+            "longitude",
+            "created_at",
+            "updated_at",
+            "is_saved",
+            "status",
+            "listing_state",
+            "is_deleted",
+            "distance_miles",
+        ]
+
+    def _card_image(self, obj):
+        images = self._room_images(obj)
+        selected_cover_id = getattr(obj, "cover_photo_id", None)
+        if selected_cover_id:
+            images = sorted(
+                images,
+                key=lambda image: image.id != selected_cover_id,
+            )
+
+        if self._viewer_is_room_owner(obj):
+            visible = images
+        else:
+            visible = [
+                image
+                for image in images
+                if image.status == RoomImage.STATUS_APPROVED
+            ]
+            if len(visible) < 3:
+                return None
+
+        if not visible:
+            return None
+
+        image = visible[0]
+        return image.thumbnail or image.image
+
+    def get_cover_image(self, obj):
+        card_image = self._card_image(obj)
+        if card_image:
+            return self._absolute_media_url(card_image)
+
+        # Legacy Room.image fallback for listings predating RoomImage.
+        if not self._room_images(obj):
+            return self._absolute_media_url(getattr(obj, "image", None))
+        return None
+
+    def get_photo_count(self, obj):
+        images = self._room_images(obj)
+        if self._viewer_is_room_owner(obj):
+            return len(images)
+        return sum(
+            image.status == RoomImage.STATUS_APPROVED
+            for image in images
+        )
 
 
 
@@ -2948,6 +3050,16 @@ class HomeSummarySerializer(serializers.Serializer):
     """
     featured_rooms = RoomSerializer(many=True)
     latest_rooms = RoomSerializer(many=True)
+    popular_cities = CitySummarySerializer(many=True)
+    stats = serializers.DictField()
+    app_links = serializers.DictField()
+
+
+class CompactHomeSummarySerializer(serializers.Serializer):
+    """Home payload for current web clients; legacy clients keep full rooms."""
+
+    featured_rooms = RoomCardSerializer(many=True)
+    latest_rooms = RoomCardSerializer(many=True)
     popular_cities = CitySummarySerializer(many=True)
     stats = serializers.DictField()
     app_links = serializers.DictField()

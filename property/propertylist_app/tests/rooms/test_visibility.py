@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from propertylist_app.models import Room, RoomCategorie
+from propertylist_app.models import Room, RoomCategorie, Tenancy
 from propertylist_app.tasks import expire_paid_listings
 
 
@@ -64,7 +64,7 @@ def test_hidden_room_not_in_list_or_search():
 
 
 @pytest.mark.django_db
-def test_expired_room_hidden_after_scheduler():
+def test_expired_room_keeps_active_lifecycle_after_scheduler():
     cat = RoomCategorie.objects.create(name="Premium", active=True)
 
     User = get_user_model()
@@ -82,9 +82,9 @@ def test_expired_room_hidden_after_scheduler():
     expire_paid_listings()
 
     room.refresh_from_db()
-    assert room.status == "hidden"
-    
-    
+    assert room.status == "active"
+
+
 @pytest.mark.django_db
 def test_paid_active_but_unavailable_room_not_in_public_search():
     cat = RoomCategorie.objects.create(
@@ -128,4 +128,58 @@ def test_paid_active_but_unavailable_room_not_in_public_search():
 
     ids = {item["id"] for item in results}
 
-    assert room.id not in ids    
+    assert room.id not in ids
+
+
+@pytest.mark.django_db
+def test_tenancy_participant_can_retrieve_hidden_rented_room():
+    User = get_user_model()
+    landlord = User.objects.create_user(
+        username="tenancy_detail_landlord",
+        password="pass12345",
+    )
+    tenant = User.objects.create_user(
+        username="tenancy_detail_tenant",
+        password="pass12345",
+    )
+    stranger = User.objects.create_user(
+        username="tenancy_detail_stranger",
+        password="pass12345",
+    )
+    category = RoomCategorie.objects.create(
+        name="Tenancy detail room",
+        active=True,
+    )
+    room = Room.objects.create(
+        title="Golden Gate Residence",
+        category=category,
+        property_owner=landlord,
+        price_per_month=900,
+        status="hidden",
+        is_available=False,
+    )
+    Tenancy.objects.create(
+        room=room,
+        landlord=landlord,
+        tenant=tenant,
+        move_in_date=timezone.now().date(),
+        duration_months=6,
+        status=Tenancy.STATUS_ACTIVE,
+    )
+
+    participant_client = APIClient()
+    participant_client.force_authenticate(user=tenant)
+    participant_response = participant_client.get(
+        f"/api/v1/rooms/{room.id}/",
+    )
+
+    assert participant_response.status_code == 200
+    assert participant_response.json()["data"]["title"] == "Golden Gate Residence"
+
+    stranger_client = APIClient()
+    stranger_client.force_authenticate(user=stranger)
+    stranger_response = stranger_client.get(
+        f"/api/v1/rooms/{room.id}/",
+    )
+
+    assert stranger_response.status_code == 404

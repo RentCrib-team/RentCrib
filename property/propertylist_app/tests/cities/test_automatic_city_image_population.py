@@ -268,6 +268,8 @@ def test_backend_populates_missing_city_images_from_pexels_without_attribution_s
         "London England United Kingdom city skyline",
         "London England United Kingdom city centre",
         "London England United Kingdom landmark",
+        "London England United Kingdom city skyline at night",
+        "London England United Kingdom city lights at night",
     ]
     assert [url for url, _ in requests_seen if url != city_image_autofill.PEXELS_SEARCH_URL] == [
         relevant_url,

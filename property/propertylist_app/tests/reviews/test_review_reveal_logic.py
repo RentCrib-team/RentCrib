@@ -294,7 +294,7 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
 
     # Only TENANT -> LANDLORD reviews affect room rating
     # Landlord -> Tenant review must NOT be included
-    expected_after = 5.0
+    expected_after = 4.1
 
 
 
@@ -310,14 +310,14 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
     # Create both reviews but NOT revealed yet (active=False, reveal_at in future)
     # IMPORTANT: overall_rating is computed from review_flags in Review.save()
     # Two positive flags => 3 + 2 = 5
-    flags_for_5 = ["responsive", "maintenance_good"]
+    rating_flags = ["responsive", "maintenance_good"]
 
     Review.objects.create(
         tenancy=tenancy,
         reviewer=tenant,
         reviewee=landlord,
         role=Review.ROLE_TENANT_TO_LANDLORD,
-        review_flags=flags_for_5,
+        review_flags=rating_flags,
         notes="Tenant review",
         reveal_at=future,
         active=False,
@@ -328,7 +328,7 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
         reviewer=landlord,
         reviewee=tenant,
         role=Review.ROLE_LANDLORD_TO_TENANT,
-        review_flags=flags_for_5,
+        review_flags=rating_flags,
         notes="Landlord review",
         reveal_at=future,
         active=False,

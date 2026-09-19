@@ -43,7 +43,12 @@ def test_two_users_cannot_overbook_same_slot(user_factory, room_factory):
     - active bookings for the slot never exceed max_bookings.
     """
     landlord = user_factory(username="owner1", role="landlord")
-    room = room_factory(property_owner=landlord)
+    room = room_factory(
+        property_owner=landlord,
+        status="active",
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
+    )
 
     tenant1 = user_factory(username="tenant1", role="seeker")
     tenant2 = user_factory(username="tenant2", role="seeker")

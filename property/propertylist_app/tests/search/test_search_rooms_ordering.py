@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 
 from rest_framework.test import APITestCase
 
@@ -58,6 +59,7 @@ def make_room(
         avg_rating=avg_rating,
         number_rating=0,
         status="active",
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
 

@@ -10,7 +10,7 @@ User = get_user_model()
 def test_room_update_owner_only():
     """
     Only the room owner can update the listing.
-    Other users must receive 403 Forbidden.
+    Other users receive 404 so private listing existence is not disclosed.
     """
     owner = User.objects.create_user(username="john", password="pass123", email="j@example.com")
     stranger = User.objects.create_user(username="mark", password="pass123", email="m@example.com")
@@ -28,7 +28,7 @@ def test_room_update_owner_only():
     # try to update as non-owner → forbidden
     client.force_authenticate(user=stranger)
     r_forbidden = client.patch(f"/api/v1/rooms/{room.id}/", {"title": "Changed"}, format="json")
-    assert r_forbidden.status_code == 403
+    assert r_forbidden.status_code == 404
 
     # try to update as owner → allowed
     client.force_authenticate(user=owner)

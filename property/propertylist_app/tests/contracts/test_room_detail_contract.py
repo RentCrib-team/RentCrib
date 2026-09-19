@@ -1,6 +1,8 @@
 import pytest
+from datetime import timedelta
 from rest_framework.test import APIClient
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from propertylist_app.models import Room, RoomCategorie
 
@@ -76,6 +78,9 @@ def seed_room_if_empty():
         category=cat,
         price_per_month=900,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
 
@@ -161,7 +166,7 @@ def test_room_detail_contract_v1_shape_and_types():
         "pets_allowed",
         "cover_image",
         "other_images",
-        
+
         "image_status",
         "preferred_flatmate_gender",
         "preferred_flatmate_language",
@@ -201,13 +206,13 @@ def test_room_detail_contract_v1_shape_and_types():
     assert_is_bool(payload["is_deleted"], "is_deleted")
     assert_is_bool(payload["is_shared_room"], "is_shared_room")
     assert payload["city"] is None or isinstance(payload["city"], int)
-    
-    
-    
-    
+
+
+
+
     assert payload["cover_image"] is None or isinstance(payload["cover_image"], str)
     assert payload["other_images"] is None or isinstance(payload["other_images"],list,)
-    
+
     assert payload["image_status"] is None or payload["image_status"] in {
         "pending",
         "verified",
