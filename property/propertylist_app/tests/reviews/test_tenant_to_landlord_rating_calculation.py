@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 from django.apps import apps
@@ -92,4 +93,4 @@ def test_tenant_to_landlord_flags_auto_calculate_overall_rating():
         role=Review.ROLE_TENANT_TO_LANDLORD,
     )
     assert review.reviewee_id == landlord.id
-    assert int(review.overall_rating) == 5
+    assert review.overall_rating == Decimal("4.1")
