@@ -18,6 +18,7 @@ EVENT_MESSAGE_TYPES = {
     "cancelled": Message.TYPE_TENANCY_CANCELLED,
     "expired_unverified": Message.TYPE_TENANCY_CANCELLED,
     "rejected_unverified": Message.TYPE_TENANCY_CANCELLED,
+    "room_secured": Message.TYPE_TENANCY_CANCELLED,
 }
 
 
@@ -31,6 +32,11 @@ EVENT_BODIES = {
     ),
     "rejected_unverified": (
         "The landlord confirmed that the room was not rented to this tenant."
+    ),
+    "room_secured": (
+        "The landlord has confirmed a tenancy with another seeker. "
+        "This tenancy request is now closed and no further tenancy updates "
+        "will be sent for this room."
     ),
 }
 
