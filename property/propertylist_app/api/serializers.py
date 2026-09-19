@@ -2607,6 +2607,7 @@ class RoomSerializer(serializers.ModelSerializer):
 
 class MyListingRoomSerializer(RoomSerializer):
     viewing_summary = serializers.SerializerMethodField()
+    complimentary_relist_available = serializers.SerializerMethodField()
 
     class Meta(RoomSerializer.Meta):
                 fields = "__all__"
@@ -2628,6 +2629,11 @@ class MyListingRoomSerializer(RoomSerializer):
             "next_viewing_at": next_booking.start if next_booking else None,
             "next_booking_id": next_booking.id if next_booking else None,
         }
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_complimentary_relist_available(self, obj):
+        benefit = getattr(obj, "complimentary_listing_benefit", None)
+        return bool(benefit and benefit.consumed_at is None)
 
 
 
