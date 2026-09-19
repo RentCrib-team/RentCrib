@@ -501,12 +501,11 @@ def test_thread_detail_is_scoped_to_authoritative_active_role():
     ],
 )
 def test_start_thread_from_nonpublic_room_is_rejected(case_name, room_changes):
-    landlord = _mk_user(f"blocked-landlord-{case_name}")
-    seeker = _mk_user(f"blocked-seeker-{case_name}")
+    landlord = _mk_user(f"bl-{case_name}")
+    seeker = _mk_user(f"bs-{case_name}")
     room = _mk_room(
         landlord,
         status="active",
-        key_suffix=f"-{case_name}",
     )
 
     for field, value in room_changes.items():
