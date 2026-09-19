@@ -1373,7 +1373,9 @@ class Review(models.Model):
 
     review_flags = models.JSONField(default=list, blank=True)
 
-    overall_rating = models.PositiveIntegerField(
+    overall_rating = models.DecimalField(
+        max_digits=2,
+        decimal_places=1,
         default=3,
         validators=[MinValueValidator(1), MaxValueValidator(5)],
     )
@@ -1406,48 +1408,16 @@ class Review(models.Model):
                 self.tenancy.review_deadline_at
             )
 
-        #  IMPORTANT FIX:
-        # Only auto-calc rating from flags if flags were actually supplied.
-        # If no flags, keep the manual overall_rating (from API payload).
-        # Only auto-calc rating from flags if flags were actually supplied.
+        # Checklist reviews use a weighted proportional score. Free-text
+        # reviews keep the manual star rating supplied by the reviewer.
         flags = self.review_flags or []
         if flags:
-            if self.role == self.ROLE_TENANT_TO_LANDLORD:
-                positives = {
-                    "responsive",
-                    "maintenance_good",
-                    "accurate_listing",
-                    "respectful_fair",
-                }
-                negatives = {
-                    "unresponsive",
-                    "maintenance_poor",
-                    "misleading_listing",
-                    "unfair_treatment",
-                }
-            else:  # landlord -> tenant
-                positives = {
-                    "clean_and_tidy",
-                    "friendly",
-                    "good_communication",
-                    "paid_on_time",
-                    "property_care_good",
-                    "followed_rules",
-                }
-                negatives = {
-                    "messy",
-                    "rude",
-                    "poor_communication",
-                    "late_payment",
-                    "property_care_poor",
-                    "broke_rules",
-                }
+            from propertylist_app.review_ratings import calculate_review_rating
 
-            pos = sum(1 for f in flags if f in positives)
-            neg = sum(1 for f in flags if f in negatives)
-            score = 3 + (pos - neg)
-            self.overall_rating = max(1, min(5, score))
-
+            self.overall_rating = calculate_review_rating(
+                role=self.role,
+                flags=flags,
+            )
 
 
         super().save(*args, **kwargs)
