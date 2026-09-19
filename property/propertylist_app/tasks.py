@@ -169,6 +169,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         "cancelled",
         "expired_unverified",
         "rejected_unverified",
+        "room_secured",
     }
 
     if event not in supported_events:
@@ -189,12 +190,37 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     if not tenancy:
         return 0
 
+    # Celery jobs may execute after a competing tenancy has already won the
+    # room. Never replay a stale proposal/update prompt into a closed claim.
+    if (
+        event in {"proposed", "updated"}
+        and tenancy.status != Tenancy.STATUS_PROPOSED
+    ):
+        return 0
+
+    if (
+        event == "confirmed"
+        and tenancy.status not in {
+            Tenancy.STATUS_CONFIRMED,
+            Tenancy.STATUS_ACTIVE,
+        }
+    ):
+        return 0
+
+    if (
+        event == "room_secured"
+        and tenancy.status != Tenancy.STATUS_CANCELLED
+    ):
+        return 0
+
     room_title = getattr(tenancy.room, "title", "your room")
 
     # For a new proposal or counter-proposal, proposed_by is the person
     # who submitted the current tenancy terms.
     if event in {"proposed", "updated"}:
         sender = tenancy.proposed_by
+    elif event == "room_secured":
+        sender = tenancy.landlord
 
     # Confirmation or cancellation is performed by the person reviewing
     # the current proposal, which is the opposite party to proposed_by.
@@ -337,6 +363,34 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                     "thread_id": thread.id,
                 },
             )
+
+    if event == "room_secured":
+        notification_title = "Room no longer available"
+        notification_body = (
+            f"The landlord has confirmed a tenancy with another seeker for "
+            f"{room_title}. Your tenancy request is now closed and you will "
+            "not receive further tenancy updates for this room."
+        )
+
+        _create_notification(
+            user=tenancy.tenant,
+            notification_type="tenancy_room_secured",
+            title=notification_title,
+            body=notification_body,
+            audience=Notification.Audience.SEEKER,
+            target_type="tenancy",
+            target_id=tenancy.id,
+        )
+
+        _maybe_queue(
+            tenancy.tenant,
+            "tenancy.cancelled",
+            {
+                "room_secured_elsewhere": True,
+            },
+        )
+
+        return 1
 
     if event == "proposed":
         tenant_submitted_first = sender.id == tenancy.tenant_id
