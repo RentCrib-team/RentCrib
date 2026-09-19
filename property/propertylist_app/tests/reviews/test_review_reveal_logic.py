@@ -294,7 +294,7 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
 
     # Only TENANT -> LANDLORD reviews affect room rating
     # Landlord -> Tenant review must NOT be included
-    expected_after = 5.0
+    expected_after = 4.1
 
 
 
@@ -317,7 +317,7 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
         reviewer=tenant,
         reviewee=landlord,
         role=Review.ROLE_TENANT_TO_LANDLORD,
-        review_flags=flags_for_5,
+        review_flags=rating_flags,
         notes="Tenant review",
         reveal_at=future,
         active=False,
@@ -328,7 +328,7 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
         reviewer=landlord,
         reviewee=tenant,
         role=Review.ROLE_LANDLORD_TO_TENANT,
-        review_flags=flags_for_5,
+        review_flags=rating_flags,
         notes="Landlord review",
         reveal_at=future,
         active=False,
