@@ -169,6 +169,7 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
         "cancelled",
         "expired_unverified",
         "rejected_unverified",
+        "room_secured",
     }
 
     if event not in supported_events:
@@ -189,12 +190,37 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
     if not tenancy:
         return 0
 
+    # Celery jobs may execute after a competing tenancy has already won the
+    # room. Never replay a stale proposal/update prompt into a closed claim.
+    if (
+        event in {"proposed", "updated"}
+        and tenancy.status != Tenancy.STATUS_PROPOSED
+    ):
+        return 0
+
+    if (
+        event == "confirmed"
+        and tenancy.status not in {
+            Tenancy.STATUS_CONFIRMED,
+            Tenancy.STATUS_ACTIVE,
+        }
+    ):
+        return 0
+
+    if (
+        event == "room_secured"
+        and tenancy.status != Tenancy.STATUS_CANCELLED
+    ):
+        return 0
+
     room_title = getattr(tenancy.room, "title", "your room")
 
     # For a new proposal or counter-proposal, proposed_by is the person
     # who submitted the current tenancy terms.
     if event in {"proposed", "updated"}:
         sender = tenancy.proposed_by
+    elif event == "room_secured":
+        sender = tenancy.landlord
 
     # Confirmation or cancellation is performed by the person reviewing
     # the current proposal, which is the opposite party to proposed_by.
@@ -337,6 +363,34 @@ def task_send_tenancy_notification(tenancy_id: int, event: str) -> int:
                     "thread_id": thread.id,
                 },
             )
+
+    if event == "room_secured":
+        notification_title = "Room no longer available"
+        notification_body = (
+            f"The landlord has confirmed a tenancy with another seeker for "
+            f"{room_title}. Your tenancy request is now closed and you will "
+            "not receive further tenancy updates for this room."
+        )
+
+        _create_notification(
+            user=tenancy.tenant,
+            notification_type="tenancy_room_secured",
+            title=notification_title,
+            body=notification_body,
+            audience=Notification.Audience.SEEKER,
+            target_type="tenancy",
+            target_id=tenancy.id,
+        )
+
+        _maybe_queue(
+            tenancy.tenant,
+            "tenancy.cancelled",
+            {
+                "room_secured_elsewhere": True,
+            },
+        )
+
+        return 1
 
     if event == "proposed":
         tenant_submitted_first = sender.id == tenancy.tenant_id
@@ -1162,24 +1216,31 @@ def task_tenancy_prompts_sweep() -> int:
         # Separate mobile and web destinations.
         deep_link, cta_path = _tenancy_thread_links(tenancy)
 
-        title = "Your tenancy is ending soon"
-        body = (
+        tenant_title = "Your tenancy is ending soon"
+        tenant_body = (
             f"Your tenancy for {tenancy.room.title} is due to end soon. "
             "Update the tenancy information if you are continuing. "
             "If you are moving out, no action is required."
         )
-        
+        landlord_title = "The tenancy is ending soon"
+        landlord_body = (
+            f"The tenancy for {tenancy.room.title} is due to end soon. "
+            "Update the tenancy information if the tenant is staying. "
+            "If the tenant is moving out, no action is required."
+        )
+
         prompt_thread, prompt_message = _post_tenancy_prompt_message(
             tenancy,
             event_type="still_living_check",
             body=(
-                "Your tenancy is ending soon.\n\n"
-                "If the tenancy is continuing, update the tenancy "
-                "information. If you are moving out, no action is required."
+                "The tenancy is ending soon.\n\n"
+                "If the tenancy will continue, update the tenancy "
+                "information. If it will end as planned, no action is required."
             ),
             available_action="update_tenancy",
         )
-
+        
+        
         if prompt_thread is not None:
             # Mobile app deep link.
             deep_link = f"/app/threads/{prompt_thread.id}"
@@ -1290,6 +1351,13 @@ def task_tenancy_prompts_sweep() -> int:
             if reminder_exists:
                 _ensure_reminder_email()
                 return 0
+
+            if user.id == tenancy.landlord_id:
+                title = landlord_title
+                body = landlord_body
+            else:
+                title = tenant_title
+                body = tenant_body
 
             notification = Notification.objects.create(
                 user=user,

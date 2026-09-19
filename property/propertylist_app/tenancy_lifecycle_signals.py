@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -115,15 +116,37 @@ def retire_competing_proposals_after_confirmation(
     if instance.status not in _LIVE_TENANCY_STATUSES:
         return
 
-    (
+    competing_proposals = list(
         Tenancy.objects
         .filter(
             room_id=instance.room_id,
             status=Tenancy.STATUS_PROPOSED,
         )
         .exclude(pk=instance.pk)
-        .update(status=Tenancy.STATUS_CANCELLED)
+        .only("id")
     )
+
+    if not competing_proposals:
+        return
+
+    competing_ids = [proposal.id for proposal in competing_proposals]
+    Tenancy.objects.filter(id__in=competing_ids).update(
+        status=Tenancy.STATUS_CANCELLED,
+    )
+
+    # The winning save is inside the tenancy response transaction. Queue the
+    # closure notices only after it commits, so rolled-back confirmations can
+    # never tell another seeker that the room was taken.
+    def _queue_room_secured_notices():
+        from propertylist_app.tasks import task_send_tenancy_notification
+
+        for tenancy_id in competing_ids:
+            task_send_tenancy_notification.delay(
+                tenancy_id,
+                "room_secured",
+            )
+
+    transaction.on_commit(_queue_room_secured_notices)
 
 
 @receiver(pre_save, sender=Tenancy)
