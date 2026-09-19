@@ -81,10 +81,17 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*"),
     },
 
-    "refresh-tenancy-status-and-review-windows-daily": {
-        "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
-        "schedule": 60 * 60 * 24,
-    },
+    # Production real-calendar reconciliation — disabled while the accelerated
+    # QA tenancy lifecycle is active. Running this task alongside the minute
+    # sweep creates a second clock: it can end live tenancies from their real
+    # tenancy dates and can backfill schedule fields from compute_review_window()
+    # instead of preserving the chained QA Timer 2 -> reminder -> review flow.
+    # Restore this schedule only when the tenancy lifecycle returns to the
+    # production date-based timing rules.
+    # "refresh-tenancy-status-and-review-windows-daily": {
+    #     "task": "propertylist_app.tasks.task_refresh_tenancy_status_and_review_windows",
+    #     "schedule": 60 * 60 * 24,
+    # },
 }
 
 

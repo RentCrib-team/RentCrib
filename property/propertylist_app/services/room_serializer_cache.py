@@ -21,11 +21,20 @@ def install_room_serializer_image_cache():
         room_key = obj.pk if obj.pk is not None else id(obj)
 
         if room_key not in cache:
-            cache[room_key] = list(
-                obj.roomimage_set.filter(
-                    status__in=["approved", "pending", "rejected"]
-                ).order_by("id")
-            )
+            prefetched = getattr(
+                obj,
+                "_prefetched_objects_cache",
+                {},
+            ).get("roomimage_set")
+
+            if prefetched is not None:
+                cache[room_key] = list(prefetched)
+            else:
+                cache[room_key] = list(
+                    obj.roomimage_set.filter(
+                        status__in=["approved", "pending", "rejected"]
+                    ).order_by("id")
+                )
 
         return cache[room_key]
 

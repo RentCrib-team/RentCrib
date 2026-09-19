@@ -7,12 +7,48 @@ from asgiref.sync import async_to_sync
 
 from propertylist_app.consumers import RealtimeConsumer
 from propertylist_app.services.realtime import (
+    deliver_user_realtime_event,
     push_user_realtime_event,
 )
 
 
 @pytest.mark.django_db(transaction=True)
-def test_realtime_event_contains_safe_performance_metadata():
+def test_realtime_event_is_enqueued_after_commit_without_inline_channel_io():
+    data = {
+        "thread_id": 72,
+        "message_id": 999999,
+        "sender_id": 20,
+    }
+
+    with (
+        patch(
+            "propertylist_app.realtime_tasks."
+            "deliver_realtime_event.apply_async"
+        ) as enqueue,
+        patch(
+            "propertylist_app.services.realtime.get_channel_layer"
+        ) as get_channel_layer,
+    ):
+        push_user_realtime_event(
+            43,
+            "new_message",
+            data,
+        )
+
+    enqueue.assert_called_once()
+    get_channel_layer.assert_not_called()
+
+    queued_args = enqueue.call_args.kwargs["args"]
+    assert queued_args[0] == 43
+    assert queued_args[1] == "new_message"
+    assert queued_args[2] == data
+    assert queued_args[3]
+    assert queued_args[4] == queued_args[3]
+    datetime.fromisoformat(queued_args[5])
+    assert enqueue.call_args.kwargs["retry"] is False
+
+
+def test_realtime_delivery_contains_safe_performance_metadata():
     layer = AsyncMock()
 
     data = {
@@ -27,9 +63,9 @@ def test_realtime_event_contains_safe_performance_metadata():
         "propertylist_app.services.realtime.get_channel_layer",
         return_value=layer,
     ):
-        push_user_realtime_event(
+        deliver_user_realtime_event(
             43,
-            "new_message",
+            "new_notification",
             data,
         )
 
@@ -39,7 +75,7 @@ def test_realtime_event_contains_safe_performance_metadata():
 
     assert group_name == "user_43"
     assert event["type"] == "realtime_event"
-    assert event["event_type"] == "new_message"
+    assert event["event_type"] == "new_notification"
     assert event["data"] == data
 
     performance = event["performance"]

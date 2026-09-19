@@ -1,3 +1,4 @@
+from decimal import Decimal
 import pytest
 from django.urls import reverse
 from django.utils import timezone
@@ -95,5 +96,5 @@ def test_create_checkout_session_for_room(monkeypatch):
 
     p = Payment.objects.get(room=room)
     assert p.stripe_checkout_session_id == "cs_test_456"
-    assert p.amount == 1.00
+    assert p.amount == Decimal("7.99")
     assert p.status == "created"

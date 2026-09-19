@@ -98,7 +98,6 @@ from .bookings import (
 from .payments import (
     CreateListingCheckoutSessionView,
     CreateListingPaymentIntentView,
-    stripe_webhook,
     StripeSuccessView,
     StripeCancelView,
     SavedCardsListView,
@@ -170,7 +169,7 @@ from .notifications import (
 )
 
 
-from .bookings import CreateViewingBookingView
+from .viewing_bookings import CreateViewingBookingView
 
 from .verification import MyLandlordVerificationRequestView
 

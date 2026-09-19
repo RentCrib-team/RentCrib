@@ -12,6 +12,7 @@ from propertylist_app.models import (
     Payment,
     Room,
     RoomCategorie,
+    RoomListingBenefit,
 )
 from propertylist_app.api.views import payments as payments_views
 
@@ -93,6 +94,10 @@ def test_payment_intent_succeeded_activates_listing(monkeypatch):
 
     assert room.status == Room.Lifecycle.ACTIVE
     assert room.paid_until == timezone.now().date() + timedelta(days=30)
+
+    benefit = RoomListingBenefit.objects.get(room=room)
+    assert benefit.granted_from_payment_id == payment.id
+    assert benefit.consumed_at is None
 
     assert Notification.objects.filter(
         user=owner,

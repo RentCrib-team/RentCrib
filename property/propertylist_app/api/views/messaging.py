@@ -51,6 +51,7 @@ from propertylist_app.models import (
 from propertylist_app.api.pagination import StandardLimitOffsetPagination
 from propertylist_app.api.throttling import MessageUserThrottle, MessagingScopedThrottle
 from propertylist_app.services.realtime import push_user_realtime_event
+from propertylist_app.utils.cache import bump_buster
 from propertylist_app.api.schema_serializers import ErrorResponseSerializer
 from propertylist_app.api.schema_helpers import (
     standard_response_serializer,
@@ -370,6 +371,7 @@ class RoomSaveView(APIView):
     def post(self, request, pk, *args, **kwargs):
         room = get_object_or_404(Room.objects.alive(), pk=pk)
         SavedRoom.objects.get_or_create(user=request.user, room=room)
+        bump_buster()
         return ok_response({"saved": True}, status_code=status.HTTP_201_CREATED)
 
     @extend_schema(
@@ -386,6 +388,7 @@ class RoomSaveView(APIView):
     def delete(self, request, pk, *args, **kwargs):
         room = get_object_or_404(Room.objects.alive(), pk=pk)
         SavedRoom.objects.filter(user=request.user, room=room).delete()
+        bump_buster()
         return ok_response(
             {},
             message="Saved room removed successfully.",
@@ -419,12 +422,14 @@ class RoomSaveToggleView(APIView):
 
         if saved_qs.exists():
             saved_qs.delete()
+            bump_buster()
             return ok_response(
                 {"saved": False, "saved_at": None},
                 status_code=status.HTTP_200_OK,
             )
 
         saved = SavedRoom.objects.create(user=request.user, room=room)
+        bump_buster()
         return ok_response(
             {"saved": True, "saved_at": saved.saved_at if hasattr(saved, "saved_at") else timezone.now()},
             status_code=status.HTTP_200_OK,
@@ -444,6 +449,7 @@ class RoomSaveToggleView(APIView):
         room = get_object_or_404(Room, pk=pk)
 
         SavedRoom.objects.filter(user=request.user, room=room).delete()
+        bump_buster()
 
         return ok_response(
             {},
@@ -1441,19 +1447,26 @@ class MessageListCreateView(generics.ListCreateAPIView):
 
 
 class ThreadMarkReadView(APIView):
-    """POST /api/messages/threads/<thread_id>/read/ â€” marks all inbound messages as read."""
+    """
+    POST /api/messages/threads/<thread_id>/read/
+
+    Default / {"is_read": true}: mark eligible messages as read.
+    {"is_read": false}: mark eligible messages as unread.
+    """
+
     permission_classes = [IsAuthenticated]
-    # Disable throttling here as well to avoid flakiness
-    # throttle_classes = [UserRateThrottle]
 
     @extend_schema(
-        request=None,
+        request=ThreadMarkReadRequestSerializer,
         responses={
             200: inline_serializer(
                 name="ThreadMarkReadOkResponse",
                 fields={
                     "ok": serializers.BooleanField(),
-                    "message": serializers.CharField(required=False, allow_null=True),
+                    "message": serializers.CharField(
+                        required=False,
+                        allow_null=True,
+                    ),
                     "data": inline_serializer(
                         name="ThreadMarkReadData",
                         fields={
@@ -1467,30 +1480,24 @@ class ThreadMarkReadView(APIView):
             401: OpenApiResponse(description="Authentication required."),
             404: OpenApiResponse(description="Thread not found."),
         },
-        description="Mark thread as read for the current user.",
+        description=(
+            "Mark a thread as read or unread for the current user. "
+            "Omitting is_read defaults to true."
+        ),
     )
     def post(self, request, thread_id):
+        serializer = ThreadMarkReadRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        is_read = serializer.validated_data["is_read"]
+
         thread = get_object_or_404(
             _role_scoped_threads(request.user),
             pk=thread_id,
         )
 
-        
-
-        # A normal human message is inbound when someone else sent it.
-        #
-        # A RentCrib system message is addressed to the thread participants
-        # regardless of which real user had to be stored in Message.sender.
-        #
-        # Therefore system_event messages must be markable as read by BOTH
-        # participants, including the user whose id happens to be in sender_id.
-        
         deleted_at = (
             MessageThreadState.objects
-            .filter(
-                user=request.user,
-                thread=thread,
-            )
+            .filter(user=request.user, thread=thread)
             .values_list("deleted_at", flat=True)
             .first()
         )
@@ -1501,79 +1508,86 @@ class ThreadMarkReadView(APIView):
             visible_messages = visible_messages.filter(
                 created__gt=deleted_at
             )
-        
-        
-        messages_to_mark = list(
+
+        eligible_messages = (
             visible_messages
             .filter(
                 Q(metadata__system_event=True)
                 | ~Q(sender=request.user)
             )
-            .exclude(reads__user=request.user)
             .distinct()
         )
 
-        MessageRead.objects.bulk_create(
-            [
-                MessageRead(
-                    message=message,
-                    user=request.user,
-                )
-                for message in messages_to_mark
-            ],
-            ignore_conflicts=True,
-        )
-
-        # Only genuine human messages produce read receipts back to their
-        # original sender. RentCrib system events do not have a meaningful
-        # human sender even though the model requires one.
-        message_ids_by_sender = {}
-
-        for message in messages_to_mark:
-            metadata = message.metadata or {}
-
-            if metadata.get("system_event") is True:
-                continue
-
-            message_ids_by_sender.setdefault(
-                message.sender_id,
-                [],
-            ).append(message.id)
-
-        for sender_id, message_ids in message_ids_by_sender.items():
-            push_user_realtime_event(
-                sender_id,
-                "message_read",
-                {
-                    "thread_id": thread.id,
-                    "reader_id": request.user.id,
-                    "message_ids": message_ids,
-                },
+        if is_read:
+            messages_to_mark = list(
+                eligible_messages
+                .exclude(reads__user=request.user)
+                .distinct()
             )
 
-        # Calculate the global unread-envelope count using exactly the same rule:
-        #
-        # - normal messages count when another user sent them
-        # - system_event messages count for every participant until that
-        #   participant has their own MessageRead row
+            MessageRead.objects.bulk_create(
+                [
+                    MessageRead(
+                        message=message,
+                        user=request.user,
+                    )
+                    for message in messages_to_mark
+                ],
+                ignore_conflicts=True,
+            )
+
+            message_ids_by_sender = {}
+
+            for message in messages_to_mark:
+                metadata = message.metadata or {}
+
+                if metadata.get("system_event") is True:
+                    continue
+
+                message_ids_by_sender.setdefault(
+                    message.sender_id,
+                    [],
+                ).append(message.id)
+
+            for sender_id, message_ids in message_ids_by_sender.items():
+                push_user_realtime_event(
+                    sender_id,
+                    "message_read",
+                    {
+                        "thread_id": thread.id,
+                        "reader_id": request.user.id,
+                        "message_ids": message_ids,
+                    },
+                )
+
+            marked = len(messages_to_mark)
+
+        else:
+            read_rows = MessageRead.objects.filter(
+                user=request.user,
+                message__in=eligible_messages,
+            )
+
+            marked = read_rows.count()
+            read_rows.delete()
+
+        thread_unread_count = (
+            eligible_messages
+            .exclude(reads__user=request.user)
+            .distinct()
+            .count()
+        )
+
         base_threads = _role_scoped_threads(request.user)
 
         bin_thread_ids = list(
             MessageThreadState.objects
-            .filter(
-                user=request.user,
-                in_bin=True,
-            )
-            .values_list(
-                "thread_id",
-                flat=True,
-            )
+            .filter(user=request.user, in_bin=True)
+            .values_list("thread_id", flat=True)
         )
 
         if bin_thread_ids:
-            base_threads = base_threads.exclude(
-                id__in=bin_thread_ids,
-            )
+            base_threads = base_threads.exclude(id__in=bin_thread_ids)
 
         hidden_by_delete = MessageThreadState.objects.filter(
             user=request.user,
@@ -1581,14 +1595,11 @@ class ThreadMarkReadView(APIView):
             deleted_at__isnull=False,
             deleted_at__gte=OuterRef("created"),
         )
-        
-        
+
         total_unread = (
             Message.objects
             .filter(thread__in=base_threads)
-            .annotate(
-                hidden_by_delete=Exists(hidden_by_delete)
-            )
+            .annotate(hidden_by_delete=Exists(hidden_by_delete))
             .filter(hidden_by_delete=False)
             .filter(
                 Q(metadata__system_event=True)
@@ -1604,21 +1615,21 @@ class ThreadMarkReadView(APIView):
             "unread_count_changed",
             {
                 "thread_id": thread.id,
-                "thread_unread_count": 0,
+                "thread_unread_count": thread_unread_count,
                 "account_unread_total": total_unread,
             },
         )
 
         return ok_response(
             {
-                "marked": len(messages_to_mark),
-                "thread_unread_count": 0,
+                "marked": marked,
+                "thread_unread_count": thread_unread_count,
                 "account_unread_total": total_unread,
             },
             status_code=status.HTTP_200_OK,
         )
-        
-        
+
+
 class ThreadsBulkMarkReadView(APIView):
     """
     POST /api/v1/messages/threads/read/
@@ -2141,7 +2152,18 @@ class StartThreadFromRoomView(APIView):
         description="Start or reuse a message thread from a room, and optionally send an initial message.",
     )
     def post(self, request, room_id):
-        room = get_object_or_404(Room.objects.alive(), pk=room_id)
+        room = get_object_or_404(
+            Room.objects.alive()
+            .filter(
+                status=Room.Lifecycle.ACTIVE,
+                is_available=True,
+            )
+            .filter(
+                Q(paid_until__isnull=True)
+                | Q(paid_until__gte=timezone.localdate())
+            ),
+            pk=room_id,
+        )
 
         if room.property_owner == request.user:
             return Response(
@@ -2228,10 +2250,6 @@ class ThreadSetLabelRequestSerializer(serializers.Serializer):
         ]
     )
 
-class ThreadMarkReadRequestSerializer(serializers.Serializer):
-    # If your endpoint marks the whole thread read, no body needed.
-    # Keep as empty serializer for schema.
-    pass
 
 
 

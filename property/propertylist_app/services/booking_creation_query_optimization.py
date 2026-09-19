@@ -204,6 +204,9 @@ def install_booking_creation_query_optimization():
         return
 
     from propertylist_app.signals import booking_created_queue_emails
+    from propertylist_app.services.booking_room_eligibility import (
+        install_booking_room_eligibility_guard,
+    )
 
     post_save.disconnect(booking_created_queue_emails, sender=Booking)
     post_save.connect(
@@ -211,4 +214,5 @@ def install_booking_creation_query_optimization():
         sender=Booking,
         dispatch_uid="booking_creation_query_optimization",
     )
+    install_booking_room_eligibility_guard()
     _INSTALLED = True

@@ -10,13 +10,15 @@ from propertylist_app.tasks import task_tenancy_prompts_sweep
 pytestmark = pytest.mark.django_db
 
 
-def test_both_api_reviews_reveal_before_deadline_once_both_have_submitted(
+def test_both_api_reviews_wait_for_scheduled_reveal_after_both_submit(
     user_factory,
     room_factory,
 ):
     landlord = user_factory(username="both_review_landlord")
     tenant = user_factory(username="both_review_tenant")
     room = room_factory(property_owner=landlord)
+
+    scheduled_reveal = timezone.now() + timedelta(minutes=10)
 
     tenancy = Tenancy.objects.create(
         room=room,
@@ -29,7 +31,7 @@ def test_both_api_reviews_reveal_before_deadline_once_both_have_submitted(
         landlord_confirmed_at=timezone.now() - timedelta(days=30),
         tenant_confirmed_at=timezone.now() - timedelta(days=30),
         review_open_at=timezone.now() - timedelta(seconds=1),
-        review_deadline_at=timezone.now() + timedelta(minutes=10),
+        review_deadline_at=scheduled_reveal,
     )
 
     tenant_client = APIClient()
@@ -54,9 +56,20 @@ def test_both_api_reviews_reveal_before_deadline_once_both_have_submitted(
     assert reviews.count() == 2
     assert reviews.filter(active=False).count() == 2
 
-    # The double-blind condition has now been satisfied by both submissions.
-    # A sweep must reveal both immediately instead of waiting for the fallback
-    # deadline ten minutes later.
+    # Both reviews arriving early must not defeat the scheduled reveal.
+    # The first sweep occurs before the established reveal time, so both
+    # reviews must remain private/double-blind.
+    task_tenancy_prompts_sweep()
+
+    reviews = Review.objects.filter(tenancy=tenancy)
+    assert reviews.filter(active=False).count() == 2
+    assert reviews.filter(active=True).count() == 0
+
+    # Simulate the already-established scheduled reveal becoming due.
+    Review.objects.filter(tenancy=tenancy).update(
+        reveal_at=timezone.now() - timedelta(seconds=1)
+    )
+
     task_tenancy_prompts_sweep()
 
     assert Review.objects.filter(tenancy=tenancy, active=True).count() == 2

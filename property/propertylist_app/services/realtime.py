@@ -15,21 +15,146 @@ from propertylist_app.services.message_unread import (
 logger = logging.getLogger(__name__)
 
 
+def deliver_user_realtime_event(
+    user_id: int,
+    event_type: str,
+    data: dict,
+    *,
+    event_id: str | None = None,
+    correlation_id: str | None = None,
+    event_created_at: str | None = None,
+) -> None:
+    """
+    Perform the actual channel-layer delivery.
+
+    This function is intentionally separate from push_user_realtime_event so
+    Redis/WebSocket I/O can run in a Celery worker instead of the originating
+    HTTP request.
+    """
+    event_id = event_id or str(uuid.uuid4())
+    correlation_id = correlation_id or event_id
+    event_created_at = (
+        event_created_at
+        or datetime.now(timezone.utc).isoformat()
+    )
+
+    safe_ids = {
+        key: data.get(key)
+        for key in (
+            "thread_id",
+            "message_id",
+            "notification_id",
+        )
+        if data.get(key) is not None
+    }
+
+    try:
+        channel_layer = get_channel_layer()
+
+        if channel_layer is None:
+            logger.warning(
+                "Realtime performance event_id=%s correlation_id=%s "
+                "event_type=%s user_id=%s "
+                "stage=channel_layer_missing %s",
+                event_id,
+                correlation_id,
+                event_type,
+                user_id,
+                safe_ids,
+            )
+            return
+
+        group_send_started_at = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        group_send_started = time.perf_counter()
+
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user_id}",
+            {
+                "type": "realtime_event",
+                "event_type": event_type,
+                "data": data,
+                "performance": {
+                    "event_id": event_id,
+                    "correlation_id": correlation_id,
+                    "event_created_at": event_created_at,
+                    "group_send_started_at": group_send_started_at,
+                },
+            },
+        )
+
+        group_send_ms = (
+            time.perf_counter() - group_send_started
+        ) * 1000
+
+        logger.info(
+            "Realtime performance "
+            "event_id=%s correlation_id=%s "
+            "event_type=%s user_id=%s "
+            "stage=group_send_complete "
+            "group_send_ms=%.3f %s",
+            event_id,
+            correlation_id,
+            event_type,
+            user_id,
+            group_send_ms,
+            safe_ids,
+        )
+
+        # Human chat messages already publish unread_count_changed from
+        # their Message post-save signal. RentCrib system messages bypass
+        # that signal, so add the same authoritative companion event here
+        # for every persisted workflow/system new_message.
+        if event_type == "new_message":
+            try:
+                unread_payload = system_message_unread_payload(
+                    user_id,
+                    data,
+                )
+            except Exception:
+                logger.exception(
+                    "Realtime system-message unread calculation failed "
+                    "user_id=%s %s",
+                    user_id,
+                    safe_ids,
+                )
+            else:
+                if unread_payload is not None:
+                    # We are already in the realtime worker here. Deliver the
+                    # companion event in the same worker so ordering is kept
+                    # without creating another HTTP-side workload.
+                    deliver_user_realtime_event(
+                        user_id,
+                        "unread_count_changed",
+                        unread_payload,
+                    )
+
+    except Exception:
+        logger.exception(
+            "Realtime event delivery failed "
+            "event_id=%s correlation_id=%s "
+            "user_id=%s event_type=%s %s",
+            event_id,
+            correlation_id,
+            user_id,
+            event_type,
+            safe_ids,
+        )
+
+
 def push_user_realtime_event(
     user_id: int,
     event_type: str,
     data: dict,
 ) -> None:
     """
-    Push one realtime event to a signed-in RentCrib user.
+    Queue one realtime event for a signed-in RentCrib user.
 
-    Delivery happens only after the surrounding database transaction commits.
-    A temporary Redis/WebSocket problem must never break the normal REST,
-    notification, or email flow.
-
-    Performance instrumentation contains only safe identifiers and timing
-    metadata. Event payloads, message bodies, credentials, and tokens are
-    never written to performance logs.
+    The Celery enqueue happens only after the surrounding database transaction
+    commits. Actual Redis/WebSocket group_send work happens in the worker, so
+    a slow channel layer does not hold the originating REST request open.
     """
     event_id = str(uuid.uuid4())
     correlation_id = event_id
@@ -45,90 +170,28 @@ def push_user_realtime_event(
         if data.get(key) is not None
     }
 
-    def _send():
+    def _enqueue():
         try:
-            channel_layer = get_channel_layer()
+            from propertylist_app.realtime_tasks import (
+                deliver_realtime_event,
+            )
 
-            if channel_layer is None:
-                logger.warning(
-                    "Realtime performance event_id=%s correlation_id=%s "
-                    "event_type=%s user_id=%s "
-                    "stage=channel_layer_missing %s",
+            deliver_realtime_event.apply_async(
+                args=[
+                    user_id,
+                    event_type,
+                    data,
                     event_id,
                     correlation_id,
-                    event_type,
-                    user_id,
-                    safe_ids,
-                )
-                return
-
-            group_send_started_at = datetime.now(
-                timezone.utc
-            ).isoformat()
-
-            group_send_started = time.perf_counter()
-
-            async_to_sync(channel_layer.group_send)(
-                f"user_{user_id}",
-                {
-                    "type": "realtime_event",
-                    "event_type": event_type,
-                    "data": data,
-                    "performance": {
-                        "event_id": event_id,
-                        "correlation_id": correlation_id,
-                        "event_created_at": event_created_at,
-                        "group_send_started_at": group_send_started_at,
-                    },
-                },
+                    event_created_at,
+                ],
+                retry=False,
             )
-
-            group_send_ms = (
-                time.perf_counter() - group_send_started
-            ) * 1000
-
-            logger.info(
-                "Realtime performance "
-                "event_id=%s correlation_id=%s "
-                "event_type=%s user_id=%s "
-                "stage=group_send_complete "
-                "group_send_ms=%.3f %s",
-                event_id,
-                correlation_id,
-                event_type,
-                user_id,
-                group_send_ms,
-                safe_ids,
-            )
-
-            # Human chat messages already publish unread_count_changed from
-            # their Message post-save signal. RentCrib system messages bypass
-            # that signal, so add the same authoritative companion event here
-            # for every persisted workflow/system new_message.
-            if event_type == "new_message":
-                try:
-                    unread_payload = system_message_unread_payload(
-                        user_id,
-                        data,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Realtime system-message unread calculation failed "
-                        "user_id=%s %s",
-                        user_id,
-                        safe_ids,
-                    )
-                else:
-                    if unread_payload is not None:
-                        push_user_realtime_event(
-                            user_id,
-                            "unread_count_changed",
-                            unread_payload,
-                        )
-
         except Exception:
+            # Realtime is best-effort. A broker problem must not turn a
+            # successful business request into a 500 response.
             logger.exception(
-                "Realtime event delivery failed "
+                "Realtime enqueue failed "
                 "event_id=%s correlation_id=%s "
                 "user_id=%s event_type=%s %s",
                 event_id,
@@ -138,4 +201,4 @@ def push_user_realtime_event(
                 safe_ids,
             )
 
-    transaction.on_commit(_send)
+    transaction.on_commit(_enqueue)

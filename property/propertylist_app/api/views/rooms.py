@@ -46,9 +46,11 @@ from drf_spectacular.types import OpenApiTypes
 
 
 #Project
-from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy
+from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
 from propertylist_app.services.image import compress_listing_upload, should_auto_approve_upload
+from propertylist_app.services.listing_entitlements import consume_complimentary_listing_benefit
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
+from propertylist_app.utils.cache import bump_buster
 from propertylist_app.validators import (
     assert_no_duplicate_files,
     validate_listing_photos,
@@ -220,9 +222,39 @@ class RoomListGV(CachedAnonymousGETMixin, generics.ListAPIView):
       
       
       
-class RoomAV(APIView):
+def _optimised_room_read_queryset(queryset, request):
+    """Eager-load RoomSerializer relations and annotate viewer-specific saved state."""
+    queryset = queryset.select_related(
+        "category",
+        "property_owner",
+        "property_owner__profile",
+    ).prefetch_related(
+        Prefetch(
+            "roomimage_set",
+            queryset=RoomImage.objects.filter(
+                status__in=["approved", "pending", "rejected"],
+            ).order_by("id"),
+        )
+    )
+
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        queryset = queryset.annotate(
+            _is_saved=Exists(
+                SavedRoom.objects.filter(
+                    user=user,
+                    room_id=OuterRef("pk"),
+                )
+            )
+        )
+
+    return queryset
+
+
+class RoomAV(CachedAnonymousGETMixin, APIView):
     throttle_classes = [AnonRateThrottle, RoomCreateThrottle]
     permission_classes = [IsAuthenticatedOrReadOnly]
+    cache_prefix = "rooms:list"
 
 
     @extend_schema(
@@ -240,21 +272,27 @@ class RoomAV(APIView):
     description="List active rooms (paid and not expired). Paginated with limit/offset.",
     )
     def get(self, request, *args, **kwargs):
-            today = timezone.now().date()
+        cached = self._get_cached_response(request)
+        if cached is not None:
+            return cached
 
-            qs = (
-                Room.objects.alive()
-                .filter(status="active")
-                .filter(Q(paid_until__isnull=True) | Q(paid_until__gte=today))
-                .order_by("-id")
-            )
+        today = timezone.now().date()
 
-            paginator = StandardLimitOffsetPagination()
-            page = paginator.paginate_queryset(qs, request, view=self)
+        qs = (
+            Room.objects.alive()
+            .filter(status="active")
+            .filter(Q(paid_until__isnull=True) | Q(paid_until__gte=today))
+            .order_by("-id")
+        )
+        qs = _optimised_room_read_queryset(qs, request)
 
-            serializer = RoomSerializer(page, many=True, context={"request": request})
-            resp = paginator.get_paginated_response(serializer.data)
-            return _wrap_response_success(resp)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+
+        serializer = RoomSerializer(page, many=True, context={"request": request})
+        resp = paginator.get_paginated_response(serializer.data)
+        response = _wrap_response_success(resp)
+        return self._store_cached_response(request, response)
 
 
 
@@ -357,6 +395,7 @@ class RoomAV(APIView):
         serializer.is_valid(raise_exception=True)
 
         room = serializer.save(property_owner=request.user)
+        bump_buster()
 
         return ok_response(
             RoomSerializer(room, context={"request": request}).data,
@@ -364,30 +403,36 @@ class RoomAV(APIView):
             status_code=status.HTTP_201_CREATED,
         )
         
-class RoomDetailAV(APIView):
+class RoomDetailAV(CachedAnonymousGETMixin, APIView):
     permission_classes = [IsOwnerOrReadOnly]
     http_method_names = ["get", "put", "patch", "delete"]
+    cache_prefix = "rooms:detail"
     
     def _get_room(self, request, pk):
         """
         Owners may access their own unpublished/hidden room.
 
         Everyone else continues to see only non-hidden, non-deleted rooms.
+        Read querysets eager-load RoomSerializer relations to avoid N+1 queries.
         """
         if request.user.is_authenticated:
-            owned_room = Room.objects.filter(
+            owned_qs = _optimised_room_read_queryset(
+                Room.objects.filter(is_deleted=False),
+                request,
+            )
+            owned_room = owned_qs.filter(
                 pk=pk,
                 property_owner=request.user,
-                is_deleted=False,
             ).first()
 
             if owned_room is not None:
                 return owned_room
 
-        return get_object_or_404(
+        public_qs = _optimised_room_read_queryset(
             Room.objects.alive(),
-            pk=pk,
+            request,
         )
+        return get_object_or_404(public_qs, pk=pk)
     
     
 
@@ -410,9 +455,14 @@ class RoomDetailAV(APIView):
         description="Retrieve a room by id. Returns ok_response envelope.",
     )
     def get(self, request, pk, *args, **kwargs):
+        cached = self._get_cached_response(request)
+        if cached is not None:
+            return cached
+
         room = self._get_room(request, pk)
         serializer = RoomSerializer(room, context={"request": request})
-        return ok_response(serializer.data, status_code=status.HTTP_200_OK)
+        response = ok_response(serializer.data, status_code=status.HTTP_200_OK)
+        return self._store_cached_response(request, response)
 
     @extend_schema(
         request=RoomSerializer,
@@ -437,6 +487,7 @@ class RoomDetailAV(APIView):
         ser = RoomSerializer(room, data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
         ser.save()
+        bump_buster()
 
         return ok_response(
             ser.data,
@@ -476,6 +527,7 @@ class RoomDetailAV(APIView):
         )
         ser.is_valid(raise_exception=True)
         ser.save()
+        bump_buster()
 
         
 
@@ -498,6 +550,7 @@ class RoomDetailAV(APIView):
         room = self._get_room(request, pk)
         self.check_object_permissions(request, room)
         room.soft_delete()
+        bump_buster()
 
         return ok_response(
             {},
@@ -585,6 +638,7 @@ class RoomSoftDeleteView(APIView):
         room = get_object_or_404(Room.objects.alive(), pk=pk)
         self.check_object_permissions(request, room)
         room.soft_delete()
+        bump_buster()
         return ok_response(
             {"detail": f"Room {room.id} soft-deleted."},
             message="Room soft-deleted successfully.",
@@ -636,6 +690,7 @@ class RoomUnpublishView(APIView):
             room.status = "hidden"
             room.save(update_fields=["status", "updated_at"])
 
+        bump_buster()
         return ok_response(
             {
                 "id": room.id,
@@ -702,34 +757,10 @@ class RoomPublishView(APIView):
         today = timezone.localdate()
 
         # ---------------------------------------------------------
-        # PAYMENT GUARD
-        # ---------------------------------------------------------
-        # Republishing is free while the room's existing paid
-        # advertising period is still valid.
-        #
-        # If the listing has never been paid for, or its paid period
-        # has expired, it must go through the normal listing-payment
-        # flow before it can become active again.
-        if (
-            room.paid_until is None
-            or room.paid_until < today
-        ):
-            raise ValidationError(
-                {
-                    "detail": (
-                        "This listing does not have an active paid "
-                        "advertising period. Payment is required "
-                        "before it can be published."
-                    ),
-                    "payment_required": True,
-                }
-            )
-
-        # ---------------------------------------------------------
         # TENANCY GUARD
         # ---------------------------------------------------------
-        # A genuinely rented room must not be made available merely
-        # because the landlord presses Publish.
+        # A genuinely rented room must never consume its reserved
+        # complimentary listing period or become publicly available.
         has_live_tenancy = room.tenancies.filter(
             status__in=[
                 Tenancy.STATUS_CONFIRMED,
@@ -747,6 +778,42 @@ class RoomPublishView(APIView):
                 }
             )
 
+        # ---------------------------------------------------------
+        # LISTING ENTITLEMENT GUARD
+        # ---------------------------------------------------------
+        # A current paid period can be republished normally. If that
+        # period has ended, consume the room's one-time complimentary
+        # 30-day benefit before requiring another payment.
+        if room.paid_until is None or room.paid_until < today:
+            activated = consume_complimentary_listing_benefit(
+                room,
+                reason=RoomListingBenefit.ConsumptionReason.FUTURE_RELIST,
+            )
+
+            if activated is None:
+                raise ValidationError(
+                    {
+                        "detail": (
+                            "This listing does not have an active paid "
+                            "advertising period. Payment is required "
+                            "before it can be published."
+                        ),
+                        "payment_required": True,
+                    }
+                )
+
+            room, _benefit = activated
+            bump_buster()
+
+            return ok_response(
+                {
+                    "id": room.id,
+                    "status": room.status,
+                    "listing_state": _listing_state_for_room(room),
+                },
+                message="Your complimentary 30-day listing is now active.",
+                status_code=status.HTTP_200_OK,
+            )
         # ---------------------------------------------------------
         # REACTIVATE LISTING
         # ---------------------------------------------------------
@@ -773,6 +840,7 @@ class RoomPublishView(APIView):
         room.save(
             update_fields=update_fields,
         )
+        bump_buster()
 
         return ok_response(
             {
@@ -1390,6 +1458,7 @@ class RoomListAlt(CachedAnonymousGETMixin, generics.ListAPIView):
         room = get_object_or_404(Room.objects.alive(), pk=pk)
         self.check_object_permissions(request, room)
         room.soft_delete()
+        bump_buster()
         return ok_response(
             {},
             message="Room deleted successfully.",

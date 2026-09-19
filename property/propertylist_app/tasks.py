@@ -939,10 +939,33 @@ def task_tenancy_prompts_sweep() -> int:
             else "no-duration"
         )
 
+        latest_accepted_extension = (
+            tenancy.extensions
+            .filter(
+                status="accepted",
+                responded_at__isnull=False,
+            )
+            .order_by(
+                "-responded_at",
+                "-id",
+            )
+            .only("id")
+            .first()
+        )
+
+        cycle_key = (
+            f"{cycle_start}:{cycle_duration}"
+        )
+
+        if latest_accepted_extension is not None:
+            cycle_key = (
+                f"{cycle_key}:"
+                f"renewal-{latest_accepted_extension.id}"
+            )
+
         event_key = (
             f"tenancy:{tenancy.id}:"
-            f"{cycle_start}:"
-            f"{cycle_duration}:"
+            f"{cycle_key}:"
             f"{event_type}"
         )
 
@@ -1239,7 +1262,33 @@ def task_tenancy_prompts_sweep() -> int:
                 .exists()
             )
 
+            email_exists = (
+                OutboundNotification.objects
+                .filter(
+                    user=user,
+                    channel=NotificationTemplate.CHANNEL_EMAIL,
+                    template_key=template_key,
+                    created_at__gte=cycle_started_at,
+                    context__tenancy_id=tenancy.id,
+                )
+                .exists()
+            )
+
+            def _ensure_reminder_email():
+                if email_exists:
+                    return
+
+                _maybe_queue_reminder(
+                    user,
+                    template_key,
+                    deep_link=deep_link,
+                    cta_path=cta_path,
+                    room_title=tenancy.room.title,
+                    tenancy_id=tenancy.id,
+                )
+
             if reminder_exists:
+                _ensure_reminder_email()
                 return 0
 
             notification = Notification.objects.create(
@@ -1278,14 +1327,7 @@ def task_tenancy_prompts_sweep() -> int:
                     },
                 )
 
-            _maybe_queue_reminder(
-                user,
-                template_key,
-                deep_link=deep_link,
-                cta_path=cta_path,
-                room_title=tenancy.room.title,
-                tenancy_id=tenancy.id,
-            )
+            _ensure_reminder_email()
 
             return 1
 
@@ -1308,41 +1350,56 @@ def task_tenancy_prompts_sweep() -> int:
 
         # TEMPORARY QA RULE:
         # When neither party has updated the tenancy information,
-        # open the review window 10 minutes after the ending reminder
-        # is first created. Production must revert to end date + 7 days.
+        # the review notification becomes due 10 minutes after the
+        # ending reminder. If a delayed worker is recovering an overdue
+        # reminder, start the review window when this sweep emits the
+        # notification so users still receive the full 10 minutes.
         reminder_created = bool(
             landlord_notification_created
             or tenant_notification_created
+        )
+        reminder_dropped_at = (
+            prompt_message.created
+            if prompt_message is not None
+            else (now if reminder_created else None)
         )
 
         if (
             not landlord_done
             and not tenant_done
-            and reminder_created
+            and reminder_dropped_at is not None
         ):
-            # TEMPORARY QA RULE:
-            # QA: Open reviews 10 minutes after the ending reminder,
-            # then keep the private/double-blind review window open for 10 minutes.
-            #
-            # PRODUCTION RULE:
-            # review_deadline_at must be:
-            #
-            #     tenancy.review_open_at + timedelta(days=30)
-            #
-            tenancy.review_open_at = (
-                now + timedelta(minutes=10)
-            )
-
-            tenancy.review_deadline_at = (
-                tenancy.review_open_at
+            scheduled_review_open_at = (
+                reminder_dropped_at
                 + timedelta(minutes=10)
             )
-            tenancy.save(
-                update_fields=[
-                    "review_open_at",
-                    "review_deadline_at",
-                ]
+
+            # The minutely sweep can run after the exact due time. Use
+            # the actual notification sweep as the start of an overdue
+            # review window instead of creating an already-shortened or
+            # already-expired window.
+            review_open_at = (
+                now
+                if scheduled_review_open_at <= now
+                else scheduled_review_open_at
             )
+            review_deadline_at = (
+                review_open_at
+                + timedelta(minutes=10)
+            )
+
+            if (
+                tenancy.review_open_at != review_open_at
+                or tenancy.review_deadline_at != review_deadline_at
+            ):
+                tenancy.review_open_at = review_open_at
+                tenancy.review_deadline_at = review_deadline_at
+                tenancy.save(
+                    update_fields=[
+                        "review_open_at",
+                        "review_deadline_at",
+                    ]
+                )
             
     
     
@@ -1464,13 +1521,8 @@ def task_tenancy_prompts_sweep() -> int:
             role=Review.ROLE_LANDLORD_TO_TENANT,
         ).exists()
 
-        # Both parties have already reviewed. Reveal immediately;
-        # the existing reveal sweep below can activate them in this run.
+        # Both parties have already reviewed.
         if tenant_done and landlord_done:
-            Review.objects.filter(
-                tenancy=t,
-                active=False,
-            ).update(reveal_at=now)
             continue
 
         # Add one review-available message to the existing tenancy thread.

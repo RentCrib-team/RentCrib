@@ -118,11 +118,14 @@ class ReviewListView(generics.ListAPIView):
         now = timezone.now()
         return (
             Review.objects.select_related("reviewer", "reviewee", "tenancy")
-            .filter(active=True)
             .filter(
-                models.Q(reveal_at__lte=now)
-                | models.Q(reviewer_id=user.id)
-                | models.Q(reviewee_id=user.id)
+                models.Q(reviewer_id=user.id)
+                | models.Q(
+                    reviewee_id=user.id,
+                    active=True,
+                    reveal_at__isnull=False,
+                    reveal_at__lte=now,
+                )
             )
             .order_by("-submitted_at")
         )
@@ -190,23 +193,27 @@ class ReviewListView(generics.ListAPIView):
 class ReviewDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ReviewSerializer
-    queryset = Review.objects.select_related("reviewer", "reviewee", "tenancy").filter(active=True)
+    queryset = Review.objects.select_related("reviewer", "reviewee", "tenancy")
 
     def get_object(self):
         obj = super().get_object()
         user = self.request.user
+        now = timezone.now()
 
-        is_participant = (
-            obj.reviewer_id == user.id
-            or obj.reviewee_id == user.id
+        if obj.reviewer_id == user.id:
+            return obj
+
+        if (
+            obj.reviewee_id == user.id
+            and obj.active
+            and obj.reveal_at
+            and obj.reveal_at <= now
+        ):
+            return obj
+
+        raise PermissionDenied(
+            "You do not have permission to view this review."
         )
-
-        if not is_participant:
-            raise PermissionDenied(
-                "You do not have permission to view this review."
-            )
-
-        return obj
 
 
   
@@ -259,7 +266,7 @@ class TenancyReviewListView(APIView):
             my_role = Review.ROLE_LANDLORD_TO_TENANT
             other_role = Review.ROLE_TENANT_TO_LANDLORD
 
-        my_review = Review.objects.filter(tenancy=tenancy, role=my_role, active=True).first()
+        my_review = Review.objects.filter(tenancy=tenancy, role=my_role).first()
         other_review = Review.objects.filter(tenancy=tenancy, role=other_role, active=True).first()
 
         now = timezone.now()
