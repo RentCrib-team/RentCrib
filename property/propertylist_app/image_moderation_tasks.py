@@ -1,6 +1,8 @@
+import base64
 import logging
 
 from celery import shared_task
+from django.core.files.base import ContentFile
 from django.utils import timezone
 
 from propertylist_app.models import RoomImage
@@ -28,14 +30,11 @@ def _normalise_moderation_result(result) -> dict:
     return result or {}
 
 
-def moderate_room_image_now(room_image_id: int) -> None:
-    """
-    Moderate a stored RoomImage using Django's configured storage backend.
-
-    This helper is safe to call inside the API process when media is stored on
-    that service's local Render disk, and from Celery when media is stored in a
-    shared backend such as R2/S3.
-    """
+@shared_task(
+    name="propertylist_app.moderate_room_image",
+    ignore_result=True,
+)
+def moderate_room_image(room_image_id: int, image_payload: str | None = None) -> None:
     image = RoomImage.objects.filter(pk=room_image_id).first()
 
     if image is None:
@@ -55,15 +54,31 @@ def moderate_room_image_now(room_image_id: int) -> None:
             should_auto_approve_upload,
         )
 
-        if not image.image:
-            raise ValueError("Room image file is missing.")
-
-        # Reopen the authoritative stored object. Never reuse the incoming
-        # multipart temporary file after ImageField.save() has completed.
-        with image.image.open("rb") as stored_file:
-            moderation_result = _normalise_moderation_result(
-                should_auto_approve_upload(stored_file)
+        if image_payload:
+            raw_bytes = base64.b64decode(
+                image_payload.encode("ascii"),
+                validate=True,
             )
+            moderation_file = ContentFile(
+                raw_bytes,
+                name="moderation-image.jpg",
+            )
+            moderation_file.content_type = "image/jpeg"
+            moderation_file.seek(0)
+            moderation_result = _normalise_moderation_result(
+                should_auto_approve_upload(moderation_file)
+            )
+        else:
+            # Backwards-compatible fallback for manually queued/older tasks.
+            # This only works when the active storage backend is shared between
+            # the web and worker processes.
+            if not image.image:
+                raise ValueError("Room image file is missing.")
+
+            with image.image.open("rb") as stored_file:
+                moderation_result = _normalise_moderation_result(
+                    should_auto_approve_upload(stored_file)
+                )
 
         approved = bool(moderation_result.get("approved"))
 
@@ -116,11 +131,3 @@ def moderate_room_image_now(room_image_id: int) -> None:
             )[:2000],
             moderation_checked_at=timezone.now(),
         )
-
-
-@shared_task(
-    name="propertylist_app.moderate_room_image",
-    ignore_result=True,
-)
-def moderate_room_image(room_image_id: int) -> None:
-    moderate_room_image_now(room_image_id)

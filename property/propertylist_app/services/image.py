@@ -192,6 +192,21 @@ def _normalise_image_for_moderation(uploaded_file):
 
 
 
+def prepare_moderation_task_payload(uploaded_file) -> str:
+    """
+    Build a compact, transport-safe image payload for the Celery moderation job.
+
+    Render web and worker services do not share a local filesystem. Sending the
+    already-normalised JPEG bytes with the task means moderation does not depend
+    on the worker being able to reopen the web service's uploaded media file.
+    """
+    moderation_file = _normalise_image_for_moderation(uploaded_file)
+    moderation_file.seek(0)
+    payload = base64.b64encode(moderation_file.read()).decode("ascii")
+    moderation_file.seek(0)
+    return payload
+
+
 def _moderation_result(
     approved: bool,
     reason: str,

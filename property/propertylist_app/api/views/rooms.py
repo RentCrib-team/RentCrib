@@ -48,7 +48,10 @@ from drf_spectacular.types import OpenApiTypes
 
 #Project
 from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
-from propertylist_app.services.image import compress_listing_upload
+from propertylist_app.services.image import (
+    compress_listing_upload,
+    prepare_moderation_task_payload,
+)
 from propertylist_app.services.listing_entitlements import consume_complimentary_listing_benefit
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.utils.cache import bump_buster
@@ -995,6 +998,24 @@ class RoomPhotoUploadView(APIView):
         except Exception:
             pass
 
+        # The Celery worker is a separate Render service and cannot reopen
+        # files stored on the web service's local persistent disk. Prepare a
+        # compact JPEG payload now, while the upload stream is available, and
+        # send those bytes with the background moderation task.
+        moderation_payload = None
+        moderation_payload_error = None
+        try:
+            moderation_payload = prepare_moderation_task_payload(file_obj)
+        except Exception as exc:
+            moderation_payload_error = (
+                f"{exc.__class__.__name__}: {exc}"
+            )[:1000]
+        finally:
+            try:
+                file_obj.seek(0)
+            except Exception:
+                pass
+
         # SINGLE SOURCE OF TRUTH: create the image only once.
         image = RoomImage.objects.create(
             room=room,
@@ -1008,40 +1029,18 @@ class RoomPhotoUploadView(APIView):
 
         
 
-        # Moderation runs asynchronously only when the storage backend which
-        # actually saved this image is shared between the API and Celery. Do
-        # not trust USE_S3 alone here: a web/worker environment mismatch can
-        # leave that flag enabled while the ImageField is still backed by a
-        # service-local Render disk. A worker can never reopen that web-service
-        # path, so local files must be moderated in this process.
+        # Automated AI moderation must not hold this upload request open.
+        # The image is already safely stored as pending; after commit, queue a
+        # worker task to perform Google Vision/Gemini moderation.
         image_id = image.id
 
-        from django.core.files.storage import FileSystemStorage
+        def _enqueue_moderation():
+            try:
+                from propertylist_app.image_moderation_tasks import (
+                    moderate_room_image,
+                )
 
-        image_uses_shared_storage = not isinstance(
-            image.image.storage,
-            FileSystemStorage,
-        )
-
-        if image_uses_shared_storage:
-            def _enqueue_moderation():
-                try:
-                    from propertylist_app.image_moderation_tasks import (
-                        moderate_room_image,
-                    )
-
-                    moderate_room_image.apply_async(
-                        args=[image_id],
-                        retry=False,
-                    )
-                except Exception:
-                    import logging
-
-                    logging.getLogger(__name__).exception(
-                        "Room image moderation enqueue failed for RoomImage id=%s",
-                        image_id,
-                    )
-
+                if not moderation_payload:
                     RoomImage.objects.filter(
                         pk=image_id,
                         status=RoomImage.STATUS_PENDING,
@@ -1051,21 +1050,43 @@ class RoomPhotoUploadView(APIView):
                             RoomImage.MODERATION_SERVICE_UNAVAILABLE
                         ),
                         moderation_notes=(
-                            "Automated moderation could not be queued. "
+                            "Automated moderation payload could not be prepared. "
+                            f"{moderation_payload_error or 'Unknown error.'} "
                             "The image remains pending for manual review."
-                        ),
+                        )[:2000],
                         moderation_checked_at=timezone.now(),
                     )
+                    return
 
-            transaction.on_commit(_enqueue_moderation)
-        else:
-            from propertylist_app.image_moderation_tasks import (
-                moderate_room_image_now,
-            )
+                moderate_room_image.apply_async(
+                    args=[image_id],
+                    kwargs={"image_payload": moderation_payload},
+                    retry=False,
+                )
+            except Exception:
+                import logging
 
-            moderate_room_image_now(image_id)
-            image.refresh_from_db()
+                logging.getLogger(__name__).exception(
+                    "Room image moderation enqueue failed for RoomImage id=%s",
+                    image_id,
+                )
 
+                RoomImage.objects.filter(
+                    pk=image_id,
+                    status=RoomImage.STATUS_PENDING,
+                    moderation_reason=RoomImage.MODERATION_AWAITING_CHECK,
+                ).update(
+                    moderation_reason=(
+                        RoomImage.MODERATION_SERVICE_UNAVAILABLE
+                    ),
+                    moderation_notes=(
+                        "Automated moderation could not be queued. "
+                        "The image remains pending for manual review."
+                    ),
+                    moderation_checked_at=timezone.now(),
+                )
+
+        transaction.on_commit(_enqueue_moderation)
         # Response (serializer safe context)
         return ok_response(
             RoomImageSerializer(
