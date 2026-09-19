@@ -87,7 +87,7 @@ def test_tenant_profile_rating_updates_only_after_reveal(user_factory, room_fact
 
     # Review.save() computes overall_rating from review_flags:
     # overall_rating = 3 + (pos - neg). Two positives => 5.
-    flags_for_5 = ["friendly", "good_communication"]
+    rating_flags = ["friendly", "good_communication"]
 
 
     Review.objects.create(
