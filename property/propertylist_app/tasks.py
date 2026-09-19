@@ -1162,20 +1162,26 @@ def task_tenancy_prompts_sweep() -> int:
         # Separate mobile and web destinations.
         deep_link, cta_path = _tenancy_thread_links(tenancy)
 
-        title = "Your tenancy is ending soon"
-        body = (
+        tenant_title = "Your tenancy is ending soon"
+        tenant_body = (
             f"Your tenancy for {tenancy.room.title} is due to end soon. "
             "Update the tenancy information if you are continuing. "
             "If you are moving out, no action is required."
         )
-        
+        landlord_title = "The tenancy is ending soon"
+        landlord_body = (
+            f"The tenancy for {tenancy.room.title} is due to end soon. "
+            "Update the tenancy information if the tenant is staying. "
+            "If the tenant is moving out, no action is required."
+        )
+
         prompt_thread, prompt_message = _post_tenancy_prompt_message(
             tenancy,
             event_type="still_living_check",
             body=(
-                "Your tenancy is ending soon.\n\n"
-                "If the tenancy is continuing, update the tenancy "
-                "information. If you are moving out, no action is required."
+                "The tenancy is ending soon.\n\n"
+                "If the tenancy will continue, update the tenancy "
+                "information. If it will end as planned, no action is required."
             ),
             available_action="update_tenancy",
         )
@@ -1290,6 +1296,13 @@ def task_tenancy_prompts_sweep() -> int:
             if reminder_exists:
                 _ensure_reminder_email()
                 return 0
+
+            if user.id == tenancy.landlord_id:
+                title = landlord_title
+                body = landlord_body
+            else:
+                title = tenant_title
+                body = tenant_body
 
             notification = Notification.objects.create(
                 user=user,
