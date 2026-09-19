@@ -1,5 +1,5 @@
 import io
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -85,6 +85,7 @@ def test_room_image_upload_queues_moderation_without_running_ai_inline(
 
     enqueue.assert_called_once_with(
         args=[image.id],
+        kwargs={"image_payload": ANY},
         retry=False,
     )
 
@@ -97,7 +98,7 @@ def test_room_image_upload_queues_moderation_without_running_ai_inline(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_local_storage_is_not_queued_when_use_s3_flag_is_incorrect(tmp_path):
+def test_local_storage_queues_payload_when_use_s3_flag_is_incorrect(tmp_path):
     owner = User.objects.create_user(
         username="moderation-mismatched-storage-owner",
         email="moderation-mismatched-storage@example.com",
@@ -121,8 +122,9 @@ def test_local_storage_is_not_queued_when_use_s3_flag_is_incorrect(tmp_path):
     client.force_authenticate(user=owner)
     url = reverse("v1:room-photo-upload", kwargs={"pk": room.pk})
 
-    # Reproduce the staging failure: the flag says S3, but the ImageField is
-    # actually using service-local FileSystemStorage under MEDIA_ROOT.
+    # Reproduce the staging failure: the ImageField is on service-local
+    # FileSystemStorage. The worker must receive image bytes rather than trying
+    # to reopen the web service's private /var/data/media path.
     with override_settings(MEDIA_ROOT=str(tmp_path), USE_S3=True):
         with (
             patch(
@@ -132,11 +134,6 @@ def test_local_storage_is_not_queued_when_use_s3_flag_is_incorrect(tmp_path):
             patch(
                 "propertylist_app.services.image."
                 "should_auto_approve_upload",
-                return_value={
-                    "approved": True,
-                    "reason": RoomImage.MODERATION_AUTO_APPROVED,
-                    "notes": "Mismatched local storage moderated inline.",
-                },
             ) as moderate,
         ):
             response = client.post(
@@ -146,75 +143,20 @@ def test_local_storage_is_not_queued_when_use_s3_flag_is_incorrect(tmp_path):
             )
 
     assert response.status_code == 201, response.data
-    enqueue.assert_not_called()
-    moderate.assert_called_once()
+    moderate.assert_not_called()
 
     image = RoomImage.objects.get(room=room)
-    assert image.status == RoomImage.STATUS_APPROVED
-    assert image.moderation_reason == RoomImage.MODERATION_AUTO_APPROVED
-    assert image.moderation_checked_at is not None
-
-
-
-@pytest.mark.django_db(transaction=True)
-def test_local_media_upload_moderates_saved_file_inside_api_process(tmp_path):
-    owner = User.objects.create_user(
-        username="moderation-local-owner",
-        email="moderation-local@example.com",
-        password="pass123",
+    enqueue.assert_called_once_with(
+        args=[image.id],
+        kwargs={"image_payload": ANY},
+        retry=False,
     )
-    category = RoomCategorie.objects.create(
-        name="Moderation local",
-        active=True,
-    )
-    room = Room.objects.create(
-        title="Moderation local room",
-        description="desc",
-        price_per_month=650,
-        location="SO14",
-        category=category,
-        property_owner=owner,
-        property_type="flat",
-    )
-
-    client = APIClient()
-    client.force_authenticate(user=owner)
-    url = reverse("v1:room-photo-upload", kwargs={"pk": room.pk})
-
-    with override_settings(MEDIA_ROOT=str(tmp_path), USE_S3=False):
-        with (
-            patch(
-                "propertylist_app.image_moderation_tasks."
-                "moderate_room_image.apply_async"
-            ) as enqueue,
-            patch(
-                "propertylist_app.services.image."
-                "should_auto_approve_upload",
-                return_value={
-                    "approved": True,
-                    "reason": RoomImage.MODERATION_AUTO_APPROVED,
-                    "notes": "Stored file moderation passed.",
-                },
-            ) as moderate,
-        ):
-            response = client.post(
-                url,
-                {"image": _valid_image("local-room.jpg")},
-                format="multipart",
-            )
-
-    assert response.status_code == 201, response.data
-    enqueue.assert_not_called()
-    moderate.assert_called_once()
-
-    moderated_file = moderate.call_args.args[0]
-    assert "room_images" in str(getattr(moderated_file, "name", ""))
-
-    image = RoomImage.objects.get(room=room)
-    assert image.status == RoomImage.STATUS_APPROVED
-    assert image.moderation_reason == RoomImage.MODERATION_AUTO_APPROVED
-    assert image.moderation_notes == "Stored file moderation passed."
-    assert image.moderation_checked_at is not None
+    payload = enqueue.call_args.kwargs["kwargs"]["image_payload"]
+    assert isinstance(payload, str)
+    assert payload
+    assert image.status == RoomImage.STATUS_PENDING
+    assert image.moderation_reason == RoomImage.MODERATION_AWAITING_CHECK
+    assert image.moderation_checked_at is None
 
 
 
