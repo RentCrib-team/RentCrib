@@ -9,7 +9,7 @@ _INSTALLED = False
 
 def _optimized_get_queryset(self):
     queryset = _ORIGINAL_GET_QUERYSET(self)
-    return queryset.select_related("room", "user")
+    return queryset.select_related("room", "user", "user__profile")
 
 
 def install_booking_list_query_optimization():

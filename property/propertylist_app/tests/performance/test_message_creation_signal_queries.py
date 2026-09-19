@@ -1,4 +1,5 @@
 import pytest
+from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
@@ -10,6 +11,7 @@ from propertylist_app.models import (
     Notification,
     UserProfile,
 )
+from propertylist_app.api.views.messaging import MessageListCreateView
 
 
 @pytest.mark.django_db
@@ -84,6 +86,11 @@ def test_human_message_signal_keeps_synchronous_database_work_bounded(
 def test_message_send_request_query_count_does_not_grow_with_account_history(
     django_user_model,
 ):
+    # User primary keys are reused between database tests, while the locmem
+    # throttle cache survives rollbacks. Start this rate-limit-independent
+    # performance test with a clean cache.
+    cache.clear()
+
     sender = django_user_model.objects.create_user(
         username="message_scale_sender",
         email="message_scale_sender@example.com",
@@ -112,6 +119,7 @@ def test_message_send_request_query_count_does_not_grow_with_account_history(
     url = f"/api/v1/messages/threads/{target_thread.id}/messages/"
 
     with (
+        patch.object(MessageListCreateView, "throttle_classes", []),
         patch(
             "propertylist_app.services.message_creation_query_optimization."
             "push_user_realtime_event"

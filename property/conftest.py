@@ -127,7 +127,7 @@ def room_factory(db, user_factory):
         category=None,
         **overrides,
         ):
-        
+
         if property_owner is None:
             property_owner = user_factory(username="owner", email="owner@example.com")
 

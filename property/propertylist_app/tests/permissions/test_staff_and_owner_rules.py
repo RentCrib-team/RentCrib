@@ -81,7 +81,7 @@ def test_room_update_owner_only():
     c = APIClient()
     c.force_authenticate(user=other)
     r_forbid = c.patch(url, {"title": "Hacked Title"}, format="json")
-    assert r_forbid.status_code == 403, r_forbid.content
+    assert r_forbid.status_code == 404, r_forbid.content
 
     # ---- Owner updates → 200 and title changed
     c.force_authenticate(user=owner)

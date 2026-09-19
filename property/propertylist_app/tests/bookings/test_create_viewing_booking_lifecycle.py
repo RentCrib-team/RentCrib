@@ -28,6 +28,9 @@ def _room_with_users():
         category=category,
         property_owner=landlord,
         price_per_month=650,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
     return seeker, room
 

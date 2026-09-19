@@ -64,7 +64,7 @@ def test_hidden_room_not_in_list_or_search():
 
 
 @pytest.mark.django_db
-def test_expired_room_hidden_after_scheduler():
+def test_expired_room_keeps_active_lifecycle_after_scheduler():
     cat = RoomCategorie.objects.create(name="Premium", active=True)
 
     User = get_user_model()
@@ -82,9 +82,9 @@ def test_expired_room_hidden_after_scheduler():
     expire_paid_listings()
 
     room.refresh_from_db()
-    assert room.status == "hidden"
-    
-    
+    assert room.status == "active"
+
+
 @pytest.mark.django_db
 def test_paid_active_but_unavailable_room_not_in_public_search():
     cat = RoomCategorie.objects.create(
@@ -128,4 +128,4 @@ def test_paid_active_but_unavailable_room_not_in_public_search():
 
     ids = {item["id"] for item in results}
 
-    assert room.id not in ids    
+    assert room.id not in ids

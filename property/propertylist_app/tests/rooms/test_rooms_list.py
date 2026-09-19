@@ -1,8 +1,9 @@
 import pytest
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils import timezone
 from propertylist_app.models import Room, RoomCategorie
 
 pytestmark = pytest.mark.django_db  # this file hits the DB
@@ -48,6 +49,7 @@ def make_room(
         avg_rating=avg_rating,
         number_rating=0,
         status="active",
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
 # --- test A: ordering by rating desc -----------------------------------------

@@ -1,7 +1,9 @@
 import pytest
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from propertylist_app.models import RoomCategorie, Room
@@ -21,6 +23,7 @@ def test_rooms_list_supports_legacy_start_param():
             property_owner=owner,
             price_per_month=500 + i,
             status="active",
+            paid_until=timezone.localdate() + timedelta(days=30),
         )
 
     client = APIClient()
@@ -48,6 +51,7 @@ def test_rooms_list_legacy_start_affects_pagination_links_like_offset():
             property_owner=owner,
             price_per_month=500 + i,
             status="active",
+            paid_until=timezone.localdate() + timedelta(days=30),
         )
 
     client = APIClient()

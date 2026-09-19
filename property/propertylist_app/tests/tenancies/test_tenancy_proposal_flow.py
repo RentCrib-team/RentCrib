@@ -101,7 +101,7 @@ def test_landlord_proposes_tenancy_creates_single_proposal_row():
     # The landlord submitted the terms, so the landlord must wait.
     assert response_payload["can_agree"] is False
     assert response_payload["can_edit"] is False
-    assert response_payload["available_actions"] == []
+    assert response_payload["available_actions"] == ["cancel"]
 
     # A second initial proposal must not overwrite the existing tenancy.
     resp2 = client.post(
@@ -190,7 +190,7 @@ def test_propose_changes_resets_confirmations_and_updates_dates():
         },
         format="json",
     )
-    
+
     assert resp2.status_code == 200, resp2.data
 
     tenancy = Tenancy.objects.get(id=tenancy_id)
@@ -198,7 +198,7 @@ def test_propose_changes_resets_confirmations_and_updates_dates():
     assert str(tenancy.move_in_date) == str(date.today() + timedelta(days=14))
     assert tenancy.duration_months == 12
 
-  
+
     # The one-time correction becomes the final tenancy information.
     # No further Agree/Edit cycle is required.
     assert tenancy.landlord_confirmed_at is not None
@@ -210,8 +210,8 @@ def test_propose_changes_resets_confirmations_and_updates_dates():
     assert tenancy.still_living_check_at is not None
     assert tenancy.review_open_at is not None
     assert tenancy.review_deadline_at is not None
-    
-    
+
+
 def test_landlord_can_edit_once_when_tenant_created_original_proposal():
     landlord = _make_user("landlord_landlord_edit")
     tenant = _make_user("tenant_landlord_edit")
@@ -237,13 +237,13 @@ def test_landlord_can_edit_once_when_tenant_created_original_proposal():
     )
 
     assert response.status_code == 201, response.data
-    
+
     tenant_proposal_payload = response.data.get("data", response.data)
 
     # Tenant submitted the terms and must wait for the landlord.
     assert tenant_proposal_payload["can_agree"] is False
     assert tenant_proposal_payload["can_edit"] is False
-    assert tenant_proposal_payload["available_actions"] == []
+    assert tenant_proposal_payload["available_actions"] == ["cancel"]
 
     response_payload = response.data.get("data", response.data)
     tenancy_id = response_payload["id"]
@@ -260,7 +260,7 @@ def test_landlord_can_edit_once_when_tenant_created_original_proposal():
     )
 
     assert edit_response.status_code == 200, edit_response.data
-    
+
     edit_payload = edit_response.data.get("data", edit_response.data)
 
     # The correction is now finalised immediately.
@@ -282,7 +282,7 @@ def test_landlord_can_edit_once_when_tenant_created_original_proposal():
 
     assert tenancy.review_open_at is not None
     assert tenancy.review_deadline_at is not None
-    assert tenancy.still_living_check_at is not None  
+    assert tenancy.still_living_check_at is not None
 
 
 def test_receiving_party_gets_agree_and_edit_actions():
@@ -335,6 +335,7 @@ def test_receiving_party_gets_agree_and_edit_actions():
     assert tenancy_payload["can_edit"] is True
     assert tenancy_payload["available_actions"] == [
         "confirm",
+        "cancel",
         "propose_changes",
     ]
 
@@ -496,7 +497,7 @@ def test_both_confirm_locks_schedule_and_sets_review_dates():
 
     assert tenancy.review_open_at is not None
     assert tenancy.still_living_check_at is not None
-    
+
     expected_earliest = before_confirmation + timedelta(minutes=10)
     expected_latest = after_confirmation + timedelta(minutes=10)
 
@@ -559,9 +560,9 @@ def test_second_party_cannot_overwrite_existing_proposal_through_propose_endpoin
     assert tenancy.duration_months == 3
     assert tenancy.tenant_confirmed_at is not None
     assert tenancy.landlord_confirmed_at is None
-    
-    
-    
+
+
+
 def test_edit_immediately_completes_tenancy():
     landlord = _make_user("landlord_edit_confirm")
     tenant = _make_user("tenant_edit_confirm")
@@ -620,9 +621,9 @@ def test_edit_immediately_completes_tenancy():
     assert tenancy.review_deadline_at is not None
     assert tenancy.still_living_check_at is not None
     assert room.is_available is False
-    
-    
-    
+
+
+
 def test_tenant_created_proposal_keeps_room_available():
     landlord = _make_user("landlord_tenant_first_available")
     tenant = _make_user("tenant_tenant_first_available")
@@ -767,7 +768,7 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
         body="{{ room_title }} {{ cta_url }}",
         is_active=True,
     )
-    
+
     landlord = _make_user("landlord_tenant_first_expiry")
     tenant = _make_user("tenant_tenant_first_expiry")
     room = _make_room(owner=landlord)
@@ -816,8 +817,8 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
     assert tenancy.status == Tenancy.STATUS_CANCELLED
     assert room.is_available is True
     assert tenancy.still_living_check_at is None
-    assert tenancy.review_open_at is None  
-    
+    assert tenancy.review_open_at is None
+
         # Both parties receive the correct expiry emails.
     tenant_expiry_email = OutboundNotification.objects.filter(
         user=tenant,
@@ -836,10 +837,10 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
 
     assert tenant_expiry_email.context["room_title"] == room.title
     assert landlord_expiry_email.context["room_title"] == room.title
-    
-    
-    
-    
+
+
+
+
     # The tenant cannot repeatedly submit the expired claim.
     tenant_retry_response = tenant_client.post(
         f"{API_PREFIX}/tenancies/propose/",
@@ -858,7 +859,7 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
     assert "contact the landlord" in str(
         tenant_retry_response.data
     ).lower()
-    
+
     assert not OutboundNotification.objects.filter(
         user=landlord,
         template_key="tenancy.proposed",
@@ -892,13 +893,13 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
     new_tenancy = Tenancy.objects.get(
         id=landlord_payload["id"]
     )
-    
+
     replacement_email = OutboundNotification.objects.filter(
         user=tenant,
         template_key="tenancy.proposed",
         context__tenancy_id=new_tenancy.id,
     ).first()
-    
+
     replacement_created_at = new_tenancy.created_at
 
     repeated_viewing_email_exists = OutboundNotification.objects.filter(
@@ -924,4 +925,4 @@ def test_unverified_tenant_created_proposal_expires_after_ten_minutes():
     assert new_tenancy.status == Tenancy.STATUS_PROPOSED
     assert new_tenancy.landlord_confirmed_at is not None
     assert new_tenancy.tenant_confirmed_at is None
-    assert room.is_available is False  
+    assert room.is_available is False

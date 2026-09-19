@@ -23,6 +23,10 @@ def test_nearby_orders_by_distance_and_attaches_distance(monkeypatch):
         "propertylist_app.api.views.public.geocode_postcode_cached",
         fake_geocode,
     )
+    monkeypatch.setattr(
+        "propertylist_app.services.search_radius_candidate_optimization.geocode_postcode_cached",
+        fake_geocode,
+    )
 
     owner = User.objects.create_user(
         username="o",
@@ -94,6 +98,10 @@ def test_search_with_postcode_distance_ordering_and_reverse(monkeypatch):
 
     monkeypatch.setattr(
         "propertylist_app.api.views.public.geocode_postcode_cached",
+        fake_geocode,
+    )
+    monkeypatch.setattr(
+        "propertylist_app.services.search_radius_candidate_optimization.geocode_postcode_cached",
         fake_geocode,
     )
 

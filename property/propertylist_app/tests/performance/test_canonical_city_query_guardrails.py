@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from propertylist_app.api.views import public_locations
+from propertylist_app.api.views.public_locations import PUBLIC_CITY_DIRECTORY_SLUGS
 from propertylist_app.models import City, Room, RoomCategorie, UserProfile
 
 
@@ -42,9 +43,10 @@ class _ProfileTouchingCanonicalHomeSerializer:
 @pytest.mark.django_db
 def test_canonical_city_list_applies_limit_offset_in_database():
     City.objects.all().delete()
-    for index in range(30):
+    for index, slug in enumerate(PUBLIC_CITY_DIRECTORY_SLUGS):
         City.objects.create(
-            name=f"Canonical City {index:02d}",
+            name=slug.replace("-", " ").title(),
+            slug=slug,
             display_order=index,
             is_active=True,
         )

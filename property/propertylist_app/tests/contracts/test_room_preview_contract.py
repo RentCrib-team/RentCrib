@@ -1,6 +1,9 @@
 import pytest
+from datetime import timedelta
 from rest_framework.test import APIClient
 from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.utils import timezone
 
 from propertylist_app.models import Room, RoomCategorie
 
@@ -78,6 +81,9 @@ def seed_room_if_empty():
         category=cat,
         price_per_month=900,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
 
@@ -99,6 +105,7 @@ def get_room_id_for_preview(client: APIClient) -> int:
     items = _extract_list_items(r.json())
     if not items:
         seed_room_if_empty()
+        cache.clear()
         r2 = client.get(ROOMS_LIST_V1)
         assert r2.status_code == 200, getattr(r2, "content", b"")
         items = _extract_list_items(r2.json())
