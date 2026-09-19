@@ -1248,7 +1248,6 @@ class CreateListingCheckoutSessionView(APIView):
                     session = _stripe_mod().checkout.Session.create(
                         mode="payment",
                         customer=customer_id,
-                        payment_method_types=["card"],
                         line_items=[
                             {
                                 "price_data": {
