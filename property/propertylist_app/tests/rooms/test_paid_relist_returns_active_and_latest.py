@@ -77,7 +77,7 @@ def test_successful_paid_relist_returns_room_to_active_and_latest(
     payment = Payment.objects.create(
         user=landlord,
         room=room,
-        amount=1.00,
+        amount=7.99,
         currency="GBP",
         status=Payment.Status.CREATED,
     )
