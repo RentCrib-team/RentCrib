@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 
 #Django
+from django.conf import settings
 from django.db import transaction
 from django.db.models import (
     Case,
@@ -1008,45 +1009,56 @@ class RoomPhotoUploadView(APIView):
 
         
 
-        # Automated AI moderation must not hold this upload request open.
-        # The image is already safely stored as pending; after commit, queue a
-        # worker task to perform Google Vision/Gemini moderation.
+        # Moderation runs asynchronously only when the configured media
+        # backend is shared between the API and Celery (R2/S3). A Render disk is
+        # private to this web service, so a worker cannot reopen /var/data files.
+        # In that case moderate the authoritative stored file here instead of
+        # queueing a task that is guaranteed to fail with FileNotFoundError.
         image_id = image.id
 
-        def _enqueue_moderation():
-            try:
-                from propertylist_app.image_moderation_tasks import (
-                    moderate_room_image,
-                )
+        if getattr(settings, "USE_S3", False):
+            def _enqueue_moderation():
+                try:
+                    from propertylist_app.image_moderation_tasks import (
+                        moderate_room_image,
+                    )
 
-                moderate_room_image.apply_async(
-                    args=[image_id],
-                    retry=False,
-                )
-            except Exception:
-                import logging
+                    moderate_room_image.apply_async(
+                        args=[image_id],
+                        retry=False,
+                    )
+                except Exception:
+                    import logging
 
-                logging.getLogger(__name__).exception(
-                    "Room image moderation enqueue failed for RoomImage id=%s",
-                    image_id,
-                )
+                    logging.getLogger(__name__).exception(
+                        "Room image moderation enqueue failed for RoomImage id=%s",
+                        image_id,
+                    )
 
-                RoomImage.objects.filter(
-                    pk=image_id,
-                    status=RoomImage.STATUS_PENDING,
-                    moderation_reason=RoomImage.MODERATION_AWAITING_CHECK,
-                ).update(
-                    moderation_reason=(
-                        RoomImage.MODERATION_SERVICE_UNAVAILABLE
-                    ),
-                    moderation_notes=(
-                        "Automated moderation could not be queued. "
-                        "The image remains pending for manual review."
-                    ),
-                    moderation_checked_at=timezone.now(),
-                )
+                    RoomImage.objects.filter(
+                        pk=image_id,
+                        status=RoomImage.STATUS_PENDING,
+                        moderation_reason=RoomImage.MODERATION_AWAITING_CHECK,
+                    ).update(
+                        moderation_reason=(
+                            RoomImage.MODERATION_SERVICE_UNAVAILABLE
+                        ),
+                        moderation_notes=(
+                            "Automated moderation could not be queued. "
+                            "The image remains pending for manual review."
+                        ),
+                        moderation_checked_at=timezone.now(),
+                    )
 
-        transaction.on_commit(_enqueue_moderation)
+            transaction.on_commit(_enqueue_moderation)
+        else:
+            from propertylist_app.image_moderation_tasks import (
+                moderate_room_image_now,
+            )
+
+            moderate_room_image_now(image_id)
+            image.refresh_from_db()
+
         # Response (serializer safe context)
         return ok_response(
             RoomImageSerializer(

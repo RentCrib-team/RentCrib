@@ -28,11 +28,14 @@ def _normalise_moderation_result(result) -> dict:
     return result or {}
 
 
-@shared_task(
-    name="propertylist_app.moderate_room_image",
-    ignore_result=True,
-)
-def moderate_room_image(room_image_id: int) -> None:
+def moderate_room_image_now(room_image_id: int) -> None:
+    """
+    Moderate a stored RoomImage using Django's configured storage backend.
+
+    This helper is safe to call inside the API process when media is stored on
+    that service's local Render disk, and from Celery when media is stored in a
+    shared backend such as R2/S3.
+    """
     image = RoomImage.objects.filter(pk=room_image_id).first()
 
     if image is None:
@@ -55,6 +58,8 @@ def moderate_room_image(room_image_id: int) -> None:
         if not image.image:
             raise ValueError("Room image file is missing.")
 
+        # Reopen the authoritative stored object. Never reuse the incoming
+        # multipart temporary file after ImageField.save() has completed.
         with image.image.open("rb") as stored_file:
             moderation_result = _normalise_moderation_result(
                 should_auto_approve_upload(stored_file)
@@ -97,7 +102,8 @@ def moderate_room_image(room_image_id: int) -> None:
         )
 
         # Only mark the original pending upload as unavailable. If an admin
-        # changed the row while the task was running, leave that decision alone.
+        # changed the row while moderation was running, leave that decision
+        # alone.
         RoomImage.objects.filter(
             pk=room_image_id,
             status=RoomImage.STATUS_PENDING,
@@ -110,3 +116,11 @@ def moderate_room_image(room_image_id: int) -> None:
             )[:2000],
             moderation_checked_at=timezone.now(),
         )
+
+
+@shared_task(
+    name="propertylist_app.moderate_room_image",
+    ignore_result=True,
+)
+def moderate_room_image(room_image_id: int) -> None:
+    moderate_room_image_now(room_image_id)
