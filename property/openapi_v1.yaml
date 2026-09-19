@@ -10905,7 +10905,9 @@ components:
         review_flags:
           readOnly: true
         overall_rating:
-          type: integer
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,1})?$
           readOnly: true
         notes:
           type: string
@@ -13498,9 +13500,9 @@ components:
           x-spec-enum-id: 24b02ba2f4a75d8c
           nullable: true
         overall_rating:
-          type: integer
-          maximum: 5
-          minimum: 1
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,1})?$
         review_flags: {}
         notes:
           type: string
