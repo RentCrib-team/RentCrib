@@ -476,6 +476,7 @@ REST_FRAMEWORK = {
         "user": "1000/hour",
         "anon": "100/hour",
         "room-create": "10/hour",
+        "photo-upload": "30/minute",
 
         "login": "5/minute",
         "token-refresh": "10/minute",
@@ -851,4 +852,3 @@ LOGGING = {
         },
     },
 }
-
