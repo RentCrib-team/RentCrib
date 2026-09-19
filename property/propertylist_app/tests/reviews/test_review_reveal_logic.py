@@ -310,7 +310,7 @@ def test_room_rating_updates_only_after_reveal(user_factory, room_factory):
     # Create both reviews but NOT revealed yet (active=False, reveal_at in future)
     # IMPORTANT: overall_rating is computed from review_flags in Review.save()
     # Two positive flags => 3 + 2 = 5
-    flags_for_5 = ["responsive", "maintenance_good"]
+    rating_flags = ["responsive", "maintenance_good"]
 
     Review.objects.create(
         tenancy=tenancy,
