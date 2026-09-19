@@ -1,9 +1,11 @@
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 from django.apps import apps
 from django.utils import timezone
 
+from propertylist_app.api.serializers import MessageSerializer
 from propertylist_app.tasks import task_tenancy_prompts_sweep
 
 
@@ -119,6 +121,17 @@ def test_same_terms_renewal_gets_fresh_ending_reminder_cycle(
         "If the tenancy is ending, no action is required."
     )
     assert fresh_reminder.metadata["available_actions"] == ["update_tenancy"]
+
+    request = SimpleNamespace(user=landlord)
+    assert MessageSerializer(
+        old_reminder,
+        context={"request": request},
+    ).data["available_actions"] == []
+    assert MessageSerializer(
+        fresh_reminder,
+        context={"request": request},
+    ).data["available_actions"] == ["update_tenancy"]
+
     assert fresh_reminder.created >= sweep_started_at
     assert fresh_reminder.created <= sweep_finished_at
     assert (
