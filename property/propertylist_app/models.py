@@ -1057,6 +1057,14 @@ class RoomImage(models.Model):
         blank=True,
     )
 
+    # Small, cache-friendly rendition used by listing/search cards.  The
+    # original remains the source for detail galleries and moderation.
+    thumbnail = models.ImageField(
+        upload_to="room_images/thumbnails/",
+        null=True,
+        blank=True,
+    )
+
    
 
     uploaded_at = models.DateTimeField(

@@ -2650,6 +2650,88 @@ class MyListingRoomSerializer(RoomSerializer):
         return bool(benefit and benefit.consumed_at is None)
 
 
+class RoomCardSerializer(RoomSerializer):
+    """Compact room representation for grids, carousels and map pins."""
+
+    photo_count = serializers.SerializerMethodField(read_only=True)
+
+    class Meta(RoomSerializer.Meta):
+        fields = [
+            "id",
+            "title",
+            "location",
+            "price_per_month",
+            "avg_rating",
+            "number_rating",
+            "is_available",
+            "available_from",
+            "bills_included",
+            "landlord_type",
+            "landlord_type_label",
+            "landlord_verified",
+            "owner_name",
+            "owner_avatar",
+            "property_owner",
+            "cover_image",
+            "image_status",
+            "photo_count",
+            "latitude",
+            "longitude",
+            "created_at",
+            "updated_at",
+            "is_saved",
+            "status",
+            "listing_state",
+            "is_deleted",
+            "distance_miles",
+        ]
+
+    def _card_image(self, obj):
+        images = self._room_images(obj)
+        selected_cover_id = getattr(obj, "cover_photo_id", None)
+        if selected_cover_id:
+            images = sorted(
+                images,
+                key=lambda image: image.id != selected_cover_id,
+            )
+
+        if self._viewer_is_room_owner(obj):
+            visible = images
+        else:
+            visible = [
+                image
+                for image in images
+                if image.status == RoomImage.STATUS_APPROVED
+            ]
+            if len(visible) < 3:
+                return None
+
+        if not visible:
+            return None
+
+        image = visible[0]
+        return image.thumbnail or image.image
+
+    def get_cover_image(self, obj):
+        card_image = self._card_image(obj)
+        if card_image:
+            return self._absolute_media_url(card_image)
+
+        # Legacy Room.image fallback for listings predating RoomImage.
+        if not self._room_images(obj):
+            return self._absolute_media_url(getattr(obj, "image", None))
+        return None
+
+    def get_photo_count(self, obj):
+        images = self._room_images(obj)
+        if self._viewer_is_room_owner(obj):
+            return len(images)
+        return sum(
+            image.status == RoomImage.STATUS_APPROVED
+            for image in images
+        )
+
+
 
 
 
@@ -2968,6 +3050,16 @@ class HomeSummarySerializer(serializers.Serializer):
     """
     featured_rooms = RoomSerializer(many=True)
     latest_rooms = RoomSerializer(many=True)
+    popular_cities = CitySummarySerializer(many=True)
+    stats = serializers.DictField()
+    app_links = serializers.DictField()
+
+
+class CompactHomeSummarySerializer(serializers.Serializer):
+    """Home payload for current web clients; legacy clients keep full rooms."""
+
+    featured_rooms = RoomCardSerializer(many=True)
+    latest_rooms = RoomCardSerializer(many=True)
     popular_cities = CitySummarySerializer(many=True)
     stats = serializers.DictField()
     app_links = serializers.DictField()

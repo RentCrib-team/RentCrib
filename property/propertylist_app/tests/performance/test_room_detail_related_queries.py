@@ -46,7 +46,9 @@ def test_room_detail_fetches_category_owner_profile_without_extra_queries(
     view = RoomDetailAV()
     request = view.initialize_request(django_request)
 
-    with django_assert_num_queries(1):
+    # One room query plus one bounded image prefetch. Serializing the room can
+    # now reuse that image set without issuing a later query.
+    with django_assert_num_queries(2):
         fetched_room = view._get_room(request, room.id)
         related_values = (
             fetched_room.category.name,

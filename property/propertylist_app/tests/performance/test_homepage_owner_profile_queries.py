@@ -76,9 +76,10 @@ def test_homepage_fetches_owner_profiles_without_per_room_queries(
     request = APIRequestFactory().get("/api/v1/home/")
 
     # Expected fixed cost:
-    # 1 featured query + 1 latest query + 1 city aggregation + 3 stats queries.
+    # 1 featured query + 1 latest query + 2 bounded image prefetches +
+    # 1 city aggregation + 3 stats queries.
     # Accessing each room owner's profile must not add another query per room.
-    with django_assert_num_queries(6):
+    with django_assert_num_queries(8):
         response = public_views.HomePageView.as_view()(request)
 
     assert response.status_code == 200

@@ -690,14 +690,20 @@ if USE_S3:
     AWS_S3_FILE_OVERWRITE = False
     AWS_DEFAULT_ACL = None
 
-    AWS_QUERYSTRING_AUTH = True
+    AWS_S3_CUSTOM_DOMAIN = (
+        os.getenv("AWS_S3_CUSTOM_DOMAIN", "")
+        or os.getenv("MEDIA_PUBLIC_HOST", "")
+    ).strip()
+
+    # A public R2 delivery domain produces one stable URL per object, allowing
+    # browser and edge caches to reuse card images. Keep signed URLs only when
+    # the private S3-compatible endpoint is the sole delivery path.
+    AWS_QUERYSTRING_AUTH = not bool(AWS_S3_CUSTOM_DOMAIN)
     AWS_QUERYSTRING_EXPIRE = int(os.getenv("AWS_QUERYSTRING_EXPIRE", "900"))
 
     AWS_S3_OBJECT_PARAMETERS = {
         "CacheControl": "max-age=86400, s-maxage=86400",
     }
-
-    AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN", "")
 
     if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
         raise ImproperlyConfigured("AWS credentials must be set when USE_S3=True")
