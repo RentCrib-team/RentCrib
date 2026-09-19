@@ -100,12 +100,12 @@ def test_task_refresh_room_ratings_updates_room_for_revealed_reviews(django_user
         reviewee=landlord,
         role=Review.ROLE_TENANT_TO_LANDLORD,
         reveal_at=now - timedelta(days=1),
-        review_flags=["responsive", "maintenance_good"],  # save() auto-calculates to 5
+        review_flags=["responsive", "maintenance_good"],  # weighted score: 4.1
         notes="Good landlord",
         active=True,
     )
     review.refresh_from_db()
-    assert review.overall_rating == 5
+    assert review.overall_rating == Decimal("4.1")
 
     # Run nightly refresh task
     updated_rooms_count = task_refresh_room_ratings_nightly()
@@ -114,7 +114,7 @@ def test_task_refresh_room_ratings_updates_room_for_revealed_reviews(django_user
     # Room rating should now reflect the revealed review
     room.refresh_from_db()
     assert room.number_rating == 1
-    assert room.avg_rating == pytest.approx(5.0)
+    assert room.avg_rating == pytest.approx(4.1)
 
 
 def test_task_refresh_room_ratings_ignores_unrevealed_reviews(django_user_model):
