@@ -257,6 +257,25 @@ def test_still_living_check_at_triggers_notification_for_both_users(user_factory
 
     assert notifications[tenant.id].target_type == "still_living_check"
     assert notifications[tenant.id].target_id == tenancy.id
+
+    landlord_notification = notifications[landlord.id]
+    tenant_notification = notifications[tenant.id]
+
+    assert landlord_notification.title == "The tenancy is ending soon"
+    assert "if the tenant is staying" in landlord_notification.body.lower()
+    assert "if the tenant is moving out" in landlord_notification.body.lower()
+    assert "if you are moving out" not in landlord_notification.body.lower()
+
+    assert tenant_notification.title == "Your tenancy is ending soon"
+    assert "if you are moving out" in tenant_notification.body.lower()
+
+    assert landlord_notification.message_id == tenant_notification.message_id
+    assert landlord_notification.message is not None
+    assert landlord_notification.message.body == (
+        "The tenancy is ending soon.\n\n"
+        "If the tenancy will continue, update the tenancy information. "
+        "If it will end as planned, no action is required."
+    )
     
     
 def test_still_living_check_does_not_duplicate_legacy_landlord_booking_target(
