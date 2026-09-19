@@ -4,7 +4,6 @@ from datetime import date, datetime
 
 
 #Django
-from django.conf import settings
 from django.db import transaction
 from django.db.models import (
     Case,
@@ -1009,14 +1008,22 @@ class RoomPhotoUploadView(APIView):
 
         
 
-        # Moderation runs asynchronously only when the configured media
-        # backend is shared between the API and Celery (R2/S3). A Render disk is
-        # private to this web service, so a worker cannot reopen /var/data files.
-        # In that case moderate the authoritative stored file here instead of
-        # queueing a task that is guaranteed to fail with FileNotFoundError.
+        # Moderation runs asynchronously only when the storage backend which
+        # actually saved this image is shared between the API and Celery. Do
+        # not trust USE_S3 alone here: a web/worker environment mismatch can
+        # leave that flag enabled while the ImageField is still backed by a
+        # service-local Render disk. A worker can never reopen that web-service
+        # path, so local files must be moderated in this process.
         image_id = image.id
 
-        if getattr(settings, "USE_S3", False):
+        from django.core.files.storage import FileSystemStorage
+
+        image_uses_shared_storage = not isinstance(
+            image.image.storage,
+            FileSystemStorage,
+        )
+
+        if image_uses_shared_storage:
             def _enqueue_moderation():
                 try:
                     from propertylist_app.image_moderation_tasks import (
