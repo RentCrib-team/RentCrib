@@ -43,3 +43,27 @@ def retire_extension_proposal_actions_after_response(
         metadata["available_actions"] = []
         message.metadata = metadata
         message.save(update_fields=["metadata"])
+
+    # An accepted renewal is the answer to the current ending-soon prompt.
+    # Retire that prompt too, for both parties, otherwise an old bell/envelope
+    # message can keep offering a second renewal beside an "Accepted" entry.
+    # The next rental period gets a new prompt when *its* check becomes due.
+    if instance.status != instance.STATUS_ACCEPTED:
+        return
+
+    ending_messages = Message.objects.filter(
+        metadata__tenancy_id=instance.tenancy_id,
+        metadata__event_type="still_living_check",
+        metadata__system_event=True,
+        created__lte=instance.responded_at,
+    )
+
+    for message in ending_messages:
+        metadata = dict(message.metadata or {})
+
+        if not metadata.get("available_actions"):
+            continue
+
+        metadata["available_actions"] = []
+        message.metadata = metadata
+        message.save(update_fields=["metadata"])
