@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from propertylist_app.api.serializers import RoomSerializer
-from propertylist_app.models import Tenancy
+from propertylist_app.models import Message, MessageThread, Tenancy
 from propertylist_app.tasks import task_refresh_tenancy_status_and_review_windows
 
 
@@ -104,6 +104,20 @@ def test_real_tenancy_end_clears_previous_relist_stamp(
         status=Tenancy.STATUS_ACTIVE,
         landlord_confirmed_at=timezone.now() - timedelta(days=120),
         tenant_confirmed_at=timezone.now() - timedelta(days=120),
+    )
+
+    thread = MessageThread.objects.create()
+    thread.participants.set([landlord, tenant])
+    Message.objects.create(
+        thread=thread,
+        sender=landlord,
+        body="Your tenancy is ending soon.",
+        metadata={
+            "system_event": True,
+            "event_type": "still_living_check",
+            "tenancy_id": tenancy.id,
+            "room_id": room.id,
+        },
     )
 
     task_refresh_tenancy_status_and_review_windows()

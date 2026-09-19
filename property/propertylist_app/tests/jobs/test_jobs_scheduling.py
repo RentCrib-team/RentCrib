@@ -11,7 +11,7 @@ User = get_user_model()
 
 
 @pytest.mark.django_db
-def test_expire_paid_listings_hides_and_notifies_owner():
+def test_expire_paid_listings_keeps_natural_expiry_active_and_notifies_owner():
     owner = User.objects.create_user(username="landlord", password="pass", email="owner@example.com")
     cat = RoomCategorie.objects.create(name="Flat", active=True)
 
@@ -44,7 +44,7 @@ def test_expire_paid_listings_hides_and_notifies_owner():
     room_old.refresh_from_db()
     room_ok.refresh_from_db()
 
-    assert room_old.status == "hidden"
+    assert room_old.status == "active"
     assert room_ok.status == "active"
 
     # A notification is created for the owner

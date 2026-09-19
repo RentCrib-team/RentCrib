@@ -45,6 +45,9 @@ def test_propertylist_app_migrations_are_reversible():
     - If there is only one migration (e.g. 0001_initial), reversing it may be too destructive
       for some projects; we skip in that case.
     """
+    if connection.vendor != "postgresql":
+        pytest.skip("Migration rollback safety is validated against PostgreSQL.")
+
     app_label = "propertylist_app"
 
     if not apps.is_installed(app_label):

@@ -45,13 +45,16 @@ class TestRoomsOrderingAndPagination(BaseAPITest):
 
         # Create 3 rooms with different ratings/prices/categories
         self.r1 = Room.objects.create(
-            title="Room 1", category=self.cat_b, price_per_month=900, avg_rating=4.2, property_owner=self.user
+            title="Room 1", category=self.cat_b, price_per_month=900, avg_rating=4.2, property_owner=self.user,
+            status=Room.Lifecycle.ACTIVE, paid_until=timezone.localdate() + timedelta(days=30),
         )
         self.r2 = Room.objects.create(
-            title="Room 2", category=self.cat_a, price_per_month=700, avg_rating=4.9, property_owner=self.user
+            title="Room 2", category=self.cat_a, price_per_month=700, avg_rating=4.9, property_owner=self.user,
+            status=Room.Lifecycle.ACTIVE, paid_until=timezone.localdate() + timedelta(days=30),
         )
         self.r3 = Room.objects.create(
-            title="Room 3", category=self.cat_a, price_per_month=800, avg_rating=3.8, property_owner=self.user
+            title="Room 3", category=self.cat_a, price_per_month=800, avg_rating=3.8, property_owner=self.user,
+            status=Room.Lifecycle.ACTIVE, paid_until=timezone.localdate() + timedelta(days=30),
         )
 
     def test_rooms_alt_order_by_avg_rating_desc(self):

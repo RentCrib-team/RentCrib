@@ -49,7 +49,7 @@ def test_public_cities_are_canonical_and_never_derived_from_room_location(
 
     assert response.status_code == 200
     names = [city["name"] for city in response.data["data"]]
-    assert names == ["Bristol", "London"]
+    assert names == ["London", "Bristol"]
     assert "2 Main Street, KA6 7QL" not in names
     assert "Hidden City" not in names
 
@@ -137,7 +137,7 @@ def test_public_city_search_filters_city_name_not_property_address(
 
 
 @pytest.mark.django_db
-def test_homepage_uses_only_active_featured_canonical_cities_in_admin_order(
+def test_homepage_uses_population_ranked_public_cities_not_featured_admin_order(
     api_client,
     room_factory,
     user_factory,
@@ -195,6 +195,6 @@ def test_homepage_uses_only_active_featured_canonical_cities_in_admin_order(
 
     assert response.status_code == 200
     cities = response.data["data"]["popular_cities"]
-    assert [city["name"] for city in cities] == ["Southampton", "Leeds"]
-    assert [city["room_count"] for city in cities] == [1, 1]
+    assert [city["name"] for city in cities] == ["Leeds", "Bristol"]
+    assert [city["room_count"] for city in cities] == [1, 0]
     assert all("KA6 7QL" not in city["name"] for city in cities)

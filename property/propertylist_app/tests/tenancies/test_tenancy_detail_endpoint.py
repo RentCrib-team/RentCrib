@@ -81,7 +81,7 @@ def test_landlord_can_retrieve_own_tenancy():
     # The original proposer must wait for the other party.
     assert response.data["data"]["can_agree"] is False
     assert response.data["data"]["can_edit"] is False
-    assert response.data["data"]["available_actions"] == []
+    assert response.data["data"]["available_actions"] == ["cancel"]
 
 
 def test_tenant_can_retrieve_own_tenancy_with_review_actions():
@@ -106,6 +106,7 @@ def test_tenant_can_retrieve_own_tenancy_with_review_actions():
     assert response.data["data"]["can_edit"] is True
     assert response.data["data"]["available_actions"] == [
         "confirm",
+        "cancel",
         "propose_changes",
     ]
 

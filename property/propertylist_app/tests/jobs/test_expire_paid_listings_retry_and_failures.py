@@ -33,7 +33,7 @@ def _mk_room(owner, *, title="Room", status="active", is_deleted=False, paid_unt
     )
 
 
-def test_expire_paid_listings_hides_only_expired_active_rooms_and_returns_count():
+def test_expire_paid_listings_keeps_natural_expiry_active_and_returns_count():
     owner = _mk_user("owner1")
     today = timezone.localdate()
 
@@ -50,7 +50,7 @@ def test_expire_paid_listings_hides_only_expired_active_rooms_and_returns_count(
     already_hidden.refresh_from_db()
     deleted.refresh_from_db()
 
-    assert expired.status == "hidden"
+    assert expired.status == "active"
     assert not_expired.status == "active"
     assert already_hidden.status == "hidden"
     assert deleted.status == "active"
@@ -70,7 +70,7 @@ def test_expire_paid_listings_respects_notify_reminders_toggle():
     assert Notification.objects.filter(user=owner, type="listing_expired").count() == 0
 
 
-def test_expire_paid_listings_notification_failure_does_not_block_hiding():
+def test_expire_paid_listings_notification_failure_keeps_natural_expiry_active():
     owner = _mk_user("owner3")
     today = timezone.localdate()
     room = _mk_room(owner, title="Expired", status="active", paid_until=today - timedelta(days=1))
@@ -81,10 +81,10 @@ def test_expire_paid_listings_notification_failure_does_not_block_hiding():
 
     assert updated == 1
     room.refresh_from_db()
-    assert room.status == "hidden"
+    assert room.status == "active"
 
 
-def test_expire_paid_listings_running_twice_is_idempotent_second_run_updates_0():
+def test_expire_paid_listings_running_twice_keeps_natural_expiry_active():
     owner = _mk_user("owner4")
     today = timezone.localdate()
     room = _mk_room(owner, title="Expired", status="active", paid_until=today - timedelta(days=1))
@@ -93,7 +93,7 @@ def test_expire_paid_listings_running_twice_is_idempotent_second_run_updates_0()
     second = expire_paid_listings(today=today)
 
     assert first == 1
-    assert second == 0
+    assert second == 1
 
     room.refresh_from_db()
-    assert room.status == "hidden"
+    assert room.status == "active"

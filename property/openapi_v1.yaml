@@ -1325,52 +1325,13 @@ paths:
   /api/v1/bookings/create/:
     post:
       operationId: bookings_create_create
-      description: Preflight validation for booking creation. Validates room, start/end
-        datetimes, and checks for booking conflicts.
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-        description: Optional idempotency key to prevent duplicate booking creation.
       tags:
       - bookings
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BookingPreflightRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/BookingPreflightRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/BookingPreflightRequest'
-        required: true
       security:
       - jwtAuth: []
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  ok:
-                    type: boolean
-                  message:
-                    type: string
-                    nullable: true
-                  data:
-                    $ref: '#/components/schemas/BookingPreflightResponse'
-                required:
-                - ok
-                - data
-          description: ''
-        '400':
-          description: Missing/invalid fields or invalid datetime format.
-        '401':
-          description: Authentication required.
+          description: No response body
   /api/v1/bookings/landlord-viewings/:
     get:
       operationId: bookings_landlord_viewings_list
@@ -1420,6 +1381,7 @@ paths:
   /api/v1/bookings/viewing/:
     post:
       operationId: bookings_viewing_create
+      description: Create a lifecycle-safe viewing through the legacy viewing endpoint.
       tags:
       - bookings
       requestBody:
@@ -1459,16 +1421,15 @@ paths:
   /api/v1/cities/:
     get:
       operationId: cities_retrieve
-      description: List active canonical cities with managed city-card images and
-        discoverable-room counts. Property addresses and postcodes are never returned
-        as cities. image_url always resolves to either an uploaded city image or the
-        RentCrib fallback artwork.
+      description: List the population-ranked public city directory with managed city-card
+        images and discoverable-room counts. The wider canonical city catalogue remains
+        available to room search/location logic.
       parameters:
       - in: query
         name: q
         schema:
           type: string
-        description: Filter canonical city names by case-insensitive substring.
+        description: Filter public city names by case-insensitive substring.
       tags:
       - cities
       security:
@@ -1549,8 +1510,7 @@ paths:
   /api/v1/home/:
     get:
       operationId: home_retrieve
-      description: Return homepage summary data. Popular city cards come from the
-        canonical active/featured City catalogue, not Room.location.
+      description: Public homepage data using the canonical City catalogue.
       tags:
       - home
       security:
@@ -1558,11 +1518,7 @@ paths:
       - {}
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CanonicalHomePageOkResponse'
-          description: ''
+          description: No response body
   /api/v1/inbox/:
     get:
       operationId: inbox_retrieve
@@ -1933,7 +1889,8 @@ paths:
   /api/v1/messages/threads/{thread_id}/read/:
     post:
       operationId: messages_threads_read_create_2
-      description: Mark thread as read for the current user.
+      description: Mark a thread as read or unread for the current user. Omitting
+        is_read defaults to true.
       parameters:
       - in: path
         name: thread_id
@@ -1942,6 +1899,17 @@ paths:
         required: true
       tags:
       - messages
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThreadMarkReadRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ThreadMarkReadRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ThreadMarkReadRequest'
       security:
       - jwtAuth: []
       responses:
@@ -2492,11 +2460,15 @@ paths:
     post:
       operationId: payments_payment_intent_rooms_create
       description: |-
-        Creates a Stripe PaymentIntent for a room listing fee.
+        Creates or resumes a Stripe PaymentIntent for a room listing fee.
 
         Intended for native mobile clients using Stripe PaymentSheet.
         The listing is NOT activated here. Stripe webhook confirmation
         remains the trusted source of payment success.
+
+        Repeated requests for the same owner/room/amount reuse the same
+        in-flight Payment and PaymentIntent instead of creating another
+        charge opportunity.
       parameters:
       - in: path
         name: id
@@ -2515,6 +2487,12 @@ paths:
                 $ref: '#/components/schemas/CreateListingPaymentIntentResponse'
           description: ''
         '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ''
+        '409':
           content:
             application/json:
               schema:
@@ -2767,42 +2745,20 @@ paths:
   /api/v1/payments/webhook/:
     post:
       operationId: payments_webhook_create
-      description: Stripe webhook endpoint. Verifies the Stripe-Signature header and
-        processes Stripe event payloads. Currently handles checkout.session.completed
-        and checkout.session.expired. Other event types are acknowledged and ignored.
-      parameters:
-      - in: header
-        name: Stripe-Signature
-        schema:
-          type: string
-        description: Stripe webhook signature header used to verify the request.
-        required: true
+      description: |-
+        Single Stripe webhook processor for both clients.
+
+        Web Checkout sends checkout.session.completed.
+        Native mobile PaymentSheet sends payment_intent.succeeded.
+        Both events use the same validation and payment-success code path.
       tags:
       - payments
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StripeWebhookEventRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/StripeWebhookEventRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/StripeWebhookEventRequest'
+      security:
+      - jwtAuth: []
+      - {}
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StripeWebhookAckOkResponse'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ''
+          description: No response body
   /api/v1/realtime/ticket/:
     post:
       operationId: realtime_ticket_create
@@ -3193,17 +3149,17 @@ paths:
           description: ''
   /api/v1/rooms/:
     get:
-      operationId: api_v1_rooms_list
-      description: List active rooms (paid and not expired). Paginated with limit/offset.
-      parameters:
-      - in: query
-        name: limit
-        schema:
-          type: integer
-      - in: query
-        name: offset
-        schema:
-          type: integer
+      operationId: rooms_retrieve
+      description: |-
+        Drop-in mixin for DRF views:
+        - Caches GET responses for anonymous and authenticated callers
+        - Authenticated cache entries are isolated per requesting user
+        - Uses per-view prefix to isolate keys
+        - Stores/returns the response data payload (JSON-serializable)
+        - Uses the global cache buster so when room data changes,
+          new keys are automatically used.
+
+        The historical class name is kept for import compatibility.
       tags:
       - rooms
       security:
@@ -3211,11 +3167,7 @@ paths:
       - {}
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RoomListResponse'
-          description: ''
+          description: No response body
     post:
       operationId: rooms_create
       description: Create a room owned by the logged-in user.
@@ -3270,11 +3222,14 @@ paths:
       operationId: rooms_alt_list
       description: |-
         Drop-in mixin for DRF views:
-        - Caches ONLY anonymous GET responses
+        - Caches GET responses for anonymous and authenticated callers
+        - Authenticated cache entries are isolated per requesting user
         - Uses per-view prefix to isolate keys
-        - Stores/returns 'data' payload (JSON-serializable)
-        - Uses the global cache buster so when data changes,
+        - Stores/returns the response data payload (JSON-serializable)
+        - Uses the global cache buster so when room data changes,
           new keys are automatically used.
+
+        The historical class name is kept for import compatibility.
       parameters:
       - name: limit
         required: false
@@ -3321,11 +3276,14 @@ paths:
       operationId: rooms_alt_update
       description: |-
         Drop-in mixin for DRF views:
-        - Caches ONLY anonymous GET responses
+        - Caches GET responses for anonymous and authenticated callers
+        - Authenticated cache entries are isolated per requesting user
         - Uses per-view prefix to isolate keys
-        - Stores/returns 'data' payload (JSON-serializable)
-        - Uses the global cache buster so when data changes,
+        - Stores/returns the response data payload (JSON-serializable)
+        - Uses the global cache buster so when room data changes,
           new keys are automatically used.
+
+        The historical class name is kept for import compatibility.
       tags:
       - rooms-alt
       requestBody:
@@ -3377,11 +3335,14 @@ paths:
       operationId: rooms_alt_partial_update
       description: |-
         Drop-in mixin for DRF views:
-        - Caches ONLY anonymous GET responses
+        - Caches GET responses for anonymous and authenticated callers
+        - Authenticated cache entries are isolated per requesting user
         - Uses per-view prefix to isolate keys
-        - Stores/returns 'data' payload (JSON-serializable)
-        - Uses the global cache buster so when data changes,
+        - Stores/returns the response data payload (JSON-serializable)
+        - Uses the global cache buster so when room data changes,
           new keys are automatically used.
+
+        The historical class name is kept for import compatibility.
       tags:
       - rooms-alt
       requestBody:
@@ -3432,11 +3393,14 @@ paths:
       operationId: rooms_alt_destroy
       description: |-
         Drop-in mixin for DRF views:
-        - Caches ONLY anonymous GET responses
+        - Caches GET responses for anonymous and authenticated callers
+        - Authenticated cache entries are isolated per requesting user
         - Uses per-view prefix to isolate keys
-        - Stores/returns 'data' payload (JSON-serializable)
-        - Uses the global cache buster so when data changes,
+        - Stores/returns the response data payload (JSON-serializable)
+        - Uses the global cache buster so when room data changes,
           new keys are automatically used.
+
+        The historical class name is kept for import compatibility.
       tags:
       - rooms-alt
       security:
@@ -6386,6 +6350,8 @@ components:
           type: string
           format: uri
           nullable: true
+        image_is_approved:
+          type: boolean
         image_url:
           type: string
           readOnly: true
@@ -6401,8 +6367,9 @@ components:
           type: boolean
         display_order:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         room_count:
           type: integer
           readOnly: true
@@ -7300,8 +7267,9 @@ components:
           format: date-time
         max_bookings:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         is_full:
           type: boolean
           readOnly: true
@@ -7355,6 +7323,10 @@ components:
         user_name:
           type: string
           readOnly: true
+        seeker_avatar:
+          type: string
+          format: uri
+          readOnly: true
         slot:
           type: integer
           nullable: true
@@ -7392,6 +7364,7 @@ components:
       - created_at
       - id
       - room_title
+      - seeker_avatar
       - user_id
       - user_name
     BookingCancelData:
@@ -7441,28 +7414,6 @@ components:
           type: string
       required:
       - message
-    BookingPreflightRequest:
-      type: object
-      properties:
-        room:
-          type: integer
-        start:
-          type: string
-          format: date-time
-        end:
-          type: string
-          format: date-time
-      required:
-      - end
-      - room
-      - start
-    BookingPreflightResponse:
-      type: object
-      properties:
-        detail:
-          type: string
-      required:
-      - detail
     BookingRescheduleResponse:
       type: object
       properties:
@@ -7523,16 +7474,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicCitySummary'
-      required:
-      - data
-      - ok
-    CanonicalHomePageOkResponse:
-      type: object
-      properties:
-        ok:
-          type: boolean
-        data:
-          $ref: '#/components/schemas/PublicHomeSummary'
       required:
       - data
       - ok
@@ -9552,6 +9493,8 @@ components:
           type: string
           format: uri
           nullable: true
+        image_is_approved:
+          type: boolean
         image_url:
           type: string
           readOnly: true
@@ -9567,8 +9510,9 @@ components:
           type: boolean
         display_order:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         room_count:
           type: integer
           readOnly: true
@@ -9716,8 +9660,9 @@ components:
           x-spec-enum-id: 419efe661ee3fa5f
         object_id:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         reason:
           type: string
           maxLength: 64
@@ -9887,12 +9832,14 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         number_of_bathrooms:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         bathroom_type:
           enum:
           - private
@@ -9950,13 +9897,15 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         household_type:
           enum:
@@ -10069,23 +10018,27 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         room_for:
           enum:
@@ -10113,8 +10066,9 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -10737,6 +10691,9 @@ components:
           format: uri
           readOnly: true
           nullable: true
+        image_is_approved:
+          type: boolean
+          readOnly: true
         image_url:
           type: string
           readOnly: true
@@ -10754,37 +10711,11 @@ components:
       - id
       - image
       - image_alt
+      - image_is_approved
       - image_url
       - name
       - room_count
       - slug
-    PublicHomeSummary:
-      type: object
-      properties:
-        featured_rooms:
-          type: array
-          items:
-            $ref: '#/components/schemas/Room'
-        latest_rooms:
-          type: array
-          items:
-            $ref: '#/components/schemas/Room'
-        popular_cities:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublicCitySummary'
-        stats:
-          type: object
-          additionalProperties: {}
-        app_links:
-          type: object
-          additionalProperties: {}
-      required:
-      - app_links
-      - featured_rooms
-      - latest_rooms
-      - popular_cities
-      - stats
     RealtimeTicketData:
       type: object
       properties:
@@ -10879,8 +10810,9 @@ components:
           x-spec-enum-id: 419efe661ee3fa5f
         object_id:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         reason:
           type: string
           maxLength: 64
@@ -11195,12 +11127,14 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         number_of_bathrooms:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         bathroom_type:
           enum:
           - private
@@ -11258,13 +11192,15 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         household_type:
           enum:
@@ -11377,23 +11313,27 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         room_for:
           enum:
@@ -11421,8 +11361,9 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -11894,37 +11835,6 @@ components:
           type: string
       required:
       - message
-    RoomListResponse:
-      type: object
-      properties:
-        ok:
-          type: boolean
-          default: true
-        message:
-          type: string
-        data:
-          $ref: '#/components/schemas/RoomListResponseData'
-      required:
-      - data
-      - message
-    RoomListResponseData:
-      type: object
-      properties:
-        count:
-          type: integer
-        next:
-          type: string
-          nullable: true
-        previous:
-          type: string
-          nullable: true
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Room'
-      required:
-      - count
-      - results
     RoomModerationStatusUpdateResponse:
       type: object
       properties:
@@ -12279,12 +12189,14 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         number_of_bathrooms:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         bathroom_type:
           enum:
           - private
@@ -12342,13 +12254,15 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         household_type:
           enum:
@@ -12461,23 +12375,27 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         room_for:
           enum:
@@ -12505,8 +12423,9 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -12828,49 +12747,6 @@ components:
           type: string
       required:
       - message
-    StripeWebhookAckData:
-      type: object
-      properties:
-        detail:
-          type: string
-        event_id:
-          type: string
-          nullable: true
-        event_type:
-          type: string
-          nullable: true
-        payment_id:
-          type: string
-          nullable: true
-      required:
-      - detail
-    StripeWebhookAckOkResponse:
-      type: object
-      properties:
-        ok:
-          type: boolean
-        message:
-          type: string
-          nullable: true
-        data:
-          $ref: '#/components/schemas/StripeWebhookAckData'
-      required:
-      - data
-      - ok
-    StripeWebhookEventRequest:
-      type: object
-      properties:
-        id:
-          type: string
-        type:
-          type: string
-        created:
-          type: integer
-        livemode:
-          type: boolean
-        data: {}
-        object:
-          type: string
     TenancyDetail:
       type: object
       properties:
@@ -13320,6 +13196,12 @@ components:
       required:
       - data
       - ok
+    ThreadMarkReadRequest:
+      type: object
+      properties:
+        is_read:
+          type: boolean
+          default: true
     ThreadMoveToBinData:
       type: object
       properties:

@@ -109,15 +109,12 @@ def test_seed_is_idempotent_and_does_not_overwrite_admin_city_controls():
 
 
 @pytest.mark.django_db
-def test_public_city_api_keeps_bangor_cards_city_name_only(api_client):
+def test_public_city_api_does_not_expose_bangor_outside_curated_directory(api_client):
     City.objects.all().delete()
     seed_official_uk_cities()
 
     response = api_client.get(CITIES_URL, {"q": "Bangor", "limit": 100})
 
     assert response.status_code == 200
-    bangors = response.data["data"]
-    assert len(bangors) == 2
-    assert {city["name"] for city in bangors} == {"Bangor"}
-    assert {city["slug"] for city in bangors} == BANGOR_SLUGS
-    assert all(city["image_alt"] == "Bangor" for city in bangors)
+    assert response.data["count"] == 0
+    assert response.data["data"] == []

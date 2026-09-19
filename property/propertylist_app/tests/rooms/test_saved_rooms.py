@@ -1,6 +1,8 @@
 import pytest
+from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from propertylist_app.models import Room, RoomCategorie, SavedRoom
@@ -18,6 +20,9 @@ def test_save_room_requires_authentication():
         category=cat,
         price_per_month=500,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
     client = APIClient()
@@ -51,7 +56,7 @@ def test_toggle_save_creates_savedroom_and_returns_saved_true():
     assert r.status_code in (200, 201), r.content
     assert r.data.get("ok") is True
     assert r.data.get("data", {}).get("saved") is True
-    
+
     assert r.data.get("data", {}).get("saved_at") is not None
 
 
@@ -83,7 +88,7 @@ def test_toggle_save_again_removes_savedroom_and_returns_saved_false():
     assert r.status_code == 200, r.content
     assert r.data.get("ok") is True
     assert r.data.get("data", {}).get("saved") is False
-    
+
     assert r.data.get("data", {}).get("saved_at") is None
 
 
@@ -141,6 +146,9 @@ def test_is_saved_field_true_for_saved_room_in_room_detail_or_search():
         category=cat,
         price_per_month=500,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
     SavedRoom.objects.create(user=user, room=room)

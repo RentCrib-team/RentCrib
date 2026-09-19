@@ -1,6 +1,8 @@
 import pytest
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
+from django.utils import timezone
+from datetime import timedelta
 
 from propertylist_app.models import Room, RoomCategorie
 
@@ -49,6 +51,9 @@ def seed_room_if_empty() -> None:
         category=cat,
         price_per_month=900,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
 
@@ -123,7 +128,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "listing_state",
         "location",
         "longitude",
-        
+
         "max_age",
         "max_occupants",
         "max_stay_months",
@@ -142,7 +147,7 @@ def test_rooms_list_contract_v1_strict_item_shape():
         "pets_allowed",
         "cover_image",
         "other_images",
-   
+
         "image_status",
         "preferred_flatmate_gender",
         "preferred_flatmate_language",
@@ -183,11 +188,11 @@ def test_rooms_list_contract_v1_strict_item_shape():
     assert_is_bool(first["is_deleted"], "is_deleted")
     assert_is_bool(first["is_shared_room"], "is_shared_room")
     assert first["city"] is None or isinstance(first["city"], int)
-    
-    
+
+
     assert first["cover_image"] is None or isinstance(first["cover_image"], str)
     assert first["other_images"] is None or isinstance(first["other_images"],list,)
-  
+
     assert first["image_status"] is None or first["image_status"] in {
         "pending",
         "verified",

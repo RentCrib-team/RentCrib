@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db.models import Case, Count, IntegerField, Q, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -178,7 +179,13 @@ class HomePageView(APIView):
             "-number_rating",
             "-created_at",
         )[:6]
-        latest_rooms_qs = base_rooms.order_by("-created_at")[:6]
+        latest_rooms_qs = (
+            base_rooms
+            .annotate(
+                effective_listing_at=Coalesce("relisted_at", "created_at"),
+            )
+            .order_by("-effective_listing_at", "-id")[:6]
+        )
 
         popular_cities = _order_cities_by_slug_sequence(
             _public_cities_queryset().filter(

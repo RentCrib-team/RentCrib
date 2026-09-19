@@ -26,6 +26,9 @@ def test_direct_booking_conflict_and_boundaries():
         category=cat,
         price_per_month=900,
         property_owner=u,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
     client = APIClient()
@@ -71,7 +74,7 @@ def test_direct_booking_conflict_and_boundaries():
     assert err.get("code") == "validation_error"
     assert "end" in err.get("field_errors", {}), f"Expected 'end' error, got {err}"
 
-    
+
     # reason: A4 envelope stores field-level errors inside field_errors
     end_val = err.get("field_errors", {}).get("end")
     assert end_val is not None, f"Expected end error list, got {err}"
@@ -96,6 +99,9 @@ def test_slot_booking_capacity_and_past_slot():
         category=cat,
         price_per_month=800,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
     # Future slot
@@ -136,10 +142,10 @@ def test_slot_booking_capacity_and_past_slot():
     slot_val = err.get("field_errors", {}).get("slot")
     assert slot_val is not None, f"Expected slot error list, got {err}"
     assert any("past" in str(x).lower() for x in slot_val), f"Unexpected slot error: {slot_val}"
-    
-    
-    
-    
+
+
+
+
 @pytest.mark.django_db
 def test_slot_booking_response_returns_selected_slot_only():
     """
@@ -165,6 +171,9 @@ def test_slot_booking_response_returns_selected_slot_only():
         category=cat,
         price_per_month=800,
         property_owner=owner,
+        status=Room.Lifecycle.ACTIVE,
+        is_available=True,
+        paid_until=timezone.localdate() + timedelta(days=30),
     )
 
     selected_start = (timezone.now() + timedelta(days=3)).replace(
@@ -203,11 +212,11 @@ def test_slot_booking_response_returns_selected_slot_only():
     assert response_end == selected_end
 
     assert "results" not in booking_data
-    assert "count" not in booking_data    
-    
-    
-    
-    
+    assert "count" not in booking_data
+
+
+
+
 @pytest.mark.django_db
 def test_public_availability_slots_can_be_filtered_by_date():
     """
@@ -270,7 +279,7 @@ def test_public_availability_slots_can_be_filtered_by_date():
 
     assert len(results) == 1
     assert results[0]["id"] == AvailabilitySlot.objects.get(start=day_one_start).id
-    assert results[0]["start"].startswith(day_one_start.date().isoformat())    
+    assert results[0]["start"].startswith(day_one_start.date().isoformat())
 
 
 @pytest.mark.django_db

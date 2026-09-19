@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
 
@@ -75,7 +76,13 @@ def install_public_room_visibility_contract():
             "-number_rating",
             "-created_at",
         )[:6]
-        latest_rooms_qs = base_rooms.order_by("-created_at")[:6]
+        latest_rooms_qs = (
+            base_rooms
+            .annotate(
+                effective_listing_at=Coalesce("relisted_at", "created_at"),
+            )
+            .order_by("-effective_listing_at", "-id")[:6]
+        )
         popular_cities = public_locations._order_cities_by_slug_sequence(
             public_locations._public_cities_queryset().filter(
                 slug__in=public_locations.HOMEPAGE_POPULAR_CITY_SLUGS
