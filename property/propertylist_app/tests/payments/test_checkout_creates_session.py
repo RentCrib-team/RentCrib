@@ -81,6 +81,8 @@ def test_checkout_creates_session_for_owner_room(monkeypatch):
 @pytest.mark.django_db
 def test_checkout_reuses_pending_payment_and_session(monkeypatch):
     owner = User.objects.create_user(username="owner2", password="pass123")
+    owner.profile.stripe_customer_id = "cus_existing"
+    owner.profile.save(update_fields=["stripe_customer_id"])
     cat = RoomCategorie.objects.create(name="Paid reuse", active=True)
     room = Room.objects.create(
         title="Reusable listing",
@@ -135,6 +137,8 @@ def test_checkout_rejects_room_with_active_paid_period(monkeypatch):
     from django.utils import timezone
 
     owner = User.objects.create_user(username="owner3", password="pass123")
+    owner.profile.stripe_customer_id = "cus_existing"
+    owner.profile.save(update_fields=["stripe_customer_id"])
     cat = RoomCategorie.objects.create(name="Already paid", active=True)
     room = Room.objects.create(
         title="Paid listing",
@@ -165,6 +169,8 @@ def test_checkout_rejects_room_with_active_paid_period(monkeypatch):
 @pytest.mark.django_db
 def test_checkout_replaces_expired_session(monkeypatch):
     owner = User.objects.create_user(username="owner4", password="pass123")
+    owner.profile.stripe_customer_id = "cus_existing"
+    owner.profile.save(update_fields=["stripe_customer_id"])
     cat = RoomCategorie.objects.create(name="Expired checkout", active=True)
     room = Room.objects.create(
         title="Retry listing",
