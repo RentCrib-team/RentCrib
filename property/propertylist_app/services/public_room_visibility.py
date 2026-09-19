@@ -76,8 +76,11 @@ def install_public_room_visibility_contract():
             "-created_at",
         )[:6]
         latest_rooms_qs = base_rooms.order_by("-created_at")[:6]
-        popular_cities = public_locations._public_cities_queryset(
-            featured=True
+        popular_cities = public_locations._order_cities_by_slug_sequence(
+            public_locations._public_cities_queryset().filter(
+                slug__in=public_locations.HOMEPAGE_POPULAR_CITY_SLUGS
+            ),
+            public_locations.HOMEPAGE_POPULAR_CITY_SLUGS,
         )[:12]
 
         payload = {

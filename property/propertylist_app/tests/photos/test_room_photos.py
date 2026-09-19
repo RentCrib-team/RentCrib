@@ -26,7 +26,7 @@ def make_valid_png_bytes() -> bytes:
     return buf.getvalue()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_owner_can_upload_and_delete_room_photo():
     """
     
@@ -55,7 +55,7 @@ def test_owner_can_upload_and_delete_room_photo():
     upload = SimpleUploadedFile("pic.png", make_valid_png_bytes(), content_type="image/png")
 
     with patch(
-        "propertylist_app.api.views.rooms.should_auto_approve_upload",
+        "propertylist_app.services.image.should_auto_approve_upload",
         return_value=True,
     ):
         r1 = client.post(url_up, {"image": upload}, format="multipart")
@@ -118,7 +118,7 @@ def test_non_owner_cannot_upload_or_delete_room_photo():
     
     
     
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_room_photo_upload_is_compressed_before_storage():
     owner = User.objects.create_user(
         username="compress-owner",
@@ -173,7 +173,7 @@ def test_room_photo_upload_is_compressed_before_storage():
     )
 
     with patch(
-        "propertylist_app.api.views.rooms.should_auto_approve_upload",
+        "propertylist_app.services.image.should_auto_approve_upload",
         return_value=True,
     ):
         response = client.post(

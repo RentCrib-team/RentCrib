@@ -1,0 +1,84 @@
+name: Photo moderation cross-process vet
+
+on:
+  push:
+    branches:
+      - ci/photo-moderation-cross-process-vet
+
+env:
+  DJANGO_ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+  DJANGO_SECRET_KEY: ci-test-secret-key
+  DJANGO_DEBUG: "true"
+  ENABLE_CAPTCHA: "false"
+  STRIPE_SECRET_KEY: sk_test_dummy
+  STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+  STRIPE_WEBHOOK_SECRET: whsec_dummy
+  SITE_URL: http://testserver
+  DB_NAME: rentcrib_ci
+  DB_USER: postgres
+  DB_PASSWORD: postgres
+  DB_HOST: 127.0.0.1
+  DB_PORT: "5432"
+
+jobs:
+  photo-targeted:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: rentcrib_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rentcrib_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: property
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: property/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Photo moderation targeted regressions
+        run: pytest propertylist_app/tests/photos -v
+      - name: Nearby listing lifecycle regressions
+        run: pytest propertylist_app/tests/listings/test_ads_expired_qa_lifecycle.py propertylist_app/tests/tenancies/test_renewal_action_retirement.py propertylist_app/tests/tenancies/test_tenancy_extension_endpoints.py -v
+
+  booking-tenancy-review:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: rentcrib_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rentcrib_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: property
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: property/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Full Booking Tenancy Review regression vet
+        run: pytest propertylist_app/tests/bookings propertylist_app/tests/tenancies propertylist_app/tests/reviews -v
