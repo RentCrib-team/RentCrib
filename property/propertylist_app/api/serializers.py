@@ -61,6 +61,7 @@ from notifications.services import send_security_code_email
 # --------------------
 
 class UserReviewListSerializer(serializers.ModelSerializer):
+    overall_rating = serializers.FloatField(read_only=True)
     reviewer_name = serializers.CharField(source="reviewer.username", read_only=True)
     reviewer_avatar = serializers.SerializerMethodField()
     reveal_at = serializers.DateTimeField(read_only=True)
@@ -104,6 +105,7 @@ class UserReviewListSerializer(serializers.ModelSerializer):
 
 
 class ReviewSerializer(serializers.ModelSerializer):
+    overall_rating = serializers.FloatField(read_only=True)
     review_mode = serializers.SerializerMethodField()
     review_location = serializers.SerializerMethodField()
     display_summary = serializers.SerializerMethodField()
