@@ -73,7 +73,7 @@ from propertylist_app.api.pagination import StandardLimitOffsetPagination
 
 
 
-class HomePageView(APIView):
+class HomePageView(CachedAnonymousGETMixin, APIView):
     """
     GET /api/home/
 
@@ -85,6 +85,8 @@ class HomePageView(APIView):
     - app_links: iOS / Android URLs (from settings, if defined)
     """
     permission_classes = [AllowAny]
+    cache_prefix = "home"
+    cache_ttl = 120
 
     @extend_schema(
         request=None,
@@ -1205,7 +1207,8 @@ class SearchRoomsView(CachedAnonymousGETMixin, generics.ListAPIView):
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             return _wrap_response_success(
-                self.get_paginated_response(serializer.data)
+                self.get_paginated_response(serializer.data),
+                include_legacy=(request.query_params.get("compact") != "1"),
             )
 
         # If pagination is disabled for some reason, return wrapped list

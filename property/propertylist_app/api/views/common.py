@@ -97,7 +97,7 @@ def error_response(
 # A3: Consistent success response envelope (NO mixins)
 # --------------------
 
-def _wrap_success_payload(payload):
+def _wrap_success_payload(payload, *, include_legacy=True):
     """
     Wrap successful DRF responses into a consistent shape.
 
@@ -142,16 +142,20 @@ def _wrap_success_payload(payload):
             "previous": payload.get("previous"),
         }
 
-        return {
+        wrapped = {
             "ok": True,
             "message": None,
             "data": results,
             "meta": meta,
-            "count": meta["count"],
-            "next": meta["next"],
-            "previous": meta["previous"],
-            "results": results,
         }
+        if include_legacy:
+            wrapped.update(
+                count=meta["count"],
+                next=meta["next"],
+                previous=meta["previous"],
+                results=results,
+            )
+        return wrapped
 
     # Plain list response
     if isinstance(payload, list):
@@ -170,11 +174,14 @@ def _wrap_success_payload(payload):
     }
 
 
-def _wrap_response_success(response):
+def _wrap_response_success(response, *, include_legacy=True):
     """
     Mutates a DRF Response object to wrap response.data using _wrap_success_payload().
     """
-    response.data = _wrap_success_payload(response.data)
+    response.data = _wrap_success_payload(
+        response.data,
+        include_legacy=include_legacy,
+    )
     return response
 
 

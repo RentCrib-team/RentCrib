@@ -1,10 +1,10 @@
 """Query optimization for room detail retrieval."""
 
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 
 from propertylist_app.api.views.rooms import RoomDetailAV
-from propertylist_app.models import Room, Tenancy
+from propertylist_app.models import Room, RoomImage, Tenancy
 from propertylist_app.services.public_room_visibility import _public_rooms_queryset
 
 
@@ -32,6 +32,14 @@ def _optimized_get_room(self, request, pk):
                 is_deleted=False,
             )
             .select_related(*related)
+            .prefetch_related(
+                Prefetch(
+                    "roomimage_set",
+                    queryset=RoomImage.objects.filter(
+                        status__in=["approved", "pending", "rejected"],
+                    ).order_by("id"),
+                )
+            )
             .distinct()
             .first()
         )
@@ -40,7 +48,14 @@ def _optimized_get_room(self, request, pk):
             return private_room
 
     return get_object_or_404(
-        _public_rooms_queryset().select_related(*related),
+        _public_rooms_queryset().select_related(*related).prefetch_related(
+            Prefetch(
+                "roomimage_set",
+                queryset=RoomImage.objects.filter(
+                    status__in=["approved", "pending", "rejected"],
+                ).order_by("id"),
+            )
+        ),
         pk=pk,
     )
 

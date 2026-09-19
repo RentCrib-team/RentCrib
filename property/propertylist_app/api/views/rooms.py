@@ -49,6 +49,7 @@ from drf_spectacular.types import OpenApiTypes
 #Project
 from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
 from propertylist_app.services.image import (
+    build_listing_thumbnail,
     compress_listing_upload,
     prepare_moderation_task_payload,
 )
@@ -298,7 +299,10 @@ class RoomAV(CachedAnonymousGETMixin, APIView):
 
         serializer = RoomSerializer(page, many=True, context={"request": request})
         resp = paginator.get_paginated_response(serializer.data)
-        response = _wrap_response_success(resp)
+        response = _wrap_response_success(
+            resp,
+            include_legacy=(request.query_params.get("compact") != "1"),
+        )
         return self._store_cached_response(request, response)
 
 
@@ -1032,10 +1036,19 @@ class RoomPhotoUploadView(APIView):
             except Exception:
                 pass
 
+        try:
+            thumbnail = build_listing_thumbnail(file_obj)
+        except Exception:
+            # The original upload remains usable; a backfill command can
+            # generate the rendition later without failing the landlord's
+            # upload request.
+            thumbnail = None
+
         # SINGLE SOURCE OF TRUTH: create the image only once.
         image = RoomImage.objects.create(
             room=room,
             image=file_obj,
+            thumbnail=thumbnail,
             status=RoomImage.STATUS_PENDING,
             moderation_reason=(
                 RoomImage.MODERATION_AWAITING_CHECK

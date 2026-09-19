@@ -4385,7 +4385,7 @@ paths:
                     type: string
                     nullable: true
                   data:
-                    $ref: '#/components/schemas/PaginatedRoomList'
+                    $ref: '#/components/schemas/PaginatedMyListingRoomList'
                 required:
                 - ok
                 - data
@@ -4535,7 +4535,7 @@ paths:
                     type: string
                     nullable: true
                   data:
-                    $ref: '#/components/schemas/PaginatedSearchRoomList'
+                    $ref: '#/components/schemas/PaginatedRoomCardList'
                 required:
                 - ok
                 - data
@@ -6367,9 +6367,8 @@ components:
           type: boolean
         display_order:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         room_count:
           type: integer
           readOnly: true
@@ -7267,9 +7266,8 @@ components:
           format: date-time
         max_bookings:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         is_full:
           type: boolean
           readOnly: true
@@ -8894,6 +8892,623 @@ components:
       - data
       - message
       - ok
+    MyListingRoom:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        category:
+          type: string
+          readOnly: true
+        category_id:
+          type: integer
+          writeOnly: true
+        cover_photo:
+          type: integer
+          writeOnly: true
+          nullable: true
+        avg_rating:
+          type: number
+          format: float
+          readOnly: true
+        is_saved:
+          type: boolean
+          readOnly: true
+        distance_miles:
+          type: number
+          readOnly: true
+        allow_search_indexing_effective:
+          type: boolean
+          readOnly: true
+        owner_name:
+          type: string
+          readOnly: true
+        owner_username:
+          type: string
+          readOnly: true
+        owner_avatar:
+          type: string
+          format: uri
+          readOnly: true
+        cover_image:
+          type: string
+          format: uri
+          readOnly: true
+        other_images:
+          type: array
+          items:
+            type: string
+            format: uri
+          nullable: true
+          readOnly: true
+        image_status:
+          type: string
+          readOnly: true
+        listing_state:
+          type: string
+          description: |-
+            Authoritative state used by My Listings.
+
+            Returns one of:
+            draft, active, pending_review, expired, hidden, rented.
+
+            Lifecycle states take priority over image moderation:
+            a rented, draft, expired, or hidden listing must remain in that
+            lifecycle bucket regardless of its image status.
+          readOnly: true
+        landlord_type:
+          type: string
+          readOnly: true
+        landlord_type_label:
+          type: string
+          readOnly: true
+        landlord_verified:
+          type: boolean
+          readOnly: true
+        preferred_flatmate_min_age:
+          type: integer
+          nullable: true
+        preferred_flatmate_max_age:
+          type: integer
+          nullable: true
+        viewing_summary:
+          type: string
+          readOnly: true
+        complimentary_relist_available:
+          type: boolean
+          readOnly: true
+        is_deleted:
+          type: boolean
+          readOnly: true
+        deleted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+        price_per_month:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        security_deposit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+          nullable: true
+          description: Security deposit in GBP.
+        location:
+          type: string
+          maxLength: 255
+        available_from:
+          type: string
+          format: date
+          description: Date from which the room will be available for listing / move-in.
+        is_available:
+          type: boolean
+        relisted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        furnished:
+          type: boolean
+        bills_included:
+          type: boolean
+        image:
+          type: string
+          format: uri
+          nullable: true
+        number_of_bedrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        number_of_bathrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        bathroom_type:
+          enum:
+          - private
+          - shared
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `private` - Private
+            * `shared` - Shared
+            * `no_preference` - No preference
+          x-spec-enum-id: 2472ac1c3c68f340
+        shared_living_space:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+          x-spec-enum-id: 1220d6d51d23a789
+        smoking_allowed_in_property:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+          x-spec-enum-id: 1220d6d51d23a789
+        suitable_for:
+          enum:
+          - one_person
+          - couple
+          - max_occupants
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `one_person` - One person
+            * `couple` - Couple
+            * `max_occupants` - Maximum occupants
+            * `no_preference` - No preference
+          x-spec-enum-id: 3e382fda57d4ea8e
+        max_occupants:
+          type: integer
+          maximum: 10
+          minimum: 1
+          nullable: true
+        household_bedrooms_min:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        household_bedrooms_max:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        household_type:
+          enum:
+          - professional
+          - student
+          - mixed
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `professional` - Professional
+            * `student` - Student
+            * `mixed` - Mixed
+            * `no_preference` - No preference
+          x-spec-enum-id: 96a53eeb1b8ed5ff
+        household_environment:
+          enum:
+          - quiet
+          - sociable
+          - mixed
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `quiet` - Quiet
+            * `sociable` - Sociable
+            * `mixed` - Mixed
+            * `no_preference` - No preference
+          x-spec-enum-id: 96d5fc2dead48820
+        pets_allowed:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+          x-spec-enum-id: 1220d6d51d23a789
+        inclusive_household:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+          x-spec-enum-id: 1220d6d51d23a789
+        accessible_entry:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          description: |-
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+          x-spec-enum-id: 1220d6d51d23a789
+        free_to_contact:
+          type: boolean
+        property_type:
+          enum:
+          - flat
+          - house
+          - studio
+          type: string
+          description: |-
+            * `flat` - Flat
+            * `house` - House
+            * `studio` - Studio
+          x-spec-enum-id: fb3aa58064314015
+        parking_available:
+          type: boolean
+        number_rating:
+          type: integer
+          readOnly: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        paid_until:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+        status:
+          enum:
+          - draft
+          - active
+          - hidden
+          type: string
+          description: |-
+            * `draft` - Draft
+            * `active` - Active
+            * `hidden` - Hidden
+          x-spec-enum-id: d48488fd6e64bcb3
+        is_shared_room:
+          type: boolean
+          description: Room is in an existing flat/house share.
+        min_age:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        max_age:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        min_stay_months:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        max_stay_months:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        room_for:
+          enum:
+          - any
+          - females
+          - males
+          - couples
+          type: string
+          description: |-
+            * `any` - Don't mind
+            * `females` - Females
+            * `males` - Males
+            * `couples` - Couples
+          x-spec-enum-id: a929ee7f5195bbd7
+        room_size:
+          enum:
+          - dont_mind
+          - single
+          - double
+          type: string
+          description: |-
+            * `dont_mind` - Don't mind
+            * `single` - Single
+            * `double` - Double
+          x-spec-enum-id: 2096c1823c8a5f8c
+        existing_flatmate_age:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+          description: Approximate age of current flatmate or average age in the household.
+        existing_flatmate_gender:
+          enum:
+          - male
+          - female
+          - non_binary
+          - prefer_not_to_say
+          - ''
+          type: string
+          description: |-
+            * `male` - Male
+            * `female` - Female
+            * `non_binary` - Non-binary
+            * `prefer_not_to_say` - Prefer not to say
+          x-spec-enum-id: 35b719100039a96b
+        existing_flatmate_occupation:
+          enum:
+          - professional
+          - student
+          - prefer_not_to_say
+          - ''
+          type: string
+          description: |-
+            * `professional` - Professional
+            * `student` - Student
+            * `prefer_not_to_say` - Prefer not to say
+          x-spec-enum-id: 143f737aa5eaec44
+        existing_flatmate_nationality:
+          type: string
+          maxLength: 100
+        existing_flatmate_language:
+          type: string
+          maxLength: 100
+        existing_flatmate_smoking:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Do existing flatmates smoke?
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        existing_flatmate_pets:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Are there pets in the home?
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        existing_flatmate_lgbtqia_household:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Whether the household includes LGBTQIA+ people.
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        preferred_flatmate_nationality:
+          type: string
+          description: Preferred nationality of future flatmate (free text from dropdown).
+          maxLength: 100
+        preferred_flatmate_language:
+          type: string
+          description: Preferred language of future flatmate (free text from dropdown).
+          maxLength: 100
+        preferred_flatmate_occupation:
+          enum:
+          - students_only
+          - not_for_students
+          - open_to_everyone
+          - ''
+          type: string
+          x-spec-enum-id: 6edc56ab54b6a786
+          description: |-
+            Student / non-student preference for future flatmate.
+
+            * `students_only` - For students only
+            * `not_for_students` - Not for students
+            * `open_to_everyone` - Open to everyone
+        preferred_flatmate_pets:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Whether future flatmate can have / be around pets.
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        preferred_flatmate_gender:
+          enum:
+          - no_preference
+          - male
+          - female
+          - others
+          - ''
+          type: string
+          x-spec-enum-id: 1d6dd04be4fe9acb
+          description: |-
+            Preferred gender of future flatmate.
+
+            * `no_preference` - No preference
+            * `male` - Male
+            * `female` - Female
+            * `others` - Others
+        preferred_flatmate_smoking:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Whether future flatmate can smoke or not.
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        preferred_flatmate_partners_allowed:
+          enum:
+          - 'yes'
+          - 'no'
+          - ''
+          type: string
+          x-spec-enum-id: 5af41d13614a5c41
+          description: |-
+            Whether partners are allowed to stay over.
+
+            * `yes` - Yes
+            * `no` - No
+        preferred_flatmate_lgbtqia:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Preference about LGBTQIA+ flatmates.
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        preferred_flatmate_vegan_vegetarian:
+          enum:
+          - 'yes'
+          - 'no'
+          - no_preference
+          - ''
+          type: string
+          x-spec-enum-id: 1220d6d51d23a789
+          description: |-
+            Preference about vegan/vegetarian flatmates.
+
+            * `yes` - Yes
+            * `no` - No
+            * `no_preference` - No preference
+        availability_from_time:
+          type: string
+          format: time
+          nullable: true
+        availability_to_time:
+          type: string
+          format: time
+          nullable: true
+        allow_search_indexing_override:
+          type: boolean
+          nullable: true
+        view_available_days_mode:
+          enum:
+          - everyday
+          - weekdays
+          - weekends
+          - custom
+          type: string
+          x-spec-enum-id: d2a75cae62838bd5
+          description: |-
+            Everyday / weekdays only / weekends only / custom dates.
+
+            * `everyday` - Everyday
+            * `weekdays` - Weekdays only
+            * `weekends` - Weekends only
+            * `custom` - Custom dates
+        view_available_custom_dates:
+          description: List of specific viewing dates when mode is 'custom'.
+        city:
+          type: integer
+          nullable: true
+          description: Canonical city used for city browsing and city cards.
+        property_owner:
+          type: integer
+      required:
+      - allow_search_indexing_effective
+      - avg_rating
+      - category
+      - category_id
+      - complimentary_relist_available
+      - cover_image
+      - created_at
+      - deleted_at
+      - distance_miles
+      - id
+      - image_status
+      - is_deleted
+      - is_saved
+      - landlord_type
+      - landlord_type_label
+      - landlord_verified
+      - listing_state
+      - location
+      - number_rating
+      - other_images
+      - owner_avatar
+      - owner_name
+      - owner_username
+      - paid_until
+      - price_per_month
+      - property_owner
+      - property_type
+      - relisted_at
+      - title
+      - updated_at
+      - viewing_summary
     Notification:
       type: object
       properties:
@@ -9245,6 +9860,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MessageThread'
+    PaginatedMyListingRoomList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MyListingRoom'
     PaginatedPaymentTransactionListList:
       type: object
       required:
@@ -9314,6 +9952,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Review'
+    PaginatedRoomCardList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomCard'
     PaginatedRoomList:
       type: object
       required:
@@ -9337,29 +9998,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Room'
-    PaginatedSearchRoomList:
-      type: object
-      required:
-      - count
-      - results
-      properties:
-        count:
-          type: integer
-          example: 123
-        next:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?offset=400&limit=100
-        previous:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?offset=200&limit=100
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/SearchRoom'
     PaginatedTenancyDetailList:
       type: object
       required:
@@ -9510,9 +10148,8 @@ components:
           type: boolean
         display_order:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         room_count:
           type: integer
           readOnly: true
@@ -9660,9 +10297,8 @@ components:
           x-spec-enum-id: 419efe661ee3fa5f
         object_id:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         reason:
           type: string
           maxLength: 64
@@ -9832,14 +10468,12 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         number_of_bathrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         bathroom_type:
           enum:
           - private
@@ -9897,15 +10531,13 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_type:
           enum:
@@ -10018,27 +10650,23 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         room_for:
           enum:
@@ -10066,9 +10694,8 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -10810,9 +11437,8 @@ components:
           x-spec-enum-id: 419efe661ee3fa5f
         object_id:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         reason:
           type: string
           maxLength: 64
@@ -10905,7 +11531,8 @@ components:
         review_flags:
           readOnly: true
         overall_rating:
-          type: integer
+          type: number
+          format: double
           readOnly: true
         notes:
           type: string
@@ -11127,14 +11754,12 @@ components:
           nullable: true
         number_of_bedrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         number_of_bathrooms:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
+          maximum: 2147483647
+          minimum: -2147483648
         bathroom_type:
           enum:
           - private
@@ -11192,15 +11817,13 @@ components:
           nullable: true
         household_bedrooms_min:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_bedrooms_max:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         household_type:
           enum:
@@ -11313,27 +11936,23 @@ components:
           description: Room is in an existing flat/house share.
         min_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         min_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         max_stay_months:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
         room_for:
           enum:
@@ -11361,9 +11980,8 @@ components:
           x-spec-enum-id: 2096c1823c8a5f8c
         existing_flatmate_age:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 32767
           minimum: 0
-          format: int64
           nullable: true
           description: Approximate age of current flatmate or average age in the household.
         existing_flatmate_gender:
@@ -11644,6 +12262,135 @@ components:
       required:
       - available
       - conflicts
+    RoomCard:
+      type: object
+      description: Compact room representation for grids, carousels and map pins.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 200
+        location:
+          type: string
+          maxLength: 255
+        price_per_month:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        avg_rating:
+          type: number
+          format: float
+          readOnly: true
+        number_rating:
+          type: integer
+          readOnly: true
+        is_available:
+          type: boolean
+        available_from:
+          type: string
+          format: date
+          description: Date from which the room will be available for listing / move-in.
+        bills_included:
+          type: boolean
+        landlord_type:
+          type: string
+          readOnly: true
+        landlord_type_label:
+          type: string
+          readOnly: true
+        landlord_verified:
+          type: boolean
+          readOnly: true
+        owner_name:
+          type: string
+          readOnly: true
+        owner_avatar:
+          type: string
+          format: uri
+          readOnly: true
+        property_owner:
+          type: integer
+        cover_image:
+          type: string
+          readOnly: true
+        image_status:
+          type: string
+          readOnly: true
+        photo_count:
+          type: string
+          readOnly: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        is_saved:
+          type: boolean
+          readOnly: true
+        status:
+          enum:
+          - draft
+          - active
+          - hidden
+          type: string
+          description: |-
+            * `draft` - Draft
+            * `active` - Active
+            * `hidden` - Hidden
+          x-spec-enum-id: d48488fd6e64bcb3
+        listing_state:
+          type: string
+          description: |-
+            Authoritative state used by My Listings.
+
+            Returns one of:
+            draft, active, pending_review, expired, hidden, rented.
+
+            Lifecycle states take priority over image moderation:
+            a rented, draft, expired, or hidden listing must remain in that
+            lifecycle bucket regardless of its image status.
+          readOnly: true
+        is_deleted:
+          type: boolean
+          readOnly: true
+        distance_miles:
+          type: number
+          readOnly: true
+      required:
+      - avg_rating
+      - cover_image
+      - created_at
+      - distance_miles
+      - id
+      - image_status
+      - is_deleted
+      - is_saved
+      - landlord_type
+      - landlord_type_label
+      - landlord_verified
+      - listing_state
+      - location
+      - number_rating
+      - owner_avatar
+      - owner_name
+      - photo_count
+      - price_per_month
+      - property_owner
+      - title
+      - updated_at
     RoomCategorie:
       type: object
       properties:
@@ -12058,620 +12805,6 @@ components:
             $ref: '#/components/schemas/SavedCard'
       required:
       - cards
-    SearchRoom:
-      type: object
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        category:
-          type: string
-          readOnly: true
-        category_id:
-          type: integer
-          writeOnly: true
-        cover_photo:
-          type: integer
-          writeOnly: true
-          nullable: true
-        avg_rating:
-          type: number
-          format: float
-          readOnly: true
-        is_saved:
-          type: boolean
-          readOnly: true
-        distance_miles:
-          type: number
-          readOnly: true
-        allow_search_indexing_effective:
-          type: boolean
-          readOnly: true
-        owner_name:
-          type: string
-          readOnly: true
-        owner_username:
-          type: string
-          readOnly: true
-        owner_avatar:
-          type: string
-          format: uri
-          readOnly: true
-        cover_image:
-          type: string
-          format: uri
-          readOnly: true
-        image_status:
-          type: string
-          readOnly: true
-        listing_state:
-          type: string
-          description: |-
-            Authoritative state used by My Listings.
-
-            Returns one of:
-            draft, active, pending_review, expired, hidden, rented.
-
-            Lifecycle states take priority over image moderation:
-            a rented, draft, expired, or hidden listing must remain in that
-            lifecycle bucket regardless of its image status.
-          readOnly: true
-        landlord_type:
-          type: string
-          readOnly: true
-        landlord_type_label:
-          type: string
-          readOnly: true
-        landlord_verified:
-          type: boolean
-          readOnly: true
-        preferred_flatmate_min_age:
-          type: integer
-          nullable: true
-        preferred_flatmate_max_age:
-          type: integer
-          nullable: true
-        photo_count:
-          type: string
-          readOnly: true
-        is_deleted:
-          type: boolean
-          readOnly: true
-        deleted_at:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
-        title:
-          type: string
-          maxLength: 200
-        description:
-          type: string
-        price_per_month:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
-        security_deposit:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
-          nullable: true
-          description: Security deposit in GBP.
-        location:
-          type: string
-          maxLength: 255
-        available_from:
-          type: string
-          format: date
-          description: Date from which the room will be available for listing / move-in.
-        is_available:
-          type: boolean
-        relisted_at:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
-        created_at:
-          type: string
-          format: date-time
-          readOnly: true
-        updated_at:
-          type: string
-          format: date-time
-          readOnly: true
-        furnished:
-          type: boolean
-        bills_included:
-          type: boolean
-        image:
-          type: string
-          format: uri
-          nullable: true
-        number_of_bedrooms:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
-        number_of_bathrooms:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
-        bathroom_type:
-          enum:
-          - private
-          - shared
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `private` - Private
-            * `shared` - Shared
-            * `no_preference` - No preference
-          x-spec-enum-id: 2472ac1c3c68f340
-        shared_living_space:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-          x-spec-enum-id: 1220d6d51d23a789
-        smoking_allowed_in_property:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-          x-spec-enum-id: 1220d6d51d23a789
-        suitable_for:
-          enum:
-          - one_person
-          - couple
-          - max_occupants
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `one_person` - One person
-            * `couple` - Couple
-            * `max_occupants` - Maximum occupants
-            * `no_preference` - No preference
-          x-spec-enum-id: 3e382fda57d4ea8e
-        max_occupants:
-          type: integer
-          maximum: 10
-          minimum: 1
-          nullable: true
-        household_bedrooms_min:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-        household_bedrooms_max:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-        household_type:
-          enum:
-          - professional
-          - student
-          - mixed
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `professional` - Professional
-            * `student` - Student
-            * `mixed` - Mixed
-            * `no_preference` - No preference
-          x-spec-enum-id: 96a53eeb1b8ed5ff
-        household_environment:
-          enum:
-          - quiet
-          - sociable
-          - mixed
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `quiet` - Quiet
-            * `sociable` - Sociable
-            * `mixed` - Mixed
-            * `no_preference` - No preference
-          x-spec-enum-id: 96d5fc2dead48820
-        pets_allowed:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-          x-spec-enum-id: 1220d6d51d23a789
-        inclusive_household:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-          x-spec-enum-id: 1220d6d51d23a789
-        accessible_entry:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          description: |-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-          x-spec-enum-id: 1220d6d51d23a789
-        free_to_contact:
-          type: boolean
-        property_type:
-          enum:
-          - flat
-          - house
-          - studio
-          type: string
-          description: |-
-            * `flat` - Flat
-            * `house` - House
-            * `studio` - Studio
-          x-spec-enum-id: fb3aa58064314015
-        parking_available:
-          type: boolean
-        number_rating:
-          type: integer
-          readOnly: true
-        latitude:
-          type: number
-          format: double
-          nullable: true
-        longitude:
-          type: number
-          format: double
-          nullable: true
-        paid_until:
-          type: string
-          format: date
-          readOnly: true
-          nullable: true
-        status:
-          enum:
-          - draft
-          - active
-          - hidden
-          type: string
-          description: |-
-            * `draft` - Draft
-            * `active` - Active
-            * `hidden` - Hidden
-          x-spec-enum-id: d48488fd6e64bcb3
-        is_shared_room:
-          type: boolean
-          description: Room is in an existing flat/house share.
-        min_age:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-        max_age:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-        min_stay_months:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-        max_stay_months:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-        room_for:
-          enum:
-          - any
-          - females
-          - males
-          - couples
-          type: string
-          description: |-
-            * `any` - Don't mind
-            * `females` - Females
-            * `males` - Males
-            * `couples` - Couples
-          x-spec-enum-id: a929ee7f5195bbd7
-        room_size:
-          enum:
-          - dont_mind
-          - single
-          - double
-          type: string
-          description: |-
-            * `dont_mind` - Don't mind
-            * `single` - Single
-            * `double` - Double
-          x-spec-enum-id: 2096c1823c8a5f8c
-        existing_flatmate_age:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-          nullable: true
-          description: Approximate age of current flatmate or average age in the household.
-        existing_flatmate_gender:
-          enum:
-          - male
-          - female
-          - non_binary
-          - prefer_not_to_say
-          - ''
-          type: string
-          description: |-
-            * `male` - Male
-            * `female` - Female
-            * `non_binary` - Non-binary
-            * `prefer_not_to_say` - Prefer not to say
-          x-spec-enum-id: 35b719100039a96b
-        existing_flatmate_occupation:
-          enum:
-          - professional
-          - student
-          - prefer_not_to_say
-          - ''
-          type: string
-          description: |-
-            * `professional` - Professional
-            * `student` - Student
-            * `prefer_not_to_say` - Prefer not to say
-          x-spec-enum-id: 143f737aa5eaec44
-        existing_flatmate_nationality:
-          type: string
-          maxLength: 100
-        existing_flatmate_language:
-          type: string
-          maxLength: 100
-        existing_flatmate_smoking:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Do existing flatmates smoke?
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        existing_flatmate_pets:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Are there pets in the home?
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        existing_flatmate_lgbtqia_household:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Whether the household includes LGBTQIA+ people.
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        preferred_flatmate_nationality:
-          type: string
-          description: Preferred nationality of future flatmate (free text from dropdown).
-          maxLength: 100
-        preferred_flatmate_language:
-          type: string
-          description: Preferred language of future flatmate (free text from dropdown).
-          maxLength: 100
-        preferred_flatmate_occupation:
-          enum:
-          - students_only
-          - not_for_students
-          - open_to_everyone
-          - ''
-          type: string
-          x-spec-enum-id: 6edc56ab54b6a786
-          description: |-
-            Student / non-student preference for future flatmate.
-
-            * `students_only` - For students only
-            * `not_for_students` - Not for students
-            * `open_to_everyone` - Open to everyone
-        preferred_flatmate_pets:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Whether future flatmate can have / be around pets.
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        preferred_flatmate_gender:
-          enum:
-          - no_preference
-          - male
-          - female
-          - others
-          - ''
-          type: string
-          x-spec-enum-id: 1d6dd04be4fe9acb
-          description: |-
-            Preferred gender of future flatmate.
-
-            * `no_preference` - No preference
-            * `male` - Male
-            * `female` - Female
-            * `others` - Others
-        preferred_flatmate_smoking:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Whether future flatmate can smoke or not.
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        preferred_flatmate_partners_allowed:
-          enum:
-          - 'yes'
-          - 'no'
-          - ''
-          type: string
-          x-spec-enum-id: 5af41d13614a5c41
-          description: |-
-            Whether partners are allowed to stay over.
-
-            * `yes` - Yes
-            * `no` - No
-        preferred_flatmate_lgbtqia:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Preference about LGBTQIA+ flatmates.
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        preferred_flatmate_vegan_vegetarian:
-          enum:
-          - 'yes'
-          - 'no'
-          - no_preference
-          - ''
-          type: string
-          x-spec-enum-id: 1220d6d51d23a789
-          description: |-
-            Preference about vegan/vegetarian flatmates.
-
-            * `yes` - Yes
-            * `no` - No
-            * `no_preference` - No preference
-        availability_from_time:
-          type: string
-          format: time
-          nullable: true
-        availability_to_time:
-          type: string
-          format: time
-          nullable: true
-        allow_search_indexing_override:
-          type: boolean
-          nullable: true
-        view_available_days_mode:
-          enum:
-          - everyday
-          - weekdays
-          - weekends
-          - custom
-          type: string
-          x-spec-enum-id: d2a75cae62838bd5
-          description: |-
-            Everyday / weekdays only / weekends only / custom dates.
-
-            * `everyday` - Everyday
-            * `weekdays` - Weekdays only
-            * `weekends` - Weekends only
-            * `custom` - Custom dates
-        view_available_custom_dates:
-          description: List of specific viewing dates when mode is 'custom'.
-        city:
-          type: integer
-          nullable: true
-          description: Canonical city used for city browsing and city cards.
-        property_owner:
-          type: integer
-      required:
-      - allow_search_indexing_effective
-      - avg_rating
-      - category
-      - category_id
-      - cover_image
-      - created_at
-      - deleted_at
-      - distance_miles
-      - id
-      - image_status
-      - is_deleted
-      - is_saved
-      - landlord_type
-      - landlord_type_label
-      - landlord_verified
-      - listing_state
-      - location
-      - number_rating
-      - owner_avatar
-      - owner_name
-      - owner_username
-      - paid_until
-      - photo_count
-      - price_per_month
-      - property_owner
-      - property_type
-      - relisted_at
-      - title
-      - updated_at
     SetDefaultSavedCardData:
       type: object
       properties:
@@ -13498,9 +13631,9 @@ components:
           x-spec-enum-id: 24b02ba2f4a75d8c
           nullable: true
         overall_rating:
-          type: integer
-          maximum: 5
-          minimum: 1
+          type: number
+          format: double
+          readOnly: true
         review_flags: {}
         notes:
           type: string
@@ -13527,6 +13660,7 @@ components:
           type: integer
       required:
       - id
+      - overall_rating
       - reveal_at
       - reviewer_avatar
       - reviewer_name
