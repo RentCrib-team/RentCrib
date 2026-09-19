@@ -47,7 +47,7 @@ def test_admin_hidden_room_stays_hidden_after_payment_intent(monkeypatch):
     payment = Payment.objects.create(
         user=owner,
         room=room,
-        amount="1.00",
+        amount="7.99",
         currency="GBP",
         status=Payment.Status.CREATED,
     )
