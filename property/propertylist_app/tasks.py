@@ -1162,20 +1162,13 @@ def task_tenancy_prompts_sweep() -> int:
         # Separate mobile and web destinations.
         deep_link, cta_path = _tenancy_thread_links(tenancy)
 
-        title = "Your tenancy is ending soon"
-        body = (
-            f"Your tenancy for {tenancy.room.title} is due to end soon. "
-            "Update the tenancy information if you are continuing. "
-            "If you are moving out, no action is required."
-        )
-        
         prompt_thread, prompt_message = _post_tenancy_prompt_message(
             tenancy,
             event_type="still_living_check",
             body=(
-                "Your tenancy is ending soon.\n\n"
+                "This tenancy is ending soon.\n\n"
                 "If the tenancy is continuing, update the tenancy "
-                "information. If you are moving out, no action is required."
+                "information. If the tenancy is ending, no action is required."
             ),
             available_action="update_tenancy",
         )
@@ -1227,12 +1220,26 @@ def task_tenancy_prompts_sweep() -> int:
             target_type = "still_living_check"
             target_id = tenancy.id
 
+            is_landlord = user.id == tenancy.landlord_id
             audience = (
                 Notification.Audience.LANDLORD
-                if user.id == tenancy.landlord_id
+                if is_landlord
                 else Notification.Audience.SEEKER
             )
-
+            if is_landlord:
+                notification_title = "A tenancy is ending soon"
+                notification_body = (
+                    f"The tenancy for {tenancy.room.title} is due to end soon. "
+                    "Update the tenancy information if it is continuing. "
+                    "If the tenancy is ending, no action is required."
+                )
+            else:
+                notification_title = "Your tenancy is ending soon"
+                notification_body = (
+                    f"Your tenancy for {tenancy.room.title} is due to end soon. "
+                    "Update the tenancy information if you are continuing. "
+                    "If you are moving out, no action is required."
+                )
 
             reminder_target = Q(
                 target_type="still_living_check",
@@ -1298,8 +1305,8 @@ def task_tenancy_prompts_sweep() -> int:
                 target_id=target_id,
                 thread=prompt_thread,
                 message=prompt_message,
-                title=title,
-                body=body,
+                title=notification_title,
+                body=notification_body,
                 audience=audience,
             )
 

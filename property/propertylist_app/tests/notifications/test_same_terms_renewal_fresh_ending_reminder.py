@@ -1,9 +1,11 @@
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 from django.apps import apps
 from django.utils import timezone
 
+from propertylist_app.api.serializers import MessageSerializer
 from propertylist_app.tasks import task_tenancy_prompts_sweep
 
 
@@ -19,6 +21,7 @@ def test_same_terms_renewal_gets_fresh_ending_reminder_cycle(
         "propertylist_app",
         "MessageThread",
     )
+    Notification = apps.get_model("propertylist_app", "Notification")
     Tenancy = apps.get_model("propertylist_app", "Tenancy")
     TenancyExtension = apps.get_model(
         "propertylist_app",
@@ -112,6 +115,23 @@ def test_same_terms_renewal_gets_fresh_ending_reminder_cycle(
     fresh_reminder = reminders.last()
 
     assert fresh_reminder.id != old_reminder.id
+    assert fresh_reminder.body == (
+        "This tenancy is ending soon.\n\n"
+        "If the tenancy is continuing, update the tenancy information. "
+        "If the tenancy is ending, no action is required."
+    )
+    assert fresh_reminder.metadata["available_actions"] == ["update_tenancy"]
+
+    request = SimpleNamespace(user=landlord)
+    assert MessageSerializer(
+        old_reminder,
+        context={"request": request},
+    ).data["available_actions"] == []
+    assert MessageSerializer(
+        fresh_reminder,
+        context={"request": request},
+    ).data["available_actions"] == ["update_tenancy"]
+
     assert fresh_reminder.created >= sweep_started_at
     assert fresh_reminder.created <= sweep_finished_at
     assert (
@@ -129,3 +149,20 @@ def test_same_terms_renewal_gets_fresh_ending_reminder_cycle(
         fresh_reminder.created + timedelta(minutes=10)
     )
     assert tenancy.review_open_at > sweep_finished_at
+
+    landlord_reminder = Notification.objects.get(
+        user=landlord,
+        type="tenancy_still_living_check",
+        target_id=tenancy.id,
+    )
+    tenant_reminder = Notification.objects.get(
+        user=tenant,
+        type="tenancy_still_living_check",
+        target_id=tenancy.id,
+    )
+
+    assert landlord_reminder.title == "A tenancy is ending soon"
+    assert "If the tenancy is ending" in landlord_reminder.body
+    assert "you are moving out" not in landlord_reminder.body.lower()
+    assert tenant_reminder.title == "Your tenancy is ending soon"
+    assert "If you are moving out" in tenant_reminder.body

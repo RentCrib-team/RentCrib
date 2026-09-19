@@ -4112,6 +4112,24 @@ class MessageSerializer(serializers.ModelSerializer):
             if not tenancy_id:
                 return []
 
+            latest_reminder_id = (
+                Message.objects
+                .filter(
+                    metadata__tenancy_id=tenancy_id,
+                    metadata__event_type="still_living_check",
+                    metadata__system_event=True,
+                )
+                .order_by("-created", "-id")
+                .values_list("id", flat=True)
+                .first()
+            )
+
+            # Only the newest reminder owns this cycle's action. Older
+            # reminders remain visible as history but must not repeat the
+            # same Update tenancy information button.
+            if latest_reminder_id != obj.id:
+                return []
+
             try:
                 tenancy = Tenancy.objects.get(id=tenancy_id)
             except Tenancy.DoesNotExist:
