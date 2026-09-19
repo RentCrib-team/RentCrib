@@ -88,6 +88,41 @@ def test_only_first_successful_payment_grants_one_complimentary_benefit(
     assert RoomListingBenefit.objects.filter(room=room).count() == 1
 
 
+def test_legacy_one_pound_payment_is_grandfathered_as_first_qualifying_payment(
+    user_factory,
+    room_factory,
+):
+    owner = user_factory(username="legacy_one_pound_benefit")
+    room = room_factory(property_owner=owner)
+
+    legacy_payment = Payment.objects.create(
+        user=owner,
+        room=room,
+        amount=Decimal("1.00"),
+        currency="GBP",
+        status=Payment.Status.SUCCEEDED,
+    )
+    current_payment = Payment.objects.create(
+        user=owner,
+        room=room,
+        amount=listing_fee_gbp(),
+        currency="GBP",
+        status=Payment.Status.SUCCEEDED,
+    )
+
+    benefit, created = grant_complimentary_listing_benefit(current_payment)
+
+    assert created is True
+    assert benefit.room_id == room.id
+    assert benefit.granted_from_payment_id == legacy_payment.id
+    assert benefit.consumed_at is None
+
+    same_benefit, created_again = grant_complimentary_listing_benefit(current_payment)
+    assert created_again is False
+    assert same_benefit.id == benefit.id
+    assert RoomListingBenefit.objects.filter(room=room).count() == 1
+
+
 def test_paid_expiry_auto_consumes_available_benefit_and_renews_30_days(
     monkeypatch,
     user_factory,

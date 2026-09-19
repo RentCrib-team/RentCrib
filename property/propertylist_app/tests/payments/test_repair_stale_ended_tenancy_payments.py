@@ -33,7 +33,7 @@ def _create_succeeded_payment(*, room, user):
         user=user,
         room=room,
         provider=Payment.Provider.STRIPE,
-        amount=Decimal("1.00"),
+        amount=Decimal("7.99"),
         currency="GBP",
         status=Payment.Status.SUCCEEDED,
     )

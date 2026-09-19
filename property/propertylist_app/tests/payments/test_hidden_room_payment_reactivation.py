@@ -46,7 +46,7 @@ def _make_payment(owner, room):
     return Payment.objects.create(
         user=owner,
         room=room,
-        amount="1.00",
+        amount="7.99",
         currency="GBP",
         status=Payment.Status.CREATED,
     )

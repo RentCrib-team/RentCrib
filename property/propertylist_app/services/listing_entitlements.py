@@ -29,8 +29,18 @@ def listing_fee_gbp() -> Decimal:
 
 def grant_complimentary_listing_benefit(payment: Payment):
     """
-    Grant the room's one-time complimentary 30-day period after its first
-    successful paid listing. Later payments can never replenish the benefit.
+    Grant a room exactly one complimentary 30-day listing benefit.
+
+    Legacy listing payments are grandfathered. If a room was successfully paid
+    for under the old £1 QA/listing price before the £7.99 programme launched,
+    that historical payment still counts as the room's qualifying first paid
+    listing. We preserve the original Payment amount for audit accuracy and
+    attach the benefit to the earliest successful payment instead of rewriting
+    transaction history.
+
+    The RoomListingBenefit one-to-one relation is the source of truth for
+    whether the room has already received its one-time benefit. Later payments
+    can never replenish it.
     """
     if payment.status != Payment.Status.SUCCEEDED or payment.room_id is None:
         return None, False
@@ -39,21 +49,21 @@ def grant_complimentary_listing_benefit(payment: Payment):
     if existing is not None:
         return existing, False
 
-    earlier_success_exists = (
+    qualifying_payment = (
         Payment.objects.filter(
             room_id=payment.room_id,
             status=Payment.Status.SUCCEEDED,
         )
-        .exclude(pk=payment.pk)
-        .exists()
+        .order_by("created_at", "id")
+        .first()
     )
-    if earlier_success_exists:
+    if qualifying_payment is None:
         return None, False
 
     return RoomListingBenefit.objects.get_or_create(
         room_id=payment.room_id,
         defaults={
-            "granted_from_payment": payment,
+            "granted_from_payment": qualifying_payment,
             "granted_at": timezone.now(),
         },
     )
