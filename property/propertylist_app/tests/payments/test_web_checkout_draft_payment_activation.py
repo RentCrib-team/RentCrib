@@ -58,7 +58,7 @@ def test_web_checkout_payment_moves_draft_listing_to_active_and_search_visible(
     payment = Payment.objects.create(
         user=landlord,
         room=room,
-        amount=1.00,
+        amount=7.99,
         currency="GBP",
         status=Payment.Status.CREATED,
     )

@@ -63,7 +63,7 @@ def test_payment_reflects_in_room_state(monkeypatch, api_client, user_factory):
         user=landlord,
         room=room,
         provider=Payment.Provider.STRIPE,
-        amount="1.00",
+        amount="7.99",
         currency="GBP",
         status=Payment.Status.REQUIRES_PAYMENT,
         stripe_checkout_session_id="cs_test_dummy",

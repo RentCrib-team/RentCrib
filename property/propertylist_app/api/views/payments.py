@@ -1136,6 +1136,9 @@ class CreateListingCheckoutSessionView(APIView):
 
         user = request.user
 
+        amount_gbp = listing_fee_gbp()
+        amount_pence = int(amount_gbp * 100)
+
         # Make sure user has a profile
         profile = getattr(user, "profile", None)
         if profile is None:
@@ -1161,19 +1164,6 @@ class CreateListingCheckoutSessionView(APIView):
 
         customer_id = profile.stripe_customer_id or None
 
-        # Listing fee for one 30-day advertising period
-        amount_gbp = listing_fee_gbp()
-        amount_pence = int(amount_gbp * 100)
-
-        # Create our internal Payment record
-        payment = Payment.objects.create(
-            user=user,
-            room=room,
-            amount=amount_gbp,
-            currency="GBP",
-            status="created",
-        )
-
         # Optional: read a selected saved card id from the body (for future use)
         _payment_method_id = request.data.get("payment_method_id")  # may be None
 
@@ -1182,62 +1172,151 @@ class CreateListingCheckoutSessionView(APIView):
         success_path = reverse("v1:payments-success")
         cancel_path = reverse("v1:payments-cancel")
 
-        # Create the Stripe Checkout Session
-        try:
-            session = _stripe_mod().checkout.Session.create(
-                mode="payment",
-                customer=customer_id,
-                payment_method_types=["card"],
-                line_items=[
-                    {
-                        "price_data": {
-                            "currency": "gbp",
-                            "product_data": {
-                                "name": f"Listing fee for: {room.title}",
-                            },
-                            "unit_amount": amount_pence,
+        pending_statuses = [
+            Payment.Status.CREATED,
+            Payment.Status.REQUIRES_PAYMENT,
+            Payment.Status.REQUIRES_ACTION,
+            Payment.Status.PROCESSING,
+        ]
+
+        # Serialize checkout creation per room. Keeping the Stripe call inside this
+        # transaction means a simultaneous request waits, then reuses the session
+        # saved by the first request instead of creating a second charge opportunity.
+        with transaction.atomic():
+            locked_room = Room.all_objects.select_for_update().get(pk=room.pk)
+
+            if (
+                locked_room.paid_until is not None
+                and locked_room.paid_until >= timezone.localdate()
+            ):
+                return error_response(
+                    message="This listing already has an active paid period.",
+                    status_code=status.HTTP_409_CONFLICT,
+                    code="listing_already_paid",
+                )
+
+            payment = (
+                Payment.objects.filter(
+                    user=user,
+                    room=locked_room,
+                    amount=amount_gbp,
+                    currency="GBP",
+                    status__in=pending_statuses,
+                )
+                .order_by("-created_at", "-id")
+                .first()
+            )
+
+            session = None
+            if payment and payment.stripe_checkout_session_id:
+                try:
+                    session = _stripe_mod().checkout.Session.retrieve(
+                        payment.stripe_checkout_session_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "web_checkout_session_retrieve_failed payment_id=%s",
+                        payment.id,
+                    )
+                    return error_response(
+                        message="Unable to resume checkout session.",
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        code="checkout_session_resume_error",
+                    )
+
+                session_status = getattr(session, "status", None)
+                if isinstance(session, dict):
+                    session_status = session.get("status")
+
+                if session_status == "expired":
+                    payment.status = Payment.Status.CANCELED
+                    payment.save(update_fields=["status", "updated_at"])
+                    payment = None
+                    session = None
+
+            if payment is None:
+                payment = Payment.objects.create(
+                    user=user,
+                    room=locked_room,
+                    amount=amount_gbp,
+                    currency="GBP",
+                    status=Payment.Status.CREATED,
+                )
+
+            if session is None:
+                try:
+                    session = _stripe_mod().checkout.Session.create(
+                        mode="payment",
+                        customer=customer_id,
+                        payment_method_types=["card"],
+                        line_items=[
+                            {
+                                "price_data": {
+                                    "currency": "gbp",
+                                    "product_data": {
+                                        "name": f"Listing fee for: {locked_room.title}",
+                                    },
+                                    "unit_amount": amount_pence,
+                                },
+                                "quantity": 1,
+                            }
+                        ],
+                        success_url=(
+                            f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/success"
+                            f"?session_id={{CHECKOUT_SESSION_ID}}&payment_id={payment.id}"
+                            f"&room_id={locked_room.id}"
+                        ),
+                        cancel_url=(
+                            f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/cancel"
+                            f"?payment_id={payment.id}&room_id={locked_room.id}"
+                        ),
+                        metadata={
+                            "payment_id": str(payment.id),
+                            "room_id": str(locked_room.id),
+                            "user_id": str(user.id),
                         },
-                        "quantity": 1,
-                    }
-                ],
-                success_url=(
-                    f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/success"
-                    f"?session_id={{CHECKOUT_SESSION_ID}}&payment_id={payment.id}&room_id={room.id}"
-                ),
-                cancel_url=(
-                    f"{settings.FRONTEND_BASE_URL.rstrip('/')}/payments/cancel"
-                    f"?payment_id={payment.id}&room_id={room.id}"
-                ),
-                metadata={
-                    "payment_id": str(payment.id),
-                    "room_id": str(room.id),
-                    "user_id": str(user.id),
-                },
-                payment_intent_data={
-                    "metadata": {
-                        "payment_id": str(payment.id),
-                        "room_id": str(room.id),
-                        "user_id": str(user.id),
-                    },
-                },
-            )
-        except Exception:
-            return error_response(
-                message="Unable to create checkout session.",
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                code="checkout_session_error",
-            )
+                        payment_intent_data={
+                            "metadata": {
+                                "payment_id": str(payment.id),
+                                "room_id": str(locked_room.id),
+                                "user_id": str(user.id),
+                            },
+                        },
+                        idempotency_key=f"rentcrib-web-listing-payment-{payment.id}",
+                    )
+                except Exception:
+                    logger.exception(
+                        "web_checkout_session_create_failed payment_id=%s",
+                        payment.id,
+                    )
+                    return error_response(
+                        message="Unable to create checkout session.",
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        code="checkout_session_error",
+                    )
 
-        # Safely extract session id + checkout URL (works for real Stripe + dict fakes)
-        session_id = getattr(session, "id", None)
-        checkout_url = getattr(session, "url", None)
+                session_id = getattr(session, "id", None)
+                if isinstance(session, dict):
+                    session_id = session.get("id")
 
-        if isinstance(session, dict):
-            session_id = session.get("id")
-            checkout_url = session.get("url")
+                if not session_id:
+                    return error_response(
+                        message="Stripe checkout response was incomplete.",
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        code="checkout_session_invalid_response",
+                    )
 
-        payment.stripe_checkout_session_id = str(session_id) if session_id else ""
-        payment.save(update_fields=["stripe_checkout_session_id"])
+                payment.stripe_checkout_session_id = str(session_id)
+                payment.save(
+                    update_fields=["stripe_checkout_session_id", "updated_at"]
+                )
+
+            # Safely extract session id + checkout URL (real Stripe + dict fakes).
+            session_id = getattr(session, "id", None)
+            checkout_url = getattr(session, "url", None)
+            if isinstance(session, dict):
+                session_id = session.get("id")
+                checkout_url = session.get("url")
 
         return ok_response(
             {

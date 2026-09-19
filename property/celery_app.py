@@ -28,20 +28,10 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*"),
     },
 
-    # Listing advertising lifecycle.
-    # These sweeps choose their timing contract from the environment:
-    # - production: warn within 7 days of paid_until; expire after paid_until
-    # - staging/QA: warn at minute 15; expire at minute 20
-    # Running once per minute gives QA deterministic accelerated coverage;
-    # production sends only once per paid cycle because both channels dedupe.
-    "listing-expiry-warning-sweep-every-minute": {
-        "task": "propertylist_app.listing_expiry_warning_sweep",
-        "schedule": crontab(minute="*"),
-    },
-    "listing-expiry-sweep-every-minute": {
-        "task": "propertylist_app.listing_expiry_sweep",
-        "schedule": crontab(minute="*"),
-    },
+    # Listing advertising expiry automation is intentionally disabled.
+    # Do not schedule either the accelerated 15-minute warning or the
+    # 20-minute expiry/free-period transition. Viewing and tenancy QA timers
+    # below are separate and remain enabled.
 
     "notify-upcoming-bookings-every-minute": {
         "task": "propertylist_app.services.tasks.notify_upcoming_bookings",

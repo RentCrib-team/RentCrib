@@ -69,7 +69,7 @@ def test_fresh_relist_payment_after_qa_tenancy_end_restores_active_search_visibi
     payment = Payment.objects.create(
         user=landlord,
         room=room,
-        amount=1.00,
+        amount=7.99,
         currency="GBP",
         status=Payment.Status.CREATED,
     )

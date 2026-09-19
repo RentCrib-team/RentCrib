@@ -117,7 +117,8 @@ def moderate_room_image(room_image_id: int, image_payload: str | None = None) ->
         )
 
         # Only mark the original pending upload as unavailable. If an admin
-        # changed the row while the task was running, leave that decision alone.
+        # changed the row while moderation was running, leave that decision
+        # alone.
         RoomImage.objects.filter(
             pk=room_image_id,
             status=RoomImage.STATUS_PENDING,

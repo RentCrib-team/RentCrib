@@ -38,7 +38,7 @@ def test_paid_draft_without_live_tenancy_does_not_become_rented(monkeypatch):
     payment = Payment.objects.create(
         user=owner,
         room=room,
-        amount=1.00,
+        amount=7.99,
         currency="GBP",
         status="created",
     )
