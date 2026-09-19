@@ -48,7 +48,10 @@ from drf_spectacular.types import OpenApiTypes
 
 #Project
 from propertylist_app.models import Room, RoomCategorie, RoomImage, SavedRoom, AvailabilitySlot, Booking,Tenancy, RoomListingBenefit
-from propertylist_app.services.image import compress_listing_upload
+from propertylist_app.services.image import (
+    compress_listing_upload,
+    prepare_moderation_task_payload,
+)
 from propertylist_app.services.listing_entitlements import consume_complimentary_listing_benefit
 from propertylist_app.utils.cached_views import CachedAnonymousGETMixin
 from propertylist_app.utils.cache import bump_buster
@@ -995,6 +998,24 @@ class RoomPhotoUploadView(APIView):
         except Exception:
             pass
 
+        # The Celery worker is a separate Render service and cannot reopen
+        # files stored on the web service's local persistent disk. Prepare a
+        # compact JPEG payload now, while the upload stream is available, and
+        # send those bytes with the background moderation task.
+        moderation_payload = None
+        moderation_payload_error = None
+        try:
+            moderation_payload = prepare_moderation_task_payload(file_obj)
+        except Exception as exc:
+            moderation_payload_error = (
+                f"{exc.__class__.__name__}: {exc}"
+            )[:1000]
+        finally:
+            try:
+                file_obj.seek(0)
+            except Exception:
+                pass
+
         # SINGLE SOURCE OF TRUTH: create the image only once.
         image = RoomImage.objects.create(
             room=room,
@@ -1019,8 +1040,27 @@ class RoomPhotoUploadView(APIView):
                     moderate_room_image,
                 )
 
+                if not moderation_payload:
+                    RoomImage.objects.filter(
+                        pk=image_id,
+                        status=RoomImage.STATUS_PENDING,
+                        moderation_reason=RoomImage.MODERATION_AWAITING_CHECK,
+                    ).update(
+                        moderation_reason=(
+                            RoomImage.MODERATION_SERVICE_UNAVAILABLE
+                        ),
+                        moderation_notes=(
+                            "Automated moderation payload could not be prepared. "
+                            f"{moderation_payload_error or 'Unknown error.'} "
+                            "The image remains pending for manual review."
+                        )[:2000],
+                        moderation_checked_at=timezone.now(),
+                    )
+                    return
+
                 moderate_room_image.apply_async(
                     args=[image_id],
+                    kwargs={"image_payload": moderation_payload},
                     retry=False,
                 )
             except Exception:
