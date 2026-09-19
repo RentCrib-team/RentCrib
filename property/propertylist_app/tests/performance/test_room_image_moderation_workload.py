@@ -60,6 +60,10 @@ def test_room_image_upload_queues_moderation_without_running_ai_inline(
     with override_settings(MEDIA_ROOT=str(tmp_path), USE_S3=True):
         with (
             patch(
+                "django.core.files.storage.FileSystemStorage",
+                new=type("DifferentStorageType", (), {}),
+            ),
+            patch(
                 "propertylist_app.image_moderation_tasks."
                 "moderate_room_image.apply_async"
             ) as enqueue,
@@ -90,6 +94,65 @@ def test_room_image_upload_queues_moderation_without_running_ai_inline(
         == RoomImage.MODERATION_AWAITING_CHECK
     )
     assert image.moderation_checked_at is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_local_storage_is_not_queued_when_use_s3_flag_is_incorrect(tmp_path):
+    owner = User.objects.create_user(
+        username="moderation-mismatched-storage-owner",
+        email="moderation-mismatched-storage@example.com",
+        password="pass123",
+    )
+    category = RoomCategorie.objects.create(
+        name="Moderation mismatched storage",
+        active=True,
+    )
+    room = Room.objects.create(
+        title="Moderation mismatched storage room",
+        description="desc",
+        price_per_month=650,
+        location="SO14",
+        category=category,
+        property_owner=owner,
+        property_type="flat",
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=owner)
+    url = reverse("v1:room-photo-upload", kwargs={"pk": room.pk})
+
+    # Reproduce the staging failure: the flag says S3, but the ImageField is
+    # actually using service-local FileSystemStorage under MEDIA_ROOT.
+    with override_settings(MEDIA_ROOT=str(tmp_path), USE_S3=True):
+        with (
+            patch(
+                "propertylist_app.image_moderation_tasks."
+                "moderate_room_image.apply_async"
+            ) as enqueue,
+            patch(
+                "propertylist_app.services.image."
+                "should_auto_approve_upload",
+                return_value={
+                    "approved": True,
+                    "reason": RoomImage.MODERATION_AUTO_APPROVED,
+                    "notes": "Mismatched local storage moderated inline.",
+                },
+            ) as moderate,
+        ):
+            response = client.post(
+                url,
+                {"image": _valid_image("mismatched-local-room.jpg")},
+                format="multipart",
+            )
+
+    assert response.status_code == 201, response.data
+    enqueue.assert_not_called()
+    moderate.assert_called_once()
+
+    image = RoomImage.objects.get(room=room)
+    assert image.status == RoomImage.STATUS_APPROVED
+    assert image.moderation_reason == RoomImage.MODERATION_AUTO_APPROVED
+    assert image.moderation_checked_at is not None
 
 
 
